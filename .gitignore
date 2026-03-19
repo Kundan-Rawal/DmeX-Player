@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+build/
+.env
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# C++ Engine Build Artifacts
+audio-engine-cpp/build/
+audio-engine-cpp/.vs/
+audio-engine-cpp/out/
+audio-engine-cpp/bin/*.exe
+audio-engine-cpp/bin/*.pdb
+audio-engine-cpp/bin/*.ilk
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# User specific database
+library.json
