@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Command } from "@tauri-apps/plugin-shell";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readDir, readFile, readTextFile } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import * as mm from "music-metadata";
 import { FastAverageColor } from "fast-average-color";
@@ -198,8 +199,7 @@ function App() {
   useEffect(() => { stateRefs.current = { displayedTracks, currentTrack }; }, [displayedTracks, currentTrack]);
 
   const writeToEngine = async (cmd: string) => {
-    if (!engineProcess.current) return;
-    try { await engineProcess.current.write(cmd); } catch (_) {}
+    try { await invoke('audio_command', { cmd: cmd.trim() }); } catch (_) {}
   };
 
   useEffect(() => {
@@ -251,8 +251,13 @@ function App() {
 
   useEffect(() => {
     const iv = setInterval(async () => {
-      if (engineProcess.current && isPlaying && !isLoading) await writeToEngine("GET_TIME\n");
-    }, 500);
+      if (isPlaying && !isLoading) {
+        try {
+          const metrics: [number, number, number] = await invoke('audio_metrics');
+          setCurrentTime(metrics[0]); setDuration(metrics[1]); setAudioLevel(Math.min(1, metrics[2] * 2.5));
+        } catch(e) {}
+      }
+    }, 250);
     return () => clearInterval(iv);
   }, [isPlaying, isLoading]);
 
@@ -473,34 +478,21 @@ function App() {
 
       setIsAnalyzing(true);
       try {
-        const fpPromise = new Promise<string>(resolve => { fpResolverRef.current = resolve; });
-        await writeToEngine('ANALYZE\n');
-        const fpLine = await Promise.race([
-          fpPromise,
-          new Promise<string>((_,rej) => setTimeout(() => rej(new Error('timeout')), 6000))
-        ]);
-        if (id === loadIdRef.current) {
+        const fpLine: string = await invoke('analyze_current_track');
+        if (id === loadIdRef.current && fpLine.startsWith("FINGERPRINT ")) {
           const parts = fpLine.split(' ');
-          const profile = classifyAudio(
-            parseFloat(parts[1])||0, parseFloat(parts[2])||10,
-            parseFloat(parts[3])||0.1, parseFloat(parts[4])||0.1
-          );
-          setDetectedProfile(profile);
-          detectedProfileRef.current = profile;
+          const profile = classifyAudio(parseFloat(parts[1])||0, parseFloat(parts[2])||10, parseFloat(parts[3])||0.1, parseFloat(parts[4])||0.1);
+          setDetectedProfile(profile); detectedProfileRef.current = profile;
           await applySmartSettings(profile, smartTasteRef.current);
-
+          
           if (profile.id !== track.profile) {
             const updated = { ...track, profile: profile.id };
             const newList = playlistRef.current.map(t => t.path === track.path ? updated : t);
             setPlaylist(newList);
-            if (dbProcess.current) {
-              await dbProcess.current.set("user_playlist", newList);
-              await dbProcess.current.save();
-            }
+            if (dbProcess.current) { await dbProcess.current.set("user_playlist", newList); await dbProcess.current.save(); }
           }
         }
       } catch (_) {
-        fpResolverRef.current = null;
       } finally { setIsAnalyzing(false); }
 
       if (id === loadIdRef.current) {
