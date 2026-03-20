@@ -1,13 +1,16 @@
 name: Build DmeX Android APK
 
 on:
-  workflow_dispatch: # This creates the manual "Run workflow" button
+  workflow_dispatch:
+
+# FIX: Force GitHub's runner to use the modern Node 24 runtime to prevent deprecation crashes
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
 
-    # CRITICAL: This tells the cloud server to run all commands inside your UI folder
     defaults:
       run:
         working-directory: ./music-player-ui 
@@ -19,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24 # FIX: Upgraded from 20 to 24
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -54,5 +57,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DmeX-Android-APK
-          # Points directly to the generated APK
           path: music-player-ui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
