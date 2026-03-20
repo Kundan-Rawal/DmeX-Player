@@ -50,11 +50,24 @@ jobs:
       - name: Initialize Android Scaffolding
         run: npx @tauri-apps/cli android init
 
-      - name: Build Android APK
+      # --- PRODUCTION SECURITY STEPS ---
+      
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > dmex-release-key.jks
+
+      - name: Build Android APK (Signed Release)
+        env:
+          # This tells Tauri to use the Keystore we just decoded, along with your GitHub Secrets
+          TAURI_ANDROID_KEYSTORE: ${{ github.workspace }}/music-player-ui/dmex-release-key.jks
+          TAURI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          TAURI_ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: npx @tauri-apps/cli android build
 
-      - name: Upload APK Artifact
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: DmeX-Android-APK
-          path: music-player-ui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          name: DmeX-Production-APK
+          # FIX: We are now grabbing the signed version, not the "-unsigned" version
+          path: music-player-ui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
