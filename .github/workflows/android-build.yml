@@ -49,6 +49,13 @@ jobs:
       - name: Initialize Android Scaffolding
         run: npx @tauri-apps/cli android init
 
+      - name: Inject Master Storage Permissions
+        run: |
+          sed -i 's/<application/    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" \/>\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" \/>\n    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" \/>\n    <application/' src-tauri/gen/android/app/src/main/AndroidManifest.xml
+
+      - name: Build Android APK (Unsigned Release)
+        run: npx @tauri-apps/cli android build
+
       - name: Build Android APK (Unsigned Release)
         run: npx @tauri-apps/cli android build
 
@@ -85,3 +92,5 @@ jobs:
         with:
           name: DmeX-Production-APK
           path: music-player-ui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+
+      
