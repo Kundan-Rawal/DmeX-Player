@@ -2124,6 +2124,7 @@ dependencies = [
  "tauri-plugin-persisted-scope",
  "tauri-plugin-shell",
  "tauri-plugin-store",
+ "walkdir",
 ]
 
 [[package]]

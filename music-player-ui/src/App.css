@@ -11,7 +11,27 @@
 /* ─── 1. RESET ──────────────────────────────────────────────── */
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 * { font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
-body { overflow:hidden; }
+
+/* Android system navigation bar fix:
+   color-scheme:dark tells the WebView to use a dark system UI
+   (dark status bar, dark navigation bar) when in dark mode.
+   The meta tag <meta name="color-scheme"> in index.html also helps. */
+:root { color-scheme: dark; }
+
+body {
+  overflow: hidden;
+  /* Extend black background into Android system nav bar area */
+  background: #090909;
+}
+
+/* Performance: promote scrollable areas to their own GPU layer */
+.content-area, .mobile-dsp-body, .lyrics-display {
+  -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
+}
+/* Performance: prevent layout thrash on track list */
+.track-list { contain: content; }
+
 ::-webkit-scrollbar { width:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--scrollbar); border-radius:10px; }
@@ -431,7 +451,40 @@ body { overflow:hidden; }
 [data-theme="light"] .val-purple { color:#7b1fa2; }
 [data-theme="light"] .val-orange { color:#e65100; }
 
-/* Lyrics badge — desktop hidden, mobile shows it */
+/* ─── VIRTUAL SCROLL ────────────────────────────────────────────
+   The VirtualList component wraps the track list in a scrollable
+   div and only renders visible rows. The container fills all
+   available space inside .content-area.                          */
+.virtual-scroll-container {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* Smooth momentum scrolling on iOS/Android WebView */
+  overscroll-behavior: contain;
+}
+/* track-list inside virtual scroll: relative positioning for absolute children */
+.track-list {
+  list-style: none;
+  /* height set by JS (totalHeight) */
+  /* Disable contain:content — absolute children need to overflow */
+}
+/* Each row must be EXACTLY ITEM_HEIGHT (72px) tall */
+.track-item {
+  height: 72px;
+  /* overflow:hidden prevents content from exceeding row height */
+  overflow: hidden;
+}
+
+/* content-area fills remaining space after header + tabs */
+.content-area {
+  flex: 1;
+  overflow: hidden;       /* VirtualList handles its own scroll */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Lyrics badge — desktop hidden */
 .lyrics-art-badge { display: none; }
 
 /* ─── 13. MOBILE ELEMENTS (desktop: hidden) ─────────────────── */
@@ -479,7 +532,18 @@ body { overflow:hidden; }
 
   /* Hide desktop header */
   .app-header { display:none; }
-  .content-area { padding:8px 0 160px; }
+  /* content-area: fill remaining height, virtual scroll handles its own overflow */
+  .content-area {
+    padding: 0;
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Virtual scroll container: account for mini player height at bottom */
+  .virtual-scroll-container {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px) + 8px);
+  }
   .track-list-header { display:none; }
 
   /* ── Track rows: Samsung Music style (flex, not grid) ── */
@@ -511,9 +575,20 @@ body { overflow:hidden; }
   .track-item-artist { font-size:12px; }
   .time-cell { font-size:12px; color:var(--text-muted); white-space:nowrap; padding-right:0; }
 
-  /* Mini player pill */
-  .bottom-player { left:8px; width:calc(100vw - 16px); bottom:12px; height:76px; border-radius:18px; }
-  .mini-player-content { padding:8px 16px; }
+  /* ── Mini player: flush to bottom edge, no floating ──
+     The old bottom:12px left a visible gap where Android's nav bar showed
+     the content behind the player in white/grey.
+     Fix: bottom:0, full width, round only top corners, padding-bottom for
+     the gesture indicator bar via env(safe-area-inset-bottom).            */
+  .bottom-player {
+    left: 0;
+    width: 100vw;
+    bottom: 0;
+    height: auto;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .mini-player-content { padding: 10px 18px 12px; height: auto; }
   .art-circle { width:44px; height:44px; border-radius:10px; }
   .track-title { font-size:13px; }
   .artist-subtitle { font-size:11px; }
@@ -745,5 +820,235 @@ body { overflow:hidden; }
   .expanded-player-content {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+/* ════════════════════════════════════════════════════════════════════
+   NEW COMPONENTS: Folder Modal, Scan Progress, Empty State
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ─── SCAN PROGRESS TOAST ──────────────────────────────────────── */
+.scan-progress {
+  background: color-mix(in srgb, var(--theme-color) 15%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--theme-color) 30%, transparent);
+  color: var(--text-primary);
+  font-size: 13px; font-weight: 600;
+  padding: 8px 16px;
+  margin: 0 16px 4px;
+  border-radius: 10px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ─── EMPTY STATE ───────────────────────────────────────────────── */
+.empty-state {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 60px 32px;
+  text-align: center;
+}
+.empty-icon { font-size: 56px; margin-bottom: 16px; opacity: 0.3; }
+.empty-title { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
+.empty-hint  { font-size: 14px; color: var(--text-muted); line-height: 1.6; max-width: 260px; }
+.empty-add-btn {
+  margin-top: 24px;
+  background: var(--theme-color);
+  color: #fff; border: none;
+  padding: 12px 28px; border-radius: 24px;
+  font-size: 15px; font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--theme-color) 35%, transparent);
+  transition: all 0.2s;
+}
+.empty-add-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+/* ─── FOLDER PICKER MODAL ───────────────────────────────────────── */
+.folder-modal-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: flex-end;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: overlayIn 0.2s ease;
+}
+@keyframes overlayIn { from { opacity:0 } to { opacity:1 } }
+
+.folder-modal {
+  background: var(--bg-sidebar);
+  width: 100%;
+  border-radius: 22px 22px 0 0;
+  padding: 0 0 env(safe-area-inset-bottom, 16px);
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  animation: slideUp 0.25s cubic-bezier(0.25,1,0.5,1);
+}
+@keyframes slideUp { from { transform:translateY(100%) } to { transform:translateY(0) } }
+
+.folder-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 22px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.folder-modal-header h2 { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.folder-modal-close {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-raised); border: none;
+  color: var(--text-secondary); font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; line-height: 1;
+}
+
+.folder-modal-hint {
+  font-size: 12px; color: var(--text-muted);
+  padding: 8px 22px 4px;
+  line-height: 1.4;
+}
+
+.folder-modal-list {
+  overflow-y: auto; flex: 1;
+  padding: 8px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.folder-modal-item {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; background: none; border: none;
+  padding: 13px 22px;
+  text-align: left; cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid var(--border);
+}
+.folder-modal-item:last-child { border-bottom: none; }
+.folder-modal-item:hover, .folder-modal-item:active { background: var(--bg-raised); }
+.folder-modal-icon { font-size: 22px; flex-shrink: 0; }
+.folder-modal-name { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.folder-modal-path { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+
+.folder-modal-footer {
+  padding: 12px 22px;
+  border-top: 1px solid var(--border);
+}
+.folder-modal-scan-all {
+  width: 100%; height: 46px;
+  background: var(--theme-color); border: none;
+  border-radius: 12px; color: #fff;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  transition: all 0.2s;
+}
+.folder-modal-scan-all:hover { filter: brightness(1.1); }
+
+/* ─── ANDROID NAV BAR — extend app background ─────────────────────
+   The WebView in Tauri Android doesn't automatically cover the system
+   navigation bar. These rules extend the app's background color down
+   into that area so it's no longer white.                            */
+/* ─── ANDROID NAV BAR — extend app background ───────────────────── */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .app-layout {
+    padding-bottom: env(safe-area-inset-bottom);
+    min-height: 100dvh;
+  }
+  .bottom-player:not(.expanded) {
+    bottom: 12px;
+    padding-bottom: 0px; 
+    margin-bottom: 40px;
+    border-radius: 30px;
+  }
+  .bottom-player.expanded {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+} /* <--- Safely closed block */
+
+/* ====================================================================
+   PERFORMANCE OPTIMIZATIONS (60FPS MARQUEE FIX)
+   ==================================================================== */
+
+/* Force scrolling text into a dedicated GPU hardware layer */
+.mini-marquee-inner.running,
+.ep-title-wrapper.marquee,
+.ep-artist-inner.marquee {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* Convert CPU 2D translations to Hardware Accelerated 3D translations */
+@keyframes miniScroll { 
+  0%   { transform: translate3d(0, 0, 0); } 
+  100% { transform: translate3d(calc(-50% - 24px), 0, 0); } 
+}
+@keyframes scrollText { 
+  0%   { transform: translate3d(0, 0, 0); } 
+  100% { transform: translate3d(calc(-50% - 40px), 0, 0); } 
+}
+@keyframes artistScroll { 
+  0%   { transform: translate3d(0, 0, 0); } 
+  100% { transform: translate3d(calc(-50% - 30px), 0, 0); } 
+}
+
+/* ====================================================================
+   UI OVERRIDES & GLASSMORPHISM
+   ==================================================================== */
+.mobile-album-gradient { display: none !important; }
+
+.ep-icon-btn, .taste-pill, .ep-profile-badge, .vol-btn {
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.mobile-dsp-page {
+  background: color-mix(in srgb, var(--bg-primary) 65%, transparent) !important;
+  backdrop-filter: blur(35px);
+  -webkit-backdrop-filter: blur(35px);
+}
+
+.mobile-dsp-header {
+  padding-top: max(40px, env(safe-area-inset-top)) !important;
+}
+
+@media (max-width: 768px) {
+  .ep-header {
+    padding-top: max(25px, env(safe-area-inset-top)) !important;
+    padding-bottom: 10px !important;
+    z-index: 20;
+  }
+  .ep-art { margin-top: 5px; margin-bottom: 25px !important; }
+  .player-smart-section { margin-bottom: 32px !important; }
+  
+  .ep-content {
+    height: auto !important;
+    flex: 1 1 auto !important;
+    padding-bottom: 16px !important; 
+  }
+  .ep-right {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+  .ep-controls-section {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+  }
+  .ep-actions {
+    margin-top: auto !important; 
+    padding-top: 20px !important; 
+    justify-content: space-between !important;
+  }
+
+  .mobile-header { background: transparent !important; }
+  .mobile-tabs { background: transparent !important; border-bottom: none !important; padding-top: 5px !important; }
+  .app-container { background: transparent !important; border-bottom: none !important; box-shadow: none !important; }
+
+  .blob-1 { width: 140vw !important; height: 140vw !important; filter: blur(55px) !important; }
+  .blob-2 { width: 130vw !important; height: 140vw !important; filter: blur(50px) !important; }
+  .blob-3 { width: 110vw !important; height: 110vw !important; filter: blur(45px) !important; }
+  
+  [data-theme="dark"] .blob { opacity: 0.85 !important; }
+  [data-theme="light"] .blob { opacity: 0.60 !important; }
+
+  .ep-play-btn{
+    box-shadow: none !important;
   }
 }
