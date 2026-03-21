@@ -3,7 +3,6 @@ name: Build DmeX Android APK
 on:
   workflow_dispatch:
 
-# FIX: Force GitHub's runner to use the modern Node 24 runtime to prevent deprecation crashes
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -22,7 +21,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24 # FIX: Upgraded from 20 to 24
+          node-version: 24
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -50,24 +49,39 @@ jobs:
       - name: Initialize Android Scaffolding
         run: npx @tauri-apps/cli android init
 
+      - name: Build Android APK (Unsigned Release)
+        run: npx @tauri-apps/cli android build
+
       # --- PRODUCTION SECURITY STEPS ---
       
       - name: Decode Keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > dmex-release-key.jks
 
-      - name: Build Android APK (Signed Release)
+      - name: Zipalign and Sign APK
         env:
-          # This tells Tauri to use the Keystore we just decoded, along with your GitHub Secrets
-          TAURI_ANDROID_KEYSTORE: ${{ github.workspace }}/music-player-ui/dmex-release-key.jks
-          TAURI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          TAURI_ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: npx @tauri-apps/cli android build
+          KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          # Find the latest Android build tools installed on the cloud server
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+          
+          # 1. Zipalign the APK (Android requires this memory optimization before signing)
+          $BUILD_TOOLS/zipalign -p 4 src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk app-aligned.apk
+
+          # 2. Cryptographically Sign the APK using your Secrets
+          $BUILD_TOOLS/apksigner sign --ks dmex-release-key.jks \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "env:KEYSTORE_PASSWORD" \
+            --key-pass "env:KEY_PASSWORD" \
+            app-aligned.apk
+
+          # 3. Overwrite with the final Signed APK name so the Artifact Uploader finds it
+          mv app-aligned.apk src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: DmeX-Production-APK
-          # FIX: We are now grabbing the signed version, not the "-unsigned" version
           path: music-player-ui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
