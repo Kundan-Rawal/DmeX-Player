@@ -361,31 +361,49 @@ function App() {
   };
 
   const handleBrowseFolder = async () => {
+    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    setIsLoading(true);
+
     try {
-      const selectedFolder = await open({ directory: true, multiple: false });
-      if (!selectedFolder || typeof selectedFolder !== 'string') return;
-      setIsLoading(true);
-      const entries = await readDir(selectedFolder);
-      const rawFiles = entries.filter(e => isAudio(e.name));
+      let filePaths: string[] = [];
+
+      if (isMobile) {
+        filePaths = await invoke<string[]>('scan_mobile_audio');
+        if (filePaths.length === 0) {
+          alert("No audio files found in Music or Download folders.");
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        const selectedFolder = await open({ directory: true, multiple: false });
+        if (!selectedFolder || typeof selectedFolder !== 'string') {
+          setIsLoading(false); return;
+        }
+        const entries = await readDir(selectedFolder);
+        const separator = navigator.userAgent.includes('Windows') ? '\\' : '/';
+        filePaths = entries.filter(e => isAudio(e.name)).map(e => `${selectedFolder}${separator}${e.name}`);
+      }
+
       const existing = new Set(playlistRef.current.map(t => t.path));
       const newTracks: Track[] = [];
 
-      for (const entry of rawFiles) {
-        const fullPath = `${selectedFolder}\\${entry.name}`;
+      for (const fullPath of filePaths) {
         if (existing.has(fullPath)) continue;
 
-        let cleanName = stripExt(entry.name || "Unknown");
-        cleanName = cleanName.replace(/9convert\.com\s*-\s*/i,'').replace(/\[PagalWorld\.com\]/i,'').trim();
-        let t: Track = { name:cleanName, path:fullPath, artist:"Unknown Artist", album:"Single", year:"-", quality:"Standard", duration:0 };
+        const fileName = fullPath.split(/[/\\]/).pop() || "Unknown";
+        let cleanName = stripExt(fileName);
+        cleanName = cleanName.replace(/9convert\.com\s*-\s*/i, '').replace(/\[PagalWorld\.com\]/i, '').trim();
+
+        let t: Track = { name: cleanName, path: fullPath, artist: "Unknown Artist", album: "Single", year: "-", quality: "Standard", duration: 0 };
 
         try {
           const fileData = await readFile(fullPath);
-          const meta = await mm.parseBuffer(fileData, { mimeType:getMime(fullPath) }, { skipCovers: true });
-          if (meta.common.title)    t.name     = meta.common.title;
-          if (meta.common.artist)   t.artist   = meta.common.artist;
-          if (meta.common.album)    t.album    = meta.common.album;
-          if (meta.common.year)     t.year     = meta.common.year.toString();
-          if (meta.format.bitrate)  t.quality  = `${Math.round(meta.format.bitrate / 1000)} kbps`;
+          const meta = await mm.parseBuffer(fileData, { mimeType: getMime(fullPath) }, { skipCovers: true });
+          if (meta.common.title) t.name = meta.common.title;
+          if (meta.common.artist) t.artist = meta.common.artist;
+          if (meta.common.album) t.album = meta.common.album;
+          if (meta.common.year) t.year = meta.common.year.toString();
+          if (meta.format.bitrate) t.quality = `${Math.round(meta.format.bitrate / 1000)} kbps`;
           if (meta.format.duration) t.duration = meta.format.duration;
         } catch (_) {}
 
@@ -398,14 +416,17 @@ function App() {
         newTracks.push(t);
       }
 
-      const merged = [...playlistRef.current, ...newTracks].sort((a,b) => a.name.localeCompare(b.name));
+      const merged = [...playlistRef.current, ...newTracks].sort((a, b) => a.name.localeCompare(b.name));
       setPlaylist(merged);
       if (dbProcess.current) {
         await dbProcess.current.set("user_playlist", merged);
         await dbProcess.current.save();
       }
+    } catch (e) {
+      alert("Error scanning files: " + e);
+    } finally {
       setIsLoading(false);
-    } catch (_) { setIsLoading(false); }
+    }
   };
 
   const handleClearLibrary = async () => {

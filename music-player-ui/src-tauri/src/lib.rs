@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::os::raw::c_char;
+use walkdir::WalkDir;
 
 extern "C" {
     fn init_audio_engine();
@@ -25,11 +26,32 @@ fn audio_metrics() -> (f32, f32, f32) {
 fn analyze_current_track() -> String {
     let mut sc = 0.0; let mut cf = 0.0; let mut zcr = 0.0; let mut rms = 0.0;
     let success = unsafe { analyze_audio(&mut sc, &mut cf, &mut zcr, &mut rms) };
-    if success {
-        format!("FINGERPRINT {} {} {} {}", sc, cf, zcr, rms)
-    } else {
-        "FINGERPRINT_ERROR".to_string()
+    if success { format!("FINGERPRINT {} {} {} {}", sc, cf, zcr, rms) } 
+    else { "FINGERPRINT_ERROR".to_string() }
+}
+
+#[tauri::command]
+fn scan_mobile_audio() -> Vec<String> {
+    let mut paths = Vec::new();
+    // Native Android music and download paths
+    let roots = ["/storage/emulated/0/Music", "/storage/emulated/0/Download"];
+    
+    for root in roots {
+        for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext = ext.to_lowercase();
+                    if ["mp3", "wav", "flac", "m4a", "aac", "ogg"].contains(&ext.as_str()) {
+                        if let Some(path_str) = path.to_str() {
+                            paths.push(path_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
     }
+    paths
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,7 +62,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![audio_command, audio_metrics, analyze_current_track])
+        .invoke_handler(tauri::generate_handler![audio_command, audio_metrics, analyze_current_track, scan_mobile_audio])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
