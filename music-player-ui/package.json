@@ -19,7 +19,8 @@
     "fast-average-color": "^9.5.0",
     "music-metadata": "^11.12.3",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-fast-marquee": "^1.6.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

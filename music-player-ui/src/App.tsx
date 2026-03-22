@@ -4,6 +4,7 @@ import { readFile, readTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import * as mm from "music-metadata";
+import Marquee from "react-fast-marquee";
 import { FastAverageColor } from "fast-average-color";
 import "./App.css";
 
@@ -295,6 +296,7 @@ function App() {
   const [bulkScanPaused, setBulkScanPaused] = useState(false);
   const [bulkScanDone, setBulkScanDone]     = useState(0);
   const [bulkScanTotal, setBulkScanTotal]   = useState(0);
+  const [isBulkScanOpen, setIsBulkScanOpen]     = useState(false); // <--- ADD THIS LINE
 
   const smartTasteRef      = useRef<Taste>('QUALITY');
   const detectedProfileRef = useRef<AudioProfile | null>(null);
@@ -941,18 +943,29 @@ const meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) }, { sk
     return (
       <div className="ep-controls-section">
         <div className="ep-track-header">
-          <div className={`marquee-container ${isLong?'scrolling':''}`}>
-            <div className={`ep-title-wrapper ${isLong?'marquee':''}`}>
+          {isLong ? (
+            <div className="marquee-container scrolling">
+              <Marquee speed={40} gradient={false} delay={1.5}>
+                <h1 className="ep-title" style={{ paddingRight: '60px' }}>{trackTitle}</h1>
+              </Marquee>
+            </div>
+          ) : (
+            <div className="marquee-container">
               <h1 className="ep-title">{trackTitle}</h1>
-              {isLong && <h1 className="ep-title">{trackTitle}</h1>}
             </div>
-          </div>
-          <div className={`ep-artist-marquee ${artistIsLong?'scrolling':''}`}>
-            <div className={`ep-artist-inner ${artistIsLong?'marquee':''}`}>
+          )}
+          
+          {artistIsLong ? (
+            <div className="ep-artist-marquee scrolling">
+              <Marquee speed={35} gradient={false} delay={1.5}>
+                <h2 className="ep-artist" style={{ paddingRight: '50px' }}>{trackArtist}</h2>
+              </Marquee>
+            </div>
+          ) : (
+            <div className="ep-artist-marquee">
               <h2 className="ep-artist">{trackArtist}</h2>
-              {artistIsLong && <h2 className="ep-artist">{trackArtist}</h2>}
             </div>
-          </div>
+          )}
         </div>
         {renderSmartPills()}
         <div className="ep-volume-row">
@@ -1046,6 +1059,7 @@ const meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) }, { sk
   );
 
   /** Bulk category scan progress banner — shown when scan is running/paused */
+  /** Bulk category scan — Floating Pill + Bottom Sheet Modal */
   const renderBulkScanBanner = () => {
     const unscannedCount = playlist.filter(t => !t.profile).length;
     if (!bulkScanActive && unscannedCount === 0) return null; // all done, hide it
@@ -1053,39 +1067,59 @@ const meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) }, { sk
     const pct = bulkScanTotal > 0 ? Math.round((bulkScanDone / bulkScanTotal) * 100) : 0;
 
     return (
-      <div className="bulk-scan-banner">
-        {bulkScanActive ? (
-          <>
-            <div className="bulk-scan-info">
-              <span className="bulk-scan-label">
-                {bulkScanPaused ? '⏸ Paused' : '🎵 Scanning'} — {bulkScanDone}/{bulkScanTotal} tracks
-              </span>
-              <span className="bulk-scan-pct">{pct}%</span>
-            </div>
-            <div className="bulk-scan-bar">
-              <div className="bulk-scan-fill" style={{ width: `${pct}%` }} />
-            </div>
-            <div className="bulk-scan-actions">
-              {bulkScanPaused
-                ? <button className="bulk-btn resume" onClick={resumeBulkScan}>▶ Resume</button>
-                : <button className="bulk-btn pause"  onClick={pauseBulkScan}>⏸ Pause</button>
-              }
-              <button className="bulk-btn stop" onClick={stopBulkScan}>✕ Stop</button>
-            </div>
-          </>
-        ) : (
-          // Not active — show a "Scan Profiles" prompt if unscanned tracks exist
-          unscannedCount > 0 && (
-            <button className="bulk-scan-start-btn" onClick={startBulkCategoryScan}>
-              <span>🎯</span>
-              <div>
-                <div className="bulk-start-title">Pre-scan Audio Profiles</div>
-                <div className="bulk-start-hint">{unscannedCount} tracks not yet categorised — tap to scan in background</div>
+      <>
+        {/* The Floating Pill (Always visible when unscanned tracks exist or scan is running) */}
+        <button className="bulk-scan-fab fade-in" onClick={() => setIsBulkScanOpen(true)}>
+          <span className="fab-text">
+            {bulkScanActive 
+              ? (bulkScanPaused ? `Paused ${pct}%` : `Scanning ${pct}%`) 
+              : `Optimize (${unscannedCount})`}
+          </span>
+        </button>
+
+        {/* The Slide-Up Details Sheet */}
+        {isBulkScanOpen && (
+          <div className="folder-modal-overlay" onClick={() => setIsBulkScanOpen(false)}>
+            <div className="folder-modal" onClick={e => e.stopPropagation()}>
+              <div className="folder-modal-header">
+                <h2> Audio Optimization</h2>
+                <button className="folder-modal-close" onClick={() => setIsBulkScanOpen(false)}>×</button>
               </div>
-            </button>
-          )
+              
+              <div className="bulk-scan-modal-content">
+                <p className="folder-modal-hint" style={{marginBottom: 20, padding: 0}}>
+                  {bulkScanActive 
+                    ? "Analyzing audio fingerprints in the background to instantly apply the perfect DSP profile when you play a song." 
+                    : `${unscannedCount} tracks haven't been analyzed yet. Run a background scan to enable instant Smart DSP loading.`}
+                </p>
+
+                {bulkScanActive ? (
+                  <div className="bulk-scan-active-view">
+                    <div className="bulk-scan-info">
+                      <span className="bulk-scan-label">{bulkScanPaused ? '⏸ Paused' : '⚡ Scanning'}</span>
+                      <span className="bulk-scan-pct">{bulkScanDone} / {bulkScanTotal} ({pct}%)</span>
+                    </div>
+                    <div className="bulk-scan-bar" style={{ marginBottom: 20 }}>
+                      <div className="bulk-scan-fill" style={{ width: `${pct}%`, background: 'var(--theme-color)' }} />
+                    </div>
+                    <div className="bulk-scan-actions" style={{ display: 'flex', gap: 10 }}>
+                      {bulkScanPaused
+                        ? <button className="folder-modal-scan-all" style={{flex: 1}} onClick={resumeBulkScan}>▶ Resume</button>
+                        : <button className="folder-modal-scan-all" style={{flex: 1, background: 'var(--bg-raised)', color: 'var(--text-primary)'}} onClick={pauseBulkScan}>⏸ Pause</button>
+                      }
+                      <button className="folder-modal-scan-all" style={{flex: 1, background: '#e83040'}} onClick={stopBulkScan}>✕ Stop</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="folder-modal-scan-all" onClick={() => { startBulkCategoryScan(); setIsBulkScanOpen(false); }}>
+                     Start Background Scan
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
-      </div>
+      </>
     );
   };
 
@@ -1190,8 +1224,31 @@ const meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) }, { sk
                 <div className="track-info" onClick={()=>setIsExpanded(true)}>
                   <div className="art-circle" style={{backgroundImage:albumArt?`url(${albumArt})`:'none',backgroundColor:albumArt?'transparent':'rgba(255,255,255,0.15)'}}>{!albumArt&&<span>🎵</span>}</div>
                   <div className="mini-text-block">
-                    {(()=>{const tl=trackTitle.length>22;return(<div className={`mini-marquee-clip ${tl?'scrolling':''}`}><div className={`mini-marquee-inner ${tl?'running':''}`}><span className="track-title">{trackTitle}</span>{tl&&<span className="track-title">{trackTitle}</span>}</div></div>);})()}
-                    {(()=>{const al=trackArtist.length>26;return(<div className={`mini-marquee-clip ${al?'scrolling':''}`}><div className={`mini-marquee-inner ${al?'running':''}`}><span className="artist-subtitle">{trackArtist}{detectedProfile&&<span className="mini-profile"> {detectedProfile.icon}</span>}</span>{al&&<span className="artist-subtitle">{trackArtist}{detectedProfile&&<span className="mini-profile"> {detectedProfile.icon}</span>}</span>}</div></div>);})()}
+                    {trackTitle.length > 22 ? (
+                      <div className="mini-marquee-clip scrolling">
+                        <Marquee speed={35} gradient={false} delay={1}>
+                          <span className="track-title" style={{ paddingRight: '48px' }}>{trackTitle}</span>
+                        </Marquee>
+                      </div>
+                    ) : (
+                      <div className="mini-marquee-clip"><span className="track-title">{trackTitle}</span></div>
+                    )}
+                    
+                    {trackArtist.length > 26 ? (
+                      <div className="mini-marquee-clip scrolling">
+                        <Marquee speed={30} gradient={false} delay={1}>
+                          <span className="artist-subtitle" style={{ paddingRight: '48px' }}>
+                            {trackArtist}{detectedProfile && <span className="mini-profile"> {detectedProfile.icon}</span>}
+                          </span>
+                        </Marquee>
+                      </div>
+                    ) : (
+                      <div className="mini-marquee-clip">
+                        <span className="artist-subtitle">
+                          {trackArtist}{detectedProfile && <span className="mini-profile"> {detectedProfile.icon}</span>}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="controls">
