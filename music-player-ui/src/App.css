@@ -815,12 +815,15 @@ body {
   .app-layout {
     height: 100dvh;
   }
-  .mobile-header {
-    padding-top: 50px;
-  }
   .bottom-player {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
+  /* Pushes the play controls up so they don't overlap the transparent Android home button */
+  padding-bottom: env(safe-area-inset-bottom, 24px); 
+}
+
+.mobile-header {
+  /* Pushes the DmeX logo down so it doesn't overlap the transparent time/battery text */
+  padding-top: env(safe-area-inset-top, 35px);
+}
   .expanded-player-content {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
@@ -1072,7 +1075,83 @@ body {
     justify-content: center;
     width: 100%;
   }
+  /* Disable tap highlights, backgrounds, and scaling for media controls */
+.no-touch-effects {
+  -webkit-tap-highlight-color: transparent !important;
+  background-color: transparent !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
 
+.no-touch-effects:active,
+.no-touch-effects:hover,
+.no-touch-effects:focus {
+  background-color: transparent !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+}
+
+.glass-options-menu {
+  position: absolute;
+  top: 70px; /* Pushed down to clear the 3-dot button */
+  right: 15px;
+  width: 220px;
+  background: rgba(40, 40, 40, 0.25); /* Less dark, more transparent */
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 16px;
+  z-index: 100;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  text-align: left;
+}
+
+.glass-menu-header {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  opacity: 0.7;
+}
+
+.glass-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.glass-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.glass-slider {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.glass-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--theme-color, #fff);
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(0,0,0,0.3);
 }
 
 
