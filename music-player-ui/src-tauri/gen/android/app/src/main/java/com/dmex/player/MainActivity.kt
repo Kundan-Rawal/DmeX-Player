@@ -11,11 +11,32 @@ import android.os.Looper
 import android.view.WindowManager
 import android.graphics.Color
 import androidx.core.view.WindowCompat
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
 
 class MainActivity : TauriActivity() {
+
+    // Link to our low-level Rust function
+    external fun onAudioBecomingNoisy()
+
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY == intent.action) {
+                onAudioBecomingNoisy() // Instantly kills C++ engine
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // --- PHASE 2: Register Headphone Disconnect Listener ---
+        registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+
+        // --- PHASE 1: UI & Permissions ---
         // 1. Tell Android to let the React app draw completely edge-to-edge
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -41,5 +62,11 @@ class MainActivity : TauriActivity() {
                 ActivityCompat.requestPermissions(this@MainActivity, permissions, 1)
             }
         }, 1500)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up the listener when the app is completely killed
+        unregisterReceiver(noisyReceiver)
     }
 }

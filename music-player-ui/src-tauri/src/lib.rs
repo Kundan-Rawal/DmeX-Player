@@ -8,8 +8,10 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::audio::SampleBuffer;
 use std::fs::File;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use std::ffi::CStr;
-use std::os::raw::c_void;
+static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
 
 // ------------------------------------------------------------------
 // SYMPHONIA FFI BRIDGE (IN-MEMORY DECODE)
@@ -21,6 +23,23 @@ pub struct RustAudioBuffer {
     pub channels: u32,
     pub sample_rate: u32,
 }
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn Java_com_dmex_player_MainActivity_onAudioBecomingNoisy(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+) {
+    // 1. Flag the UI to catch up on the next poll
+    HEADPHONES_UNPLUGGED.store(true, Ordering::Relaxed);
+    
+    // 2. Instantly kill the C++ audio engine to prevent public blasting
+    let cmd = std::ffi::CString::new("PAUSE").unwrap();
+    unsafe {
+        execute_audio_command(cmd.as_ptr());
+    }
+}
+
 
 #[no_mangle]
 pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer {
@@ -135,8 +154,14 @@ fn scan_audio_paths(root: &str) -> Vec<String> {
     paths
 }
 
+
 #[tauri::command]
 fn audio_command(cmd: String) {
+    // Clear the flag if the user explicitly presses PLAY again
+    if cmd.starts_with("PLAY") {
+        HEADPHONES_UNPLUGGED.store(false, Ordering::Relaxed);
+    }
+    
     let c_str = CString::new(cmd).unwrap();
     unsafe {
         init_audio_engine();
@@ -145,10 +170,14 @@ fn audio_command(cmd: String) {
 }
 
 #[tauri::command]
-fn audio_metrics() -> (f32, f32, f32) {
+fn audio_metrics() -> (f32, f32, f32, bool) {
     let mut cur = 0.0_f32; let mut len = 0.0_f32; let mut lvl = 0.0_f32;
     unsafe { get_audio_metrics(&mut cur, &mut len, &mut lvl); }
-    (cur, len, lvl)
+    
+    // Pass the flag to React, then instantly reset it
+    let unplugged = HEADPHONES_UNPLUGGED.swap(false, Ordering::Relaxed);
+    
+    (cur, len, lvl, unplugged) // Now returns 4 values instead of 3
 }
 
 #[tauri::command]
