@@ -383,9 +383,15 @@ const DraggablePlaylistView = memo(({
     // Find element under cursor
     const elemUnderCursor = document.elementsFromPoint(e.clientX, e.clientY)[0];
     const targetLi = elemUnderCursor.closest('.track-item');
-    if (targetLi && targetLi !== dragState.current.fromTrack?.path) {
+    
+    if (targetLi) {
       const targetPath = targetLi.getAttribute('data-path');
-      if (targetPath) setDragOverPath(targetPath);
+      // Now we correctly compare string to string
+      if (targetPath && targetPath !== dragState.current.fromTrack?.path) {
+        setDragOverPath(targetPath);
+      } else {
+        setDragOverPath(null);
+      }
     } else {
       setDragOverPath(null);
     }
@@ -1479,7 +1485,7 @@ await writeToEngine(`FIRGAIN ${fb.toFixed(3)} ${fm.toFixed(3)} ${fh.toFixed(3)}`
     setScanProgress(`Loading metadata for ${needsEnrich.length} tracks…`);
 
     const BATCH = 30; const DELAY = 20;
-    let enriched = 0; let batchesSinceLastSave = 0;
+    let enriched = 0; 
 
     for (let i = 0; i < needsEnrich.length; i += BATCH) {
       if (!enricherRunning.current) break;
