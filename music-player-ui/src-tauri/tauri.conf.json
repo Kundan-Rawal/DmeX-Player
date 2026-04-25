@@ -12,10 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "music-player-ui",
-        "width": 800,
-        "height": 600
-      }
+          "title": "DmeX Player",
+          "width": 1200,
+          "height": 800,
+          "decorations": false,
+          "transparent": false
+        }
     ],
     "security": {
       "csp": null
@@ -30,6 +32,10 @@
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
-      ]
+      ],
+      "resources": [
+      "resources/impulses/*"
+    ]
     }
+    
 }

@@ -1,3 +1,5 @@
+
+
 use walkdir::WalkDir;
 use std::ffi::CString;
 use std::os::raw::c_char;
@@ -9,9 +11,19 @@ use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::audio::SampleBuffer;
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
-
 use std::ffi::CStr;
+
+mod db; // Import our new database module
+
+use std::sync::Mutex;
+use rusqlite::Connection;
+use tauri::{State, Manager};
+
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
+
+struct AppState {
+    db_conn: Mutex<Connection>,
+}
 
 // ------------------------------------------------------------------
 // SYMPHONIA FFI BRIDGE (IN-MEMORY DECODE)
@@ -30,16 +42,12 @@ pub extern "C" fn Java_com_dmex_player_MainActivity_onAudioBecomingNoisy(
     _env: *mut std::ffi::c_void,
     _class: *mut std::ffi::c_void,
 ) {
-    // 1. Flag the UI to catch up on the next poll
     HEADPHONES_UNPLUGGED.store(true, Ordering::Relaxed);
-    
-    // 2. Instantly kill the C++ audio engine to prevent public blasting
     let cmd = std::ffi::CString::new("PAUSE").unwrap();
     unsafe {
         execute_audio_command(cmd.as_ptr());
     }
 }
-
 
 #[no_mangle]
 pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer {
@@ -88,7 +96,8 @@ pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer 
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
-            Err(_) => break, 
+            Err(symphonia::core::errors::Error::IoError(_)) => break,
+            Err(_) => continue, 
         };
 
         if packet.track_id() != track_id { continue; }
@@ -99,7 +108,7 @@ pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer 
                 buf.copy_interleaved_ref(decoded);
                 all_samples.extend_from_slice(buf.samples());
             }
-            Err(_) => continue, 
+            Err(_) => continue,
         }
     }
 
@@ -132,7 +141,8 @@ pub extern "C" fn rust_free_audio_buffer(ptr: *mut RustAudioBuffer) {
 extern "C" {
     fn init_audio_engine();
     fn execute_audio_command(cmd: *const c_char);
-    fn get_audio_metrics(curTime: *mut f32, length: *mut f32, level: *mut f32);
+    // FIX: Match C++ signature exactly (requires 2 pointers)
+    fn get_audio_metrics(out_data: *mut f32, out_level: *mut f32);
     fn analyze_audio(sc: *mut f32, cf: *mut f32, zcr: *mut f32, rms: *mut f32) -> bool;
 }
 
@@ -154,14 +164,11 @@ fn scan_audio_paths(root: &str) -> Vec<String> {
     paths
 }
 
-
 #[tauri::command]
 fn audio_command(cmd: String) {
-    // Clear the flag if the user explicitly presses PLAY again
     if cmd.starts_with("PLAY") {
         HEADPHONES_UNPLUGGED.store(false, Ordering::Relaxed);
     }
-    
     let c_str = CString::new(cmd).unwrap();
     unsafe {
         init_audio_engine();
@@ -169,15 +176,47 @@ fn audio_command(cmd: String) {
     }
 }
 
+
 #[tauri::command]
-fn audio_metrics() -> (f32, f32, f32, bool) {
-    let mut cur = 0.0_f32; let mut len = 0.0_f32; let mut lvl = 0.0_f32;
-    unsafe { get_audio_metrics(&mut cur, &mut len, &mut lvl); }
+fn fetch_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
+    let conn = state.db_conn.lock().unwrap();
+    match db::get_all_tracks(&conn) {
+        Ok(tracks) => Ok(tracks),
+        Err(e) => Err(format!("Failed to fetch library: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn add_to_library(track: db::Track, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    match db::upsert_track(&conn, &track) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to insert track: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn audio_metrics() -> Vec<f32> {
+    // Collect 10 elements from out_data array + 1 element from out_level
+    let mut data = vec![0.0f32; 10]; 
+    let mut level: f32 = 0.0;
     
-    // Pass the flag to React, then instantly reset it
-    let unplugged = HEADPHONES_UNPLUGGED.swap(false, Ordering::Relaxed);
+    unsafe {
+        // FIX: Provide both memory addresses so C++ doesn't segfault
+        get_audio_metrics(data.as_mut_ptr(), &mut level);
+    }
     
-    (cur, len, lvl, unplugged) // Now returns 4 values instead of 3
+    let finished = if data[0] > 0.0 && data[1] > 0.0 && data[0] >= (data[1] - 0.5) {
+        1.0 
+    } else { 
+        0.0 
+    };
+
+    // Return the exact 12 values App.tsx is waiting for
+    vec![
+        data[0], data[1], data[2], data[3], data[4], data[5], 
+        data[6], data[7], data[8], data[9], level, finished
+    ]
 }
 
 #[tauri::command]
@@ -197,7 +236,7 @@ async fn read_file_head(path: String, max_bytes: usize) -> Result<Vec<u8>, Strin
     use std::io::Read;
     tauri::async_runtime::spawn_blocking(move || {
         let file = std::fs::File::open(&path).map_err(|e| format!("Cannot open {}: {}", path, e))?;
-        let mut buf = Vec::with_capacity(max_bytes.min(131072));
+        let mut buf = Vec::with_capacity(max_bytes);
         file.take(max_bytes as u64).read_to_end(&mut buf).map_err(|e| format!("Read error: {}", e))?;
         Ok(buf)
     }).await.map_err(|e| format!("Thread error: {}", e))?
@@ -218,16 +257,63 @@ async fn scan_mobile_audio() -> Result<Vec<String>, String> {
     }).await.map_err(|e| format!("Thread error: {}", e))
 }
 
+#[tauri::command]
+fn toggle_favorite(path: String, is_favorite: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    db::toggle_favorite(&conn, &path, is_favorite).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_play_stats(path: String, seconds: i32, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    db::update_play_stats(&conn, &path, seconds).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_profile(path: String, profile: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    db::update_profile(&conn, &path, &profile).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::CustomPlaylist>, String> {
+    let conn = state.db_conn.lock().unwrap();
+    db::get_playlists(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_playlist(playlist: db::CustomPlaylist, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    db::save_playlist(&conn, &playlist).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            // Get the OS-specific app data directory
+            let app_data_dir = app.path()
+                .app_data_dir()
+                .expect("Failed to resolve app data dir");
+
+            // Initialize the SQLite database
+            let conn = db::init_db(app_data_dir).expect("Failed to initialize SQLite Database");
+
+            // Pass the connection to Tauri's global state manager
+            app.manage(AppState {
+                db_conn: Mutex::new(conn),
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
-            audio_command, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
+            fetch_library, add_to_library,
+            toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist,
+            audio_command, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio
         ])
-        .setup(|_app| Ok(()))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

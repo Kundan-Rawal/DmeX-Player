@@ -31,6 +31,8 @@ tauri-plugin-persisted-scope = "2"
 walkdir = "2.5.0"
 symphonia = { version = "0.5.3", features = ["aac", "mp3", "isomp4", "alac", "flac", "wav"] }
 crossbeam-channel = "0.5"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+
 
 [profile.dev.package."*"]
 opt-level = 3

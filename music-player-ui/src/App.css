@@ -27,6 +27,7 @@ body {
 /* Performance: promote scrollable areas to their own GPU layer */
 .content-area, .mobile-dsp-body, .lyrics-display {
   -webkit-overflow-scrolling: touch;
+  overflow-y: hidden;
   will-change: scroll-position;
 }
 /* Performance: prevent layout thrash on track list */
@@ -172,6 +173,36 @@ body {
 }
 
 /* ─── 4. DESKTOP SIDEBAR ────────────────────────────────────── */
+/* CUSTOM WINDOW CONTROLS (WINDOWS STYLE) */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.win-btn {
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-app-region: no-drag; 
+}
+
+.win-btn:hover { background: var(--bg-raised); color: var(--text-primary); }
+/* Native Windows red close hover */
+.win-btn.close:hover { background: #e81123; color: #ffffff; }
+
+.sidebar[data-tauri-drag-region="true"], 
+.app-header[data-tauri-drag-region="true"] {
+  user-select: none;
+}
 .sidebar {
   width:240px; min-width:240px;
   background:var(--bg-sidebar); border-right:1px solid var(--border);
@@ -212,8 +243,9 @@ body {
 
 /* ─── 5. MAIN CONTENT ───────────────────────────────────────── */
 .app-container { flex:1; display:flex; flex-direction:column; height:100vh; overflow:hidden; }
-.app-header { padding:28px 36px 16px; display:flex; align-items:baseline; gap:14px; flex-shrink:0; }
-.app-header h1 { font-size:28px; font-weight:800; letter-spacing:-0.5px; color:var(--text-primary); }
+.app-header { 
+  padding:28px 36px 16px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; 
+}.app-header h1 { font-size:28px; font-weight:800; letter-spacing:-0.5px; color:var(--text-primary); }
 .bollywood-hint { font-size:12px; color:var(--text-muted); }
 .content-area { flex:1; overflow-y:auto; padding:0 36px; padding-bottom:130px; }
 .placeholder-text { text-align:center; color:var(--text-muted); margin-top:60px; font-size:14px; font-weight:500; line-height:2; }
@@ -415,10 +447,9 @@ body {
 .lyrics-mode .ep-left  { flex-direction:column; width:340px; gap:16px; }
 .lyrics-mode .ep-art   { width:280px; height:280px; }
 .lyrics-mode .ep-right { flex:1; width:auto; display:flex; align-items:center; }
-.lyrics-display.full { height:100%; max-height:80vh; padding:35vh 0; overflow-y:auto; scroll-behavior:smooth; mask-image:linear-gradient(to bottom,transparent,black 20%,black 80%,transparent); -webkit-mask-image:linear-gradient(to bottom,transparent,black 20%,black 80%,transparent); }
+.lyrics-display.full { width:100%;text-align: center; height:100%; max-height:80vh; padding:35vh 0; overflow-y:auto; scroll-behavior:smooth; mask-image:linear-gradient(to bottom,transparent,black 20%,black 80%,transparent); -webkit-mask-image:linear-gradient(to bottom,transparent,black 20%,black 80%,transparent); }
 .lyric-line { font-size:22px; font-weight:600; color:var(--lyric-color); transition:all 0.5s cubic-bezier(0.25,1,0.5,1); margin-bottom:14px; min-height:30px; }
-.lyric-line.active { font-size:32px; font-weight:800; color:var(--lyric-active); margin-bottom:22px; transform:scale(1.03); transform-origin:left center; }
-
+.lyric-line.active { font-size:32px; font-weight:600; color:var(--lyric-active); margin-bottom:22px; transform:scale(1.03); transform-origin:center; }
 /* ─── 12. DSP DASHBOARD ─────────────────────────────────────── */
 .studio-dashboard { width:100%; max-height:80vh; padding:26px 28px; background:var(--dsp-bg); backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); border-radius:20px; border:1px solid var(--border); overflow-y:auto; display:flex; flex-direction:column; }
 .studio-header { margin-bottom:18px; }
@@ -1154,6 +1185,37 @@ body {
   box-shadow: 0 0 10px rgba(0,0,0,0.3);
 }
 
+/* ── Speaker Boost preset pill buttons inside glass menu ── */
+.glass-boost-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 2fr);
+  gap: 6px;
+}
+
+.glass-boost-btn {
+  padding: 7px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.glass-boost-btn:active {
+  transform: scale(0.93);
+}
+
+.glass-boost-btn.active {
+  font-weight: 700;
+}
+
 
 .bulk-scan-fab {
   position: fixed;
@@ -1209,4 +1271,237 @@ body {
   height: 100%;
   border-radius: 4px;
   transition: width 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+[data-tauri-drag-region="true"] {
+  -webkit-app-region: drag;
+}
+
+/* Ensure buttons block the drag so they can be clicked */
+.window-controls, .win-btn, .search-box {
+  -webkit-app-region: no-drag;
+}
+
+/* FIX: Center modals horizontally and vertically on PC so they don't hide behind the sidebar/player */
+.folder-modal-overlay {
+  justify-content: center; 
+}
+
+@media (min-width: 769px) {
+  .folder-modal-overlay {
+    align-items: center; 
+  }
+  
+  .folder-modal {
+    border-radius: 16px;
+    animation: popIn 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+}
+
+@keyframes popIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   PLAYLIST POPUP — Glassmorphism context menu (matches glass-options-menu)
+   Uses its own classes to avoid all conflicts with folder-modal animations.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.playlist-popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: overlayIn 0.15s ease;
+}
+
+.playlist-popup-glass {
+  width: 300px;
+  max-width: calc(100vw - 40px);
+  background: rgba(30, 30, 30, 0.55);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255,255,255,0.06) inset;
+  color: #ffffff;
+  animation: popIn 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.playlist-popup-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0 -4px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.playlist-popup-empty {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.38);
+  padding: 6px 4px 10px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.playlist-popup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 9px 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  text-align: left;
+  color: #fff;
+}
+
+.playlist-popup-item:hover,
+.playlist-popup-item:active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.playlist-popup-item-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.playlist-popup-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.playlist-popup-item-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playlist-popup-item-count {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.38);
+  margin-top: 1px;
+}
+
+.playlist-popup-item-add {
+  font-size: 16px;
+  color: var(--theme-color, rgba(255,255,255,0.5));
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.playlist-popup-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 12px 0;
+}
+
+.playlist-popup-form {
+  display: flex;
+  gap: 8px;
+}
+
+.playlist-popup-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+  -webkit-appearance: none;
+}
+
+.playlist-popup-input::placeholder {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.playlist-popup-input:focus {
+  border-color: var(--theme-color, rgba(255,255,255,0.4));
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.playlist-popup-create-btn {
+  background: var(--theme-color, rgba(255,255,255,0.15));
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: filter 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.playlist-popup-create-btn:hover { filter: brightness(1.15); }
+.playlist-popup-create-btn:active { filter: brightness(0.9); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DRAGGABLE PLAYLIST — Drag handle and drop target styles
+   ═══════════════════════════════════════════════════════════════════════════ */
+.drag-handle {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.22);
+  cursor: grab;
+  padding: 0 6px 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.track-item:hover .drag-handle {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Drop target: glowing left border + subtle background */
+.playlist-drag-over {
+  background: rgba(255, 255, 255, 0.04) !important;
+  box-shadow: inset 3px 0 0 var(--theme-color, rgba(255,255,255,0.6));
+}
+
+
+.drag-ghost {
+  transition: transform 0.05s linear;
+  backdrop-filter: blur(8px);
+  background: rgba(20, 20, 30, 0.9);
+  color: white;
+  font-weight: 500;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 10000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80vw;
+  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+}
+
+.playlist-drag-over {
+  border-top: 3px solid var(--theme-color);
+  background: rgba(255, 255, 255, 0.05);
+  transition: all 0.1s ease;
 }
