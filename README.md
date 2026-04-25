@@ -10,7 +10,7 @@ DmeX is designed for both casual listening and hardcore audio engineering. Here 
 
 ### 1. The High-Speed Library (Powered by SQLite)
 
-> *Place a screenshot of your main track list and sidebar here.*
+> ![Dmex List View and Landing page](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094381/Screenshot_278_wtqxwi.png)
 
 * **Instant Search & Sort:** Unlike standard players that parse massive JSON files into memory, DmeX queries a native SQLite database. You can search a 15,000+ track library in milliseconds.
 * **Bulk Management:** Click "☑ Select Multiple" to engage the bulk-selection mode. You can instantly add or remove hundreds of tracks from custom playlists without UI lag.
@@ -18,7 +18,12 @@ DmeX is designed for both casual listening and hardcore audio engineering. Here 
 
 ### 2. The Holographic 3D Visualizer
 
-> *Place a screenshot of the Lava Lamp or Radar visualizer running here.*
+![Lava Lamps Visualisation](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094503/Screenshot_279_f68bro.png)
+> *Lava Lamps Visuaisation with album art extracted colors*
+
+
+![3D Spatial Visualtiser with true sense of direction](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094567/Screenshot_281_zjuplx.png)
+> *3D Spatial Visualtiser with true sense of direction in 3 Dimensions*
 
 * **Phase-Accurate Representation:** This is not a random animation. The C++ engine calculates RMS volume, Left/Right Panning, and Phase Correlation every 32ms.
 * **Reading the Visuals:** If the "Treble Dust" or "Lava Lamp" elements push to the extreme edges of your screen, it means the audio phase correlation is out-of-phase (< 0.0), indicating a wide 3D stereo image.
@@ -26,7 +31,8 @@ DmeX is designed for both casual listening and hardcore audio engineering. Here 
 
 ### 3. The DSP Dashboard (Manual Overrides)
 
-> *Place a screenshot of the Fine Tune DSP menu showing the sliders here.*
+![DSP Dashboard](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094456/Screenshot_280_e6g3de.png)
+> *Digital Signal Processing Dashboard for customised Audio for your taste*
 
 Click the 🎛️ (Equalizer) icon in the player bar to open the DSP Dashboard.
 
@@ -53,7 +59,8 @@ The C++ core is built around mastering-grade acoustic math, eschewing standard "
 * **True Peak Limiting:** An oversampled limiter with a hard -0.3 dBFS brickwall ceiling ensures zero inter-sample clipping during downstream Digital-to-Analog (D/A) conversion.
 
 ## 🧠 Zero-NN Acoustic Machine Learning
-
+![Track Details View and the options in the music player](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777101600/Screenshot_284_otve58.png)
+> An image showing the options in the track options on the main Audio Display.
 Machine Learning in audio usually implies heavy, CPU-melting Neural Networks. DmeX takes a systems-engineering approach, utilizing deterministic acoustic feature extraction to instantly "fingerprint" a track and apply the perfect EQ/DSP profile in milliseconds:
 
 * **Crest Factor Analysis:** Measures the Peak-to-RMS ratio to instantly differentiate highly compressed electronic tracks from highly dynamic classical/acoustic recordings.
