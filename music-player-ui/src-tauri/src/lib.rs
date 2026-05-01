@@ -10,6 +10,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::audio::SampleBuffer;
 use std::fs::File;
+// use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CStr;
 
@@ -290,21 +291,57 @@ fn save_playlist(playlist: db::CustomPlaylist, state: State<'_, AppState>) -> Re
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
-            // Get the OS-specific app data directory
-            let app_data_dir = app.path()
-                .app_data_dir()
-                .expect("Failed to resolve app data dir");
+            let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            std::fs::create_dir_all(&app_dir).expect("Failed to create app data directory");
+            let db_path = app_dir.join("dmex_library.db");
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
 
-            // Initialize the SQLite database
-            let conn = db::init_db(app_data_dir).expect("Failed to initialize SQLite Database");
+            // CRITICAL FIX 1: duration is REAL, not INTEGER
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS tracks (
+                    path TEXT PRIMARY KEY,
+                    name TEXT,
+                    artist TEXT,
+                    album TEXT,
+                    year TEXT,
+                    quality TEXT,
+                    duration REAL,
+                    profile TEXT,
+                    metadataLoaded BOOLEAN,
+                    genre TEXT,
+                    isFavorite BOOLEAN,
+                    playCount INTEGER,
+                    totalSecondsListened INTEGER,
+                    thumb TEXT
+                )",
+                [],
+            ).expect("Failed to create tracks table");
 
-            // Pass the connection to Tauri's global state manager
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS playlists (
+                    id TEXT PRIMARY KEY,
+                    name TEXT
+                )",
+                [],
+            ).expect("Failed to create playlists table");
+
+            // CRITICAL FIX 2: Added the missing relational table for playlists
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS playlist_tracks (
+                    playlist_id TEXT,
+                    track_path TEXT,
+                    position INTEGER,
+                    PRIMARY KEY (playlist_id, track_path)
+                )",
+                [],
+            ).expect("Failed to create playlist_tracks table");
+
             app.manage(AppState {
-                db_conn: Mutex::new(conn),
+                db_conn: std::sync::Mutex::new(conn),
             });
 
             Ok(())

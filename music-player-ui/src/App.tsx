@@ -650,7 +650,7 @@ function App() {
   const [searchQuery, setSearchQuery]       = useState('');
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [showFolderModal, setShowFolderModal]   = useState(false);
-
+  const [isEnvDropdownOpen, setIsEnvDropdownOpen] = useState(false);
   const [albumArt, setAlbumArt]             = useState<string | null>(null);
   const [trackTitle, setTrackTitle]         = useState('Ready');
   const [trackArtist, setTrackArtist]       = useState('DmeX Player');
@@ -666,6 +666,8 @@ function App() {
   const [showDSPPage, setShowDSPPage]       = useState(false);
   const [isDarkMode, setIsDarkMode]         = useState(true);
   const [volume, setVolume]                 = useState(1.0);
+  const volumeRef                           = useRef(1.0);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
   const [isRemastered, setIsRemastered]     = useState(false);
   const [isCompressed, setIsCompressed]     = useState(false);
   const [upscaleDrive, setUpscaleDrive]     = useState(0.0);
@@ -681,8 +683,6 @@ const [smartTaste, setSmartTaste]         = useState<Taste>('ORIGINAL');
   const [bulkScanDone, setBulkScanDone]     = useState(0);
   const [bulkScanTotal, setBulkScanTotal]   = useState(0);
   const [isBulkScanOpen, setIsBulkScanOpen] = useState(false);
-  const [,setIsLimiterOn]       = useState(false);
-  const [speakerMode, setSpeakerMode]       = useState<'NONE'|'LOW'|'MED'|'HIGH'>('NONE');
   
   const [customPlaylists, setCustomPlaylists] = useState<CustomPlaylist[]>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -719,6 +719,8 @@ const [smartTaste, setSmartTaste]         = useState<Taste>('ORIGINAL');
   const [isManualOverride, setIsManualOverride] = useState(false);
   const [isFIRMode, setIsFIRMode] = useState(false);
   const [visMode, setVisMode] = useState<'ORBIT' | 'RADAR'>('ORBIT');
+  const [speakerMode, setSpeakerMode]       = useState<'NONE'|'LOW'|'MED'|'HIGH'>('NONE');
+  
 
   // Multi-band spatial imager refs — all DOM manipulation happens in the
   // rAF loop via these refs, zero React re-renders.
@@ -745,6 +747,8 @@ const isSeekingRef = useRef(false);
   const ripple1Ref = useRef<HTMLDivElement>(null);
   const ripple2Ref = useRef<HTMLDivElement>(null);
   const ripple3Ref = useRef<HTMLDivElement>(null);
+  const speakerModeRef  = useRef<'NONE'|'LOW'|'MED'|'HIGH'>('NONE');
+  useEffect(() => { speakerModeRef.current = speakerMode; }, [speakerMode]);
 
   // const lastMidLevel = useRef(0);
   const isDarkModeRef                       = useRef(isDarkMode);
@@ -810,13 +814,47 @@ const isSeekingRef = useRef(false);
     active: false, x: 0, y: 0, scale: 0, opacity: 0
   })));
 
-  
+
   const REVERB_ENVIRONMENTS = [
     { id: 'NONE', label: 'Off', path: '' },
-    { id: 'FOREST', label: 'Open Forest', path: 'resources/impulses/forest.wav' },
-    { id: 'EMT140', label: 'EMT-140', path: 'resources/impulses/emt140.wav' },
-    { id: 'byronglacieralaska', label: 'Byron Glacier Alaska', path: 'resources/impulses/byronglacieralaska.wav' },
-    { id: 'yogastudio', label: 'Yoga Studio', path: 'resources/impulses/yogastudio.wav' },
+    {id:'DTSXHeadphonewide',label:'DTS:X Headphone Wide',path:'resources/impulses/DTSXHeadphonewide.wav' },
+    {id:'SennheiserHD',label:'Sennheiser HD',path:'resources/impulses/SennheiserHD.wav' },
+    {id:'Head360',label:'Head-360',path:'resources/impulses/Head360.wav' },
+    {id:'XHRQSurround',label:'XHR-QSurround',path:'resources/impulses/XHRQSurround.wav' },
+    {id:'xiaomipiston2',label:'Xiaomi Piston 2',path:'resources/impulses/xiaomipiston2.wav' },
+    {id:'XHRStudioSurround',label:'XHR Studio Surround',path:'resources/impulses/XHRStudioSurround.wav' },
+    {id:'dolbybassboost',label:'Dolby Bass Boost',path:'resources/impulses/dolbybassboost.wav' },
+    {id:'dolbydimension',label:'Dolby Dimension',path:'resources/impulses/dolbydimension.wav' },
+    {id:'OppoPM3',label:'Oppo PM3',path:'resources/impulses/OppoPM3.wav' },
+    {id:'HyperXCloudalpha',label:'HyperX Cloud Alpha',path:'resources/impulses/HyperXCloudalpha.wav' },
+    {id:'AppleEarPods',label:'Apple EarPods',path:'resources/impulses/AppleEarPods.wav' },
+    {id:'AppleAirPods',label:'Apple AirPods',path:'resources/impulses/AppleAirPods.wav' },
+    {id:'AKGK240',label:'AKG K240',path:'resources/impulses/AKGK240.wav' },
+    {id:'SteelSeriesArctic9X',label:'SteelSeries Arctic 9X',path:'resources/impulses/SteelSeriesArctic9X.wav' },
+    { 
+      id: 'dolbyatmos', 
+      label: 'Dolby Atmos', 
+      // Put BOTH paths here, separated by the pipe |
+      path: 'resources/impulses/dolbyheadR.wav|resources/impulses/dolbyheadL.wav' 
+    },
+    { 
+      id: 'dolbyvirtualspeaker', 
+      label: 'Dolby Virtual', 
+      // Put BOTH paths here, separated by the pipe |
+      path: 'resources/impulses/dolbyvirtualspeakerL.wav|resources/impulses/dolbyvirtualspeakerR.wav' 
+    },
+    { 
+      id: 'Sony_WH1000XM2', 
+      label: 'Sony WH1000XM2L', 
+      // Put BOTH paths here, separated by the pipe |
+      path: 'resources/impulses/Sony_WH1000XM2L.wav|resources/impulses/Sony_WH1000XM2R.wav' 
+    },
+    { 
+      id: 'AKGK701', 
+      label: 'AKG K701', 
+      // Put BOTH paths here, separated by the pipe |
+      path: 'resources/impulses/AKGK701L.wav|resources/impulses/AKGK701R.wav' 
+    }
   ];
 
   
@@ -892,25 +930,36 @@ const isSeekingRef = useRef(false);
   
   useEffect(() => {
     async function boot() {
+      // 1. LOAD SQLITE TRACKS FIRST (Independent of JSON)
       try {
-        const store = await load("library.json", { autoSave: true, defaults: {} });
-        dbProcess.current = store;
-
-        // Fetch tracks AND metrics from SQLite
         const saved = await invoke<Track[]>('fetch_library');
-        if (saved?.length) {
+        console.log("SQLite Boot: Fetched", saved?.length || 0, "tracks");
+        if (saved && saved.length > 0) {
           playlistRef.current = saved;
           setPlaylist(saved);
           setFavorites(saved.filter(t => t.isFavorite).map(t => t.path)); // Hydrate favorites
         }
-        
-        // Fetch Playlists from SQLite
+      } catch (err) { 
+        console.error("CRITICAL: SQLite fetch_library failed in Rust:", err); 
+      }
+
+      // 2. LOAD SQLITE PLAYLISTS
+      try {
         const savedPlaylists = await invoke<CustomPlaylist[]>('get_playlists');
         if (savedPlaylists) setCustomPlaylists(savedPlaylists);
+      } catch (err) {
+        console.error("CRITICAL: SQLite get_playlists failed:", err);
+      }
 
+      // 3. LOAD LEGACY UI PREFERENCES
+      try {
+        const store = await load("library.json", { autoSave: true, defaults: {} });
+        dbProcess.current = store;
         const savedDark = await store.get<boolean>("isDarkMode");
         if (savedDark !== undefined && savedDark !== null) setIsDarkMode(savedDark);
-      } catch (err) { console.error(err); }
+      } catch (err) { 
+        console.error("Non-critical: Failed to load legacy library.json:", err); 
+      }
     }
     boot();
   }, []);
@@ -1484,73 +1533,68 @@ await writeToEngine(`FIRGAIN ${fb.toFixed(3)} ${fm.toFixed(3)} ${fh.toFixed(3)}`
     if (!needsEnrich.length) { enricherRunning.current = false; return; }
     setScanProgress(`Loading metadata for ${needsEnrich.length} tracks…`);
 
-    const BATCH = 30; const DELAY = 20;
-    let enriched = 0; 
+    let enriched = 0;
 
-    for (let i = 0; i < needsEnrich.length; i += BATCH) {
+    // FIX 1: Process ONE track at a time, absolutely no Promise.all batching.
+    for (const track of needsEnrich) {
       if (!enricherRunning.current) break;
-      const batch = needsEnrich.slice(i, i + BATCH);
 
-      const results = await Promise.all(batch.map(async (track) => {
-        try {
-          const raw = await invoke<number[] | string>('read_file_head', { path: track.path, maxBytes: 2097152 });          let uint8: Uint8Array;
-          if (typeof raw === 'string') {
-            const bin = atob(raw); uint8 = new Uint8Array(bin.length);
-            for (let j = 0; j < bin.length; j++) uint8[j] = bin.charCodeAt(j);
-          } else uint8 = new Uint8Array(raw);
+      try {
+        // FIX 2: Reduce IPC payload from 2MB to 500KB. 
+        // 500KB is more than enough to read ID3 tags and 99% of embedded album art.
+        const raw = await invoke<number[] | string>('read_file_head', { path: track.path, maxBytes: 512000 });
+        
+        let uint8: Uint8Array;
+        if (typeof raw === 'string') {
+          const bin = atob(raw); uint8 = new Uint8Array(bin.length);
+          for (let j = 0; j < bin.length; j++) uint8[j] = bin.charCodeAt(j);
+        } else uint8 = new Uint8Array(raw);
 
-          const meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) });
+        const meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) });
 
-          let thumbBase64 = track.thumb;
-          if (!thumbBase64 && meta.common.picture?.length) {
-            thumbBase64 = await generateThumbnail(meta.common.picture[0]) || undefined;
-          }
-
-          return { 
-            path: track.path, 
-            name: meta.common.title || track.name, 
-            artist: meta.common.artist || track.artist, 
-            album: meta.common.album || track.album, 
-            year: meta.common.year?.toString() || track.year, 
-            quality: meta.format.bitrate ? `${Math.round(meta.format.bitrate / 1000)} kbps` : track.quality, 
-            duration: meta.format.duration || track.duration, 
-            metadataLoaded: true,
-            genre: meta.common.genre?.[0] || track.genre || '',
-            thumb: thumbBase64 
-          };
-        } catch (_) { return { ...track, metadataLoaded: true }; }
-      }));
-
-      const updates = results as { path:string; name:string; artist:string; album:string; year:string; quality:string; duration:number; metadataLoaded:boolean }[];
-      
-      if (updates.length > 0) {
-        const updateMap = new Map(updates.map(u => [u.path, u]));
-        const nextPlaylist = playlistRef.current.map(t => {
-          const u = updateMap.get(t.path);
-          return u ? { ...t, ...u } : t;
-        });
-
-        playlistRef.current = nextPlaylist;
-        setPlaylist(nextPlaylist);
-
-        // ── SQLITE INTEGRATION: Update enriched tracks in DB ──
-        for (const u of updates) {
-          try {
-            await invoke('add_to_library', { track: u });
-          } catch (e) {}
+        let thumbBase64 = track.thumb;
+        if (!thumbBase64 && meta.common.picture?.length) {
+          thumbBase64 = await generateThumbnail(meta.common.picture[0]) || undefined;
         }
+
+        const updatedTrack = {
+          ...track,
+          name: meta.common.title || track.name,
+          artist: meta.common.artist || track.artist,
+          album: meta.common.album || track.album,
+          year: meta.common.year?.toString() || track.year,
+          quality: meta.format.bitrate ? `${Math.round(meta.format.bitrate / 1000)} kbps` : track.quality,
+          duration: meta.format.duration || track.duration,
+          metadataLoaded: true,
+          genre: meta.common.genre?.[0] || track.genre || '',
+          thumb: thumbBase64
+        };
+
+        // Update React State
+        setPlaylist(prev => prev.map(t => t.path === track.path ? updatedTrack : t));
+        playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updatedTrack : t);
+
+        // Save to SQLite instantly
+        await invoke('add_to_library', { track: updatedTrack });
+
+      } catch (_) {
+        // Mark as loaded even if it fails so we don't infinitely retry corrupt files
+        setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, metadataLoaded: true } : t));
       }
 
-      enriched += batch.length;
-      setScanProgress(`Loading metadata… ${Math.round((enriched / needsEnrich.length) * 100)}%`);
-      await new Promise(r => setTimeout(r, DELAY));
+      enriched++;
+      if (enriched % 3 === 0) {
+        setScanProgress(`Loading metadata… ${Math.round((enriched / needsEnrich.length) * 100)}%`);
+      }
+
+      // FIX 3: THE MAGIC BREATHER.
+      // This forces the JavaScript engine to pause for 1 frame, allowing the 
+      // C++ telemetry to update, the Canvas visualizer to draw, and the user to click/seek.
+      await new Promise(resolve => requestAnimationFrame(resolve));
     }
 
-    if (dbProcess.current) {
-      await dbProcess.current.set("user_playlist", playlistRef.current);
-      await dbProcess.current.save();
-    }
-    setScanProgress(''); enricherRunning.current = false;
+    setScanProgress('');
+    enricherRunning.current = false;
   }, []);
 
   useEffect(() => {
@@ -1641,10 +1685,10 @@ await writeToEngine(`FIRGAIN ${fb.toFixed(3)} ${fm.toFixed(3)} ${fh.toFixed(3)}`
 
     try {
       await Promise.all([
-        writeToEngine(`VOLUME ${volume}`), writeToEngine('REMASTER 0'), writeToEngine('COMPRESS 0'),
+        writeToEngine(`VOLUME ${volumeRef.current}`), writeToEngine('REMASTER 0'), writeToEngine('COMPRESS 0'),
         writeToEngine('UPSCALE 0'), writeToEngine('WIDEN 1.0'), writeToEngine('3D 0'), writeToEngine('REVERB 0'),
         writeToEngine(`BASS ${bassLevelRef.current}`),
-        writeToEngine(`LIMITER ${speakerMode === 'NONE' ? 0 : speakerMode === 'LOW' ? 0.3 : speakerMode === 'MED' ? 0.6 : 1.0}`),
+        writeToEngine(`LIMITER ${speakerModeRef.current === 'NONE' ? 0 : speakerModeRef.current === 'LOW' ? 0.3 : speakerModeRef.current === 'MED' ? 0.6 : 1.0}`),
         writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
       ]);
       if (id !== loadIdRef.current) return;
@@ -1872,85 +1916,106 @@ const TASTES: {id:Taste;icon:string;label:string}[] = [
     </div>
   );
 
-  const renderManualDSP = () => (
-    <div className="studio-dashboard fade-in">
-      <div className="studio-header"><h2>Fine Tune DSP</h2><p className="studio-subtitle">Manual override — resets on next track load</p></div>
-      <div className="manual-presets">
-        <button className="preset-btn studio"  onClick={()=>applyPreset('STUDIO')}>🎧 Studio</button>
-        <button className="preset-btn cinema"  onClick={()=>applyPreset('CINEMATIC')}>🍿 Cinematic</button>
-        <button className="preset-btn relax"   onClick={()=>applyPreset('RELAX')}>🌙 Relax</button>
-      </div>
-      <div className="dsp-grid">
-        <div className="dsp-card toggle-card">
-          <div className="dsp-toggle-group"><label>Old Song EQ</label><button className={`dsp-btn ${isRemastered?'active':''}`} onClick={()=>{const v=!isRemastered;setIsRemastered(v);writeToEngine(`REMASTER ${v?1:0}`)}}>{isRemastered?'ON':'BYPASS'}</button></div>
-          <div className="dsp-toggle-group"><label>Compressor</label><button className={`dsp-btn ${isCompressed?'active':''}`} onClick={()=>{const v=!isCompressed;setIsCompressed(v);writeToEngine(`COMPRESS ${v?1:0}`)}}>{isCompressed?'ON':'BYPASS'}</button></div>
+  const renderManualDSP = () => {
+    const isConvActive = selectedAcousticEnv !== 'NONE';
+    // 2. Create a disabled style for the native DSP nodes
+    const disabledStyle = { opacity: isConvActive ? 0.3 : 1, pointerEvents: isConvActive ? 'none' : 'auto', transition: 'opacity 0.3s' } as React.CSSProperties;
+    
+    return (
+      <div className="studio-dashboard fade-in">
+        <div className="studio-header"><h2>Fine Tune DSP</h2><p className="studio-subtitle">Manual override — resets on next track load</p></div>
+        <div className="manual-presets" style={disabledStyle}>
+          <button className="preset-btn studio" onClick={()=>applyPreset('STUDIO')}>🎧 Studio</button>
+          <button className="preset-btn cinema" onClick={()=>applyPreset('CINEMATIC')}>🍿 Cinematic</button>
+          <button className="preset-btn relax" onClick={()=>applyPreset('RELAX')}>🌙 Relax</button>
         </div>
+        <div className="dsp-grid">
+          
+          <div className="dsp-card toggle-card">
+            <div className="dsp-toggle-group"><label>Old Song EQ</label><button className={`dsp-btn ${isRemastered?'active':''}`} onClick={()=>{const v=!isRemastered;setIsRemastered(v);writeToEngine(`REMASTER ${v?1:0}`)}}>{isRemastered?'ON':'BYPASS'}</button></div>
+            <div className="dsp-toggle-group"><label>Compressor</label><button className={`dsp-btn ${isCompressed?'active':''}`} onClick={()=>{const v=!isCompressed;setIsCompressed(v);writeToEngine(`COMPRESS ${v?1:0}`)}}>{isCompressed?'ON':'BYPASS'}</button></div>
+          </div>
         
-        {/* NEW: CONVOLUTION REVERB DROPDOWN */}
-        <div className="dsp-card">
+        {/* NEW: CUSTOM GLASSMORPHISM CONVOLUTION DROPDOWN */}
+        <div className="dsp-card" style={{ position: 'relative' }}>
           <div className="dsp-label-row">
             <label>Acoustic Environment (Convolution)</label>
           </div>
-          <select 
-            className="search-input" 
-            style={{ marginTop: '8px', cursor: 'pointer', background: 'var(--bg-search)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            value={selectedAcousticEnv}
-            onChange={async (e) => {
-              const val = e.target.value;
-              setSelectedAcousticEnv(val);
-              const env = REVERB_ENVIRONMENTS.find(r => r.id === val);
-              
-              if (env && env.path) {
-                try {
-                  const fullPath = await resolveResource(env.path);
-                  writeToEngine(`LOAD_IR ${fullPath}`);
-                  // 0.35 wet: The transparent filter design (80Hz HP + 16kHz LP) means
-                  // this value gives a full, rich plate sound without washing out vocals.
-                  // Unlike the original 0.4 (which attenuated dry), here dry=1.0 always,
-                  // so the reverb is purely additive and 0.35 sounds balanced.
-                  writeToEngine(`CONVOLUTION 0.35`);
-                  setIsManualOverride(true); // <--- NEW: Lock the smart pills
-                  setSmartTaste('QUALITY' as Taste); // Reset the visual pill state
-                } catch (err) {
-                  console.error("Failed to load IR resource:", err);
-                }
-              } else {
-                writeToEngine(`LOAD_IR `); 
-                writeToEngine(`CONVOLUTION 0.0`);
-                setIsManualOverride(false); // <--- NEW: Unlock the smart pills
-              }
-            }}
+          
+          {/* The Clickable Header */}
+          <div 
+            onClick={() => setIsEnvDropdownOpen(!isEnvDropdownOpen)}
+            style={{ marginTop: '8px', padding: '10px 14px', cursor: 'pointer', background: 'rgba(255,255,255,0.08)', color: 'var(--text-primary)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
           >
-            {REVERB_ENVIRONMENTS.map(env => (
-              <option key={env.id} value={env.id}>{env.label}</option>
-            ))}
-          </select>
-        </div>
-
-<div className="dsp-card">
-          <div className="dsp-label-row">
-            <label>Tube Exciter (Air)</label>
-            <span style={{ color: '#00e676', fontWeight: 600 }}>{Math.round(upscaleDrive * 50)}%</span>
+            <span>{REVERB_ENVIRONMENTS.find(r => r.id === selectedAcousticEnv)?.label || 'Off'}</span>
+            <span style={{ fontSize: '12px', opacity: 0.7 }}>▼</span>
           </div>
-          <input 
-            type="range" 
-            className="dsp-slider" 
-            min="0" 
-            max="2.0" 
-            step="0.05" 
-            value={upscaleDrive} 
-            onChange={e => {
-              const v = parseFloat(e.target.value);
-              setUpscaleDrive(v);
-              writeToEngine(`UPSCALE ${v}`);
-            }}
-          />
-        </div>      <div className="dsp-card"><div className="dsp-label-row"><label>Stereo Width</label><span className="val-blue">{Math.round((widenWidth-1)*100)}% extra</span></div><input type="range" className="dsp-slider widener" min="1" max="1.5" step="0.05" value={widenWidth} onChange={e=>{const v=parseFloat(e.target.value);setWidenWidth(v);writeToEngine(`WIDEN ${v}`)}}/></div>
-        <div className="dsp-card"><div className="dsp-label-row"><label>3D Depth</label><span className="val-purple">{spatialExtra>0?`+${Math.round(spatialExtra*100)}%`:'Base'}</span></div><input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={spatialExtra} onChange={e=>{const v=parseFloat(e.target.value);setSpatialExtra(v);writeToEngine(`3D ${v}`)}}/></div>
-        <div className="dsp-card"><div className="dsp-label-row"><label>Digital Reverb (Algorithmic)</label><span className="val-orange">{Math.round(reverbWet*100)}%</span></div><input type="range" className="dsp-slider reverb" min="0" max="0.35" step="0.01" value={reverbWet} onChange={e=>{const v=parseFloat(e.target.value);setReverbWet(v);writeToEngine(`REVERB ${v}`)}}/></div>
+
+          {/* The Glassmorphism Dropdown Menu */}
+          {isEnvDropdownOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 98 }} onClick={() => setIsEnvDropdownOpen(false)} />
+              <div className="glass-options-menu fade-in" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 99, marginTop: '8px', padding: '6px', maxHeight: '250px', overflowY: 'auto' }}>
+                {REVERB_ENVIRONMENTS.map(env => (
+                  <div 
+                    key={env.id} 
+                    style={{ padding: '12px 14px', borderRadius: '6px', cursor: 'pointer', background: selectedAcousticEnv === env.id ? 'rgba(255,255,255,0.15)' : 'transparent', transition: 'background 0.2s' }}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setIsEnvDropdownOpen(false);
+                      setSelectedAcousticEnv(env.id);
+                      
+                      if (env.path) {
+                        try {
+                          const fullPath = await resolveResource(env.path);
+                          if (env.path.includes('|')) {
+                             const [pathL, pathR] = env.path.split('|');
+                             const fullPathL = await resolveResource(pathL);
+                             const fullPathR = await resolveResource(pathR);
+                             writeToEngine(`LOAD_IR_DUAL ${fullPathL}|${fullPathR}`);
+                          } else {
+                             writeToEngine(`LOAD_IR ${fullPath}`);
+                          }
+                          writeToEngine(`CONVOLUTION 0.35`);
+                          setIsManualOverride(true); 
+                          setSmartTaste('QUALITY' as Taste); 
+                        } catch (err) { console.error(err); }
+                      } else {
+                        writeToEngine(`LOAD_IR `); 
+                        writeToEngine(`CONVOLUTION 0.0`);
+                        setIsManualOverride(false); 
+                      }
+                    }}
+                  >
+                    {env.label}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+<div className="dsp-card" style={disabledStyle}>
+            <div className="dsp-label-row"><label>Tube Exciter (Air)</label><span style={{ color: '#00e676', fontWeight: 600 }}>{Math.round(upscaleDrive * 50)}%</span></div>
+            <input type="range" className="dsp-slider" min="0" max="2.0" step="0.05" value={upscaleDrive} onChange={e => { const v = parseFloat(e.target.value); setUpscaleDrive(v); writeToEngine(`UPSCALE ${v}`); }}/>
+          </div>      
+          <div className="dsp-card" style={disabledStyle}>
+            <div className="dsp-label-row"><label>Stereo Width</label><span className="val-blue">{Math.round((widenWidth-1)*100)}% extra</span></div>
+            <input type="range" className="dsp-slider widener" min="1" max="1.5" step="0.05" value={widenWidth} onChange={e=>{const v=parseFloat(e.target.value);setWidenWidth(v);writeToEngine(`WIDEN ${v}`)}}/>
+          </div>
+          <div className="dsp-card" style={disabledStyle}>
+            <div className="dsp-label-row"><label>3D Depth</label><span className="val-purple">{spatialExtra>0?`+${Math.round(spatialExtra*100)}%`:'Base'}</span></div>
+            <input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={spatialExtra} onChange={e=>{const v=parseFloat(e.target.value);setSpatialExtra(v);writeToEngine(`3D ${v}`)}}/>
+          </div>
+          <div className="dsp-card" style={disabledStyle}>
+            <div className="dsp-label-row"><label>Digital Reverb (Algorithmic)</label><span className="val-orange">{Math.round(reverbWet*100)}%</span></div>
+            <input type="range" className="dsp-slider reverb" min="0" max="0.35" step="0.01" value={reverbWet} onChange={e=>{const v=parseFloat(e.target.value);setReverbWet(v);writeToEngine(`REVERB ${v}`)}}/>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+
 
   const renderExpandedControls = () => {
     const isLong = trackTitle.length > 25; const artistIsLong = trackArtist.length > 30;
@@ -2530,7 +2595,8 @@ const TASTES: {id:Taste;icon:string;label:string}[] = [
                                 } : undefined}
                                 onClick={() => {
                                   setSpeakerMode(mode);
-                                  setIsLimiterOn(mode !== 'NONE');
+                                  // Send the raw value to C++. The Limiter is permanent, 
+                                  // so 0 means "no boost", 1.0 means "max boost".
                                   const val = mode === 'NONE' ? 0 : mode === 'LOW' ? 0.3 : mode === 'MED' ? 0.6 : 1.0;
                                   writeToEngine(`LIMITER ${val}`);
                                 }}

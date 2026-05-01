@@ -1,23 +1,22 @@
 use rusqlite::{Connection, Result};
-use std::fs;
-use std::path::PathBuf;
 
-// Updated Track struct to map directly to your React state
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Track {
-    pub id: String,
     pub path: String,
-    #[serde(rename = "name")] // Maps Rust 'title' to React 'name'
-    pub title: String,         
+    pub name: String,
     pub artist: String,
     pub album: String,
-    pub genre: String,
+    pub year: Option<String>,
+    pub quality: Option<String>,
     pub duration: f64,
-    pub is_favorite: bool,
-    pub play_count: i32,
-    pub total_seconds_listened: i32,
     pub profile: Option<String>,
+    pub metadata_loaded: Option<bool>,
+    pub genre: Option<String>,
+    pub is_favorite: Option<bool>,
+    pub play_count: Option<i32>,
+    pub total_seconds_listened: Option<i32>,
+    pub thumb: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -28,85 +27,74 @@ pub struct CustomPlaylist {
     pub track_paths: Vec<String>,
 }
 
-pub fn init_db(app_data_dir: PathBuf) -> Result<Connection> {
-    if !app_data_dir.exists() {
-        fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
-    }
-
-    let db_path = app_data_dir.join("dmex_library.db");
-    let conn = Connection::open(db_path)?;
-
-    // 1. The Main Tracks Table
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS tracks (
-            id TEXT PRIMARY KEY,
-            path TEXT UNIQUE NOT NULL,
-            title TEXT NOT NULL,
-            artist TEXT NOT NULL,
-            album TEXT NOT NULL,
-            genre TEXT NOT NULL,
-            duration REAL NOT NULL
-        )",
-        [],
-    )?;
-
-    // Failsafe: Add the new columns to the existing DB without crashing
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN is_favorite BOOLEAN DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN play_count INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN total_seconds_listened INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN profile TEXT", []);
-
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_artist ON tracks (artist)", [])?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_album ON tracks (album)", [])?;
-
-    // 2. Playlists Relational Tables
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS playlists (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL
-        )",
-        [],
-    )?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS playlist_tracks (
-            playlist_id TEXT,
-            track_path TEXT,
-            position INTEGER,
-            PRIMARY KEY (playlist_id, track_path)
-        )",
-        [],
-    )?;
-
-    Ok(conn)
-}
-
 pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
     conn.execute(
-        "INSERT INTO tracks (id, path, title, artist, album, genre, duration)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(path) DO UPDATE SET
-            title = excluded.title,
+        "INSERT INTO tracks (
+            path, name, artist, album, year, quality, duration, 
+            profile, metadataLoaded, genre, isFavorite, playCount, 
+            totalSecondsListened, thumb
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        ON CONFLICT(path) DO UPDATE SET
+            name = excluded.name,
             artist = excluded.artist,
             album = excluded.album,
+            year = excluded.year,
+            quality = excluded.quality,
+            duration = excluded.duration,
+            metadataLoaded = excluded.metadataLoaded,
             genre = excluded.genre,
-            duration = excluded.duration",
-            // Notice we do NOT overwrite favorites, play counts, or profiles here!
+            thumb = excluded.thumb",
         (
-            &track.id, &track.path, &track.title, &track.artist,
-            &track.album, &track.genre, track.duration,
+            &track.path, &track.name, &track.artist, &track.album,
+            &track.year, &track.quality, track.duration,
+            &track.profile, track.metadata_loaded.unwrap_or(false),
+            &track.genre, track.is_favorite.unwrap_or(false),
+            track.play_count.unwrap_or(0),
+            track.total_seconds_listened.unwrap_or(0),
+            &track.thumb
         ),
     )?;
     Ok(())
 }
 
+pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb 
+         FROM tracks ORDER BY artist, album, name"
+    )?;
+    
+    let track_iter = stmt.query_map([], |row| {
+        Ok(Track {
+            path: row.get(0)?,
+            name: row.get(1)?,
+            artist: row.get(2)?,
+            album: row.get(3)?,
+            year: row.get(4).unwrap_or(None),
+            quality: row.get(5).unwrap_or(None),
+            duration: row.get(6)?,
+            profile: row.get(7).unwrap_or(None),
+            metadata_loaded: row.get(8).unwrap_or(Some(false)),
+            genre: row.get(9).unwrap_or(None),
+            is_favorite: row.get(10).unwrap_or(Some(false)),
+            play_count: row.get(11).unwrap_or(Some(0)),
+            total_seconds_listened: row.get(12).unwrap_or(Some(0)),
+            thumb: row.get(13).unwrap_or(None),
+        })
+    })?;
+
+    let mut tracks = Vec::new();
+    for track in track_iter { tracks.push(track?); }
+    Ok(tracks)
+}
+
 pub fn toggle_favorite(conn: &Connection, path: &str, is_favorite: bool) -> Result<()> {
-    conn.execute("UPDATE tracks SET is_favorite = ?1 WHERE path = ?2", (is_favorite, path))?;
+    conn.execute("UPDATE tracks SET isFavorite = ?1 WHERE path = ?2", (is_favorite, path))?;
     Ok(())
 }
 
 pub fn update_play_stats(conn: &Connection, path: &str, seconds: i32) -> Result<()> {
-    conn.execute("UPDATE tracks SET play_count = play_count + 1, total_seconds_listened = total_seconds_listened + ?1 WHERE path = ?2", (seconds, path))?;
+    conn.execute("UPDATE tracks SET playCount = playCount + 1, totalSecondsListened = totalSecondsListened + ?1 WHERE path = ?2", (seconds, path))?;
     Ok(())
 }
 
@@ -141,23 +129,4 @@ pub fn get_playlists(conn: &Connection) -> Result<Vec<CustomPlaylist>> {
     let mut playlists = Vec::new();
     for pl in pl_iter { playlists.push(pl?); }
     Ok(playlists)
-}
-
-pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, genre, duration, is_favorite, play_count, total_seconds_listened, profile FROM tracks ORDER BY artist, album, title")?;
-    
-    let track_iter = stmt.query_map([], |row| {
-        Ok(Track {
-            id: row.get(0)?, path: row.get(1)?, title: row.get(2)?,
-            artist: row.get(3)?, album: row.get(4)?, genre: row.get(5)?, duration: row.get(6)?,
-            is_favorite: row.get(7).unwrap_or(false),
-            play_count: row.get(8).unwrap_or(0),
-            total_seconds_listened: row.get(9).unwrap_or(0),
-            profile: row.get(10).unwrap_or(None),
-        })
-    })?;
-
-    let mut tracks = Vec::new();
-    for track in track_iter { tracks.push(track?); }
-    Ok(tracks)
 }
