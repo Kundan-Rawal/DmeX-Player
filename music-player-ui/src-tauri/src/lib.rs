@@ -1,5 +1,3 @@
-
-
 use walkdir::WalkDir;
 use std::ffi::CString;
 use std::os::raw::c_char;
@@ -18,12 +16,23 @@ mod db; // Import our new database module
 
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{State, Manager};
+use tauri::{State, Manager, Emitter};
 
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
 
 struct AppState {
     db_conn: Mutex<Connection>,
+}
+
+// ------------------------------------------------------------------
+// NEW: Drip-Feed Metadata Struct
+// ------------------------------------------------------------------
+#[derive(Clone, serde::Serialize)]
+pub struct TrackMeta {
+    pub title: String,
+    pub artist: String,
+    pub file_path: String,
+    pub art_uri: Option<String>,
 }
 
 // ------------------------------------------------------------------
@@ -142,7 +151,6 @@ pub extern "C" fn rust_free_audio_buffer(ptr: *mut RustAudioBuffer) {
 extern "C" {
     fn init_audio_engine();
     fn execute_audio_command(cmd: *const c_char);
-    // FIX: Match C++ signature exactly (requires 2 pointers)
     fn get_audio_metrics(out_data: *mut f32, out_level: *mut f32);
     fn analyze_audio(sc: *mut f32, cf: *mut f32, zcr: *mut f32, rms: *mut f32) -> bool;
 }
@@ -177,7 +185,6 @@ fn audio_command(cmd: String) {
     }
 }
 
-
 #[tauri::command]
 fn fetch_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
     let conn = state.db_conn.lock().unwrap();
@@ -198,12 +205,10 @@ fn add_to_library(track: db::Track, state: State<'_, AppState>) -> Result<(), St
 
 #[tauri::command]
 fn audio_metrics() -> Vec<f32> {
-    // Collect 10 elements from out_data array + 1 element from out_level
     let mut data = vec![0.0f32; 10]; 
     let mut level: f32 = 0.0;
     
     unsafe {
-        // FIX: Provide both memory addresses so C++ doesn't segfault
         get_audio_metrics(data.as_mut_ptr(), &mut level);
     }
     
@@ -213,7 +218,6 @@ fn audio_metrics() -> Vec<f32> {
         0.0 
     };
 
-    // Return the exact 12 values App.tsx is waiting for
     vec![
         data[0], data[1], data[2], data[3], data[4], data[5], 
         data[6], data[7], data[8], data[9], level, finished
@@ -243,6 +247,9 @@ async fn read_file_head(path: String, max_bytes: usize) -> Result<Vec<u8>, Strin
     }).await.map_err(|e| format!("Thread error: {}", e))?
 }
 
+// ------------------------------------------------------------------
+// YOUR ORIGINAL SCANNER (UNTOUCHED FOR PC)
+// ------------------------------------------------------------------
 #[tauri::command]
 async fn scan_directory(path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || scan_audio_paths(&path)).await.map_err(|e| format!("Thread error: {}", e))
@@ -256,6 +263,71 @@ async fn scan_mobile_audio() -> Result<Vec<String>, String> {
         for root in &roots { paths.extend(scan_audio_paths(root)); }
         paths.sort(); paths.dedup(); paths
     }).await.map_err(|e| format!("Thread error: {}", e))
+}
+
+// =======================================================
+// FENCED OPTIMIZATION: Drip-Feed Scanner ONLY for Android
+// =======================================================
+#[tauri::command]
+async fn scan_android_music(app_handle: tauri::AppHandle, folder_path: String) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(())
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut chunk = Vec::new();
+            let mut all_paths = Vec::new();
+            
+            // If React says 'ALL', scan everything. Otherwise, scan the specific folder picked.
+            if folder_path == "ALL" {
+                let roots = [
+                    "/storage/emulated/0/Music", 
+                    "/storage/emulated/0/Download", 
+                    "/storage/emulated/0/Downloads", 
+                    "/storage/emulated/0/DCIM",
+                    // Adding common places Android hides audio
+                    "/storage/emulated/0/Audiobooks",
+                    "/storage/emulated/0/Podcasts",
+                    "/storage/emulated/0/WhatsApp/Media/WhatsApp Audio"
+                ];
+                for root in &roots {
+                    all_paths.extend(scan_audio_paths(root));
+                }
+            } else {
+                all_paths.extend(scan_audio_paths(&folder_path));
+            }
+            
+            all_paths.sort(); 
+            all_paths.dedup();
+
+            for path_str in all_paths {
+                let path = std::path::Path::new(&path_str);
+                
+                let title = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                
+                chunk.push(TrackMeta {
+                    title,
+                    artist: "Unknown Artist".to_string(),
+                    file_path: path_str,
+                    art_uri: None, 
+                });
+
+                if chunk.len() >= 50 {
+                    let _ = app_handle.emit("metadata_chunk", chunk.clone());
+                    chunk.clear();
+                }
+            }
+
+            if !chunk.is_empty() {
+                let _ = app_handle.emit("metadata_chunk", chunk);
+            }
+            let _ = app_handle.emit("scan_complete", ());
+        });
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -300,7 +372,6 @@ pub fn run() {
             let db_path = app_dir.join("dmex_library.db");
             let conn = rusqlite::Connection::open(&db_path).unwrap();
 
-            // CRITICAL FIX 1: duration is REAL, not INTEGER
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS tracks (
                     path TEXT PRIMARY KEY,
@@ -329,7 +400,6 @@ pub fn run() {
                 [],
             ).expect("Failed to create playlists table");
 
-            // CRITICAL FIX 2: Added the missing relational table for playlists
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS playlist_tracks (
                     playlist_id TEXT,
@@ -349,7 +419,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fetch_library, add_to_library,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist,
-            audio_command, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio
+            audio_command, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
+            scan_android_music // <-- CRITICAL: Register the new command here!
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

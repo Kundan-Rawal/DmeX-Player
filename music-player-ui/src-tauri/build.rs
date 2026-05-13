@@ -7,6 +7,12 @@ fn main() {
     
     cc::Build::new()
         .cpp(true)
-        .file("../../audio-engine-cpp/main.cpp")
+        .file("../../audio-engine-cpp/EngineCore.cpp")
+        .file("../../audio-engine-cpp/DSP_Nodes.cpp")
+        .file("../../audio-engine-cpp/Telemetry.cpp")
+        .file("../../audio-engine-cpp/CommandParser.cpp")
+        // Keep whatever compiler flags or include paths you already had here:
+        .flag_if_supported("-std=c++17")
+        .flag_if_supported("-O3") // Ensure optimizations are on for audio!
         .compile("audioengine");
 }
