@@ -6,12 +6,25 @@
 extern std::atomic<float> g_audioLevel;
 extern float g_bassGain;
 extern std::mutex g_irMutex;
+extern bool g_isConvolutionOn;
+extern bool g_isFIRModeOn;
+extern bool g_isRemasterOn;
+extern bool g_isUpscaleOn;
+extern bool g_isWidenOn;
+extern bool g_isCompressOn;
+extern bool g_isReverbOn;
 
 // ================================================================
 // STUDIO AURAL EXCITER
 // ================================================================
 static void exciter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
+    if (!g_isUpscaleOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
     StudioExciterNode *p = (StudioExciterNode *)pNode;
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
@@ -46,6 +59,12 @@ ma_node_vtable g_exciter_vtable = {exciter_process, NULL, 1, 1, 0};
 // ================================================================
 static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
+    if (!g_isWidenOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
     StereoWidenerNode *p = (StereoWidenerNode *)pNode;
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
@@ -68,6 +87,13 @@ ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
 static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     PsychoacousticNode *p = (PsychoacousticNode *)pNode;
+    if (p->spatialIntensity < 0.001f)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
+
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
@@ -148,6 +174,13 @@ ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0}
 static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     AudiophileEQNode *p = (AudiophileEQNode *)pNode;
+    if (!g_isFIRModeOn && !g_isRemasterOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
+
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
@@ -259,6 +292,12 @@ static float ap_tick(AllPassFilter *a, float in)
 static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     ReverbNode *r = (ReverbNode *)pNode;
+    if (!g_isReverbOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
@@ -341,6 +380,12 @@ ma_node_vtable g_subwoofer_vtable = {subwoofer_process, NULL, 1, 1, 0};
 static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     ConvolutionNode *p = (ConvolutionNode *)pNode;
+    if (!g_isConvolutionOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
@@ -405,6 +450,12 @@ ma_node_vtable g_convolution_vtable = {convolution_process, NULL, 1, 1, 0};
 static void multiband_compressor_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     MultibandCompressorNode *c = (MultibandCompressorNode *)pNode;
+    if (!g_isCompressOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;

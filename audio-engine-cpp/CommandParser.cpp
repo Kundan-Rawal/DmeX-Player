@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstring>
 #include <cmath>
+#include <mutex>
 
 #define MAX_IR_SAMPLES 2048
 
@@ -19,6 +20,7 @@ extern "C"
     {
         float *data;
         uint64_t total_samples;
+        uint64_t capacity; // <-- CRITICAL: YOU MUST ADD THIS LINE HERE
         uint32_t channels;
         uint32_t sample_rate;
     };
@@ -35,27 +37,32 @@ struct MemoryDataSource
 
 static ma_result mem_ds_read(ma_data_source *pDS, void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead)
 {
+    std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
     MemoryDataSource *m = (MemoryDataSource *)pDS;
-    // CRITICAL FIX: Protect against 0 channels from corrupt decodes
+
     if (!m->buffer || m->buffer->channels == 0)
         return MA_INVALID_OPERATION;
 
     uint64_t total_frames = m->buffer->total_samples / m->buffer->channels;
     uint64_t frames_left = total_frames - m->cursor_frames;
     uint64_t to_read = (frameCount < frames_left) ? frameCount : frames_left;
+
     if (to_read > 0)
     {
         uint64_t sample_offset = m->cursor_frames * m->buffer->channels;
         memcpy(pFramesOut, m->buffer->data + sample_offset, to_read * m->buffer->channels * sizeof(float));
         m->cursor_frames += to_read;
     }
+
     if (pFramesRead)
         *pFramesRead = to_read;
+
     return (to_read < frameCount) ? MA_AT_END : MA_SUCCESS;
 }
 
 static ma_result mem_ds_seek(ma_data_source *pDS, ma_uint64 frameIndex)
 {
+    std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
     MemoryDataSource *m = (MemoryDataSource *)pDS;
     if (!m->buffer || m->buffer->channels == 0)
         return MA_INVALID_OPERATION;
@@ -109,8 +116,12 @@ bool g_usingSymphonia = false;
 // ================================================================
 // EXPORTED API FOR RUST/REACT
 // ================================================================
+static std::mutex g_commandMutex;
+
 extern "C" void execute_audio_command(const char *cmd_in)
 {
+    std::lock_guard<std::mutex> cmdLock(g_commandMutex);
+
     if (!g_engineInitialized)
         init_audio_engine();
     if (!g_engineInitialized)
@@ -127,11 +138,15 @@ extern "C" void execute_audio_command(const char *cmd_in)
         {
             ma_sound_stop(&g_sound);
             ma_sound_uninit(&g_sound);
-            if (g_usingSymphonia && g_symSource.buffer)
+
             {
-                rust_free_audio_buffer(g_symSource.buffer);
-                g_symSource.buffer = nullptr;
-                g_usingSymphonia = false;
+                std::lock_guard<std::mutex> lock(g_audioMutex);
+                if (g_usingSymphonia && g_symSource.buffer)
+                {
+                    rust_free_audio_buffer(g_symSource.buffer);
+                    g_symSource.buffer = nullptr;
+                    g_usingSymphonia = false;
+                }
             }
             g_soundInitialized = false;
         }
@@ -140,12 +155,15 @@ extern "C" void execute_audio_command(const char *cmd_in)
         RustAudioBuffer *new_buf = rust_decode_file(args.c_str());
         if (new_buf)
         {
-            memset(&g_symSource, 0, sizeof(g_symSource));
-            ma_data_source_config baseConfig = ma_data_source_config_init();
-            baseConfig.vtable = &g_mem_vtable;
-            ma_data_source_init(&baseConfig, &g_symSource.base);
-            g_symSource.buffer = new_buf;
-            g_symSource.cursor_frames = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_audioMutex);
+                memset(&g_symSource, 0, sizeof(g_symSource));
+                ma_data_source_config baseConfig = ma_data_source_config_init();
+                baseConfig.vtable = &g_mem_vtable;
+                ma_data_source_init(&baseConfig, &g_symSource.base);
+                g_symSource.buffer = new_buf;
+                g_symSource.cursor_frames = 0;
+            }
 
             if (ma_sound_init_from_data_source(&g_engine, &g_symSource, 0, NULL, &g_sound) == MA_SUCCESS)
             {
@@ -155,11 +173,13 @@ extern "C" void execute_audio_command(const char *cmd_in)
                     std::lock_guard<std::mutex> lk(g_pathMutex);
                     g_lastLoadedPath = args;
                 }
-                updateRouting();
+                updateRouting(); // <--- ONLY NEEDED ON LOAD NOW
             }
             else
             {
+                std::lock_guard<std::mutex> lock(g_audioMutex);
                 rust_free_audio_buffer(new_buf);
+                g_symSource.buffer = nullptr;
                 std::lock_guard<std::mutex> lk(g_pathMutex);
                 g_lastLoadedPath.clear();
             }
@@ -179,8 +199,26 @@ extern "C" void execute_audio_command(const char *cmd_in)
                     std::lock_guard<std::mutex> lk(g_pathMutex);
                     g_lastLoadedPath = args;
                 }
-                updateRouting();
+                updateRouting(); // <--- ONLY NEEDED ON LOAD NOW
             }
+        }
+    }
+    else if (command == "STOP")
+    {
+        if (g_soundInitialized)
+        {
+            ma_sound_stop(&g_sound);
+            ma_sound_uninit(&g_sound);
+            {
+                std::lock_guard<std::mutex> lock(g_audioMutex);
+                if (g_usingSymphonia && g_symSource.buffer)
+                {
+                    rust_free_audio_buffer(g_symSource.buffer);
+                    g_symSource.buffer = nullptr;
+                    g_usingSymphonia = false;
+                }
+            }
+            g_soundInitialized = false;
         }
     }
     else if (command == "PLAY" && g_soundInitialized)
@@ -194,10 +232,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
         ma_uint32 sr = ma_engine_get_sample_rate(&g_engine);
         ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(stof(args) * (float)sr));
 
-        // CRITICAL FIX: Updated to clear the new mono bass states
         g_subwooferNode.lp1L = g_subwooferNode.lp2L = g_subwooferNode.lp1R = g_subwooferNode.lp2R = 0.0f;
-
-        // CRITICAL FIX: Flush the newly structured 3D HRTF buffers to prevent audio pops on seek
         memset(g_spatializerNode.haasBufL, 0, sizeof(g_spatializerNode.haasBufL));
         memset(g_spatializerNode.itdBufL, 0, sizeof(g_spatializerNode.itdBufL));
         memset(g_spatializerNode.itdBufR, 0, sizeof(g_spatializerNode.itdBufR));
@@ -210,56 +245,61 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "REMASTER")
     {
         g_isRemasterOn = (stoi(args) == 1);
-        updateRouting();
+        if (g_isRemasterOn)
+        {
+            g_audiophileEQNode.targetBass.store(1.6f, std::memory_order_relaxed);
+            g_audiophileEQNode.targetMid.store(0.7f, std::memory_order_relaxed);
+            g_audiophileEQNode.targetHigh.store(1.4f, std::memory_order_relaxed);
+        }
+        else if (!g_isFIRModeOn)
+        {
+            g_audiophileEQNode.targetBass.store(1.0f, std::memory_order_relaxed);
+            g_audiophileEQNode.targetMid.store(1.0f, std::memory_order_relaxed);
+            g_audiophileEQNode.targetHigh.store(1.0f, std::memory_order_relaxed);
+        }
     }
     else if (command == "FIRMODE")
     {
         g_isFIRModeOn = (stoi(args) == 1);
-        updateRouting();
     }
     else if (command == "FIRGAIN")
     {
         float b = 1.15f, m = 0.90f, h = 1.15f;
         sscanf(args.c_str(), "%f %f %f", &b, &m, &h);
-
-        // CRITICAL FIX: Removed the massive 1.5x multiplier. Clamped safely to 2.0.
         auto clamp = [](float v)
         { return v < 0.0f ? 0.0f : v > 2.0f ? 2.0f
                                             : v; };
-
-        g_audiophileEQNode.targetBass.store(clamp(b), std::memory_order_relaxed);
-        g_audiophileEQNode.targetMid.store(clamp(m), std::memory_order_relaxed);
-        g_audiophileEQNode.targetHigh.store(clamp(h), std::memory_order_relaxed);
+        if (g_isFIRModeOn)
+        {
+            g_audiophileEQNode.targetBass.store(clamp(b), std::memory_order_relaxed);
+            g_audiophileEQNode.targetMid.store(clamp(m), std::memory_order_relaxed);
+            g_audiophileEQNode.targetHigh.store(clamp(h), std::memory_order_relaxed);
+        }
     }
     else if (command == "COMPRESS")
     {
         g_isCompressOn = (stoi(args) == 1);
-        updateRouting();
     }
     else if (command == "UPSCALE")
     {
         float d = stof(args);
         g_exciterNode.targetDrive = d * 4.0f;
         g_isUpscaleOn = (d > 0.01f);
-        updateRouting();
     }
     else if (command == "WIDEN")
     {
         float w = stof(args);
         g_widenerNode.width = w;
         g_isWidenOn = (w > 1.01f);
-        updateRouting();
     }
     else if (command == "3D")
     {
         float val = stof(args);
         g_spatializerNode.spatialIntensity = val * 0.50f;
-        updateRouting();
     }
     else if (command == "BASS")
     {
         g_bassGain = stof(args);
-        updateRouting();
     }
     else if (command == "LOAD_IR")
     {
@@ -293,7 +333,6 @@ extern "C" void execute_audio_command(const char *cmd_in)
             g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
             g_convolutionNode.wetMix = 0.0f;
             g_isConvolutionOn = false;
-            updateRouting();
             return;
         }
 
@@ -400,12 +439,8 @@ extern "C" void execute_audio_command(const char *cmd_in)
         float w = stof(args);
         g_reverbNode.wetMix = w;
         g_isReverbOn = (w > 0.005f);
-
-        // DELETE THIS EXACT LINE BELOW SO TASTE PILLS DON'T KILL CONVOLUTION:
         if (g_isReverbOn)
             g_isConvolutionOn = false;
-
-        updateRouting();
     }
     else if (command == "CONVOLUTION")
     {
@@ -414,14 +449,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
         g_isConvolutionOn = (w > 0.005f);
         if (g_isConvolutionOn)
             g_isReverbOn = false;
-        updateRouting();
     }
     else if (command == "LIMITER")
     {
         float val = stof(args);
-        // CRITICAL FIX: Scaled up the multiplier.
-        // val comes from UI as 0.0, 0.3, 0.6, 1.0
-        // A max UI boost now equates to 120% extra gain, dynamically caught by the soft-clipper.
         g_limiterNode.boost = 1.0f + (val * 1.2f);
         g_limiterNode.gainEnv = 1.0f;
     }
@@ -437,21 +468,24 @@ extern "C" void get_audio_metrics(float *out_data, float *out_level)
         *out_level = 0.0f;
         return;
     }
-    if (g_usingSymphonia && g_symSource.buffer)
-    {
-        uint32_t ch = g_symSource.buffer->channels;
-        uint32_t sr = g_symSource.buffer->sample_rate;
-        // CRITICAL FIX: Safe exit if buffer states zero channels
-        if (ch == 0 || sr == 0)
-            return;
 
-        out_data[0] = (float)g_symSource.cursor_frames / (float)sr;
-        out_data[1] = (float)(g_symSource.buffer->total_samples / ch) / (float)sr;
-    }
-    else
     {
-        ma_sound_get_cursor_in_seconds(&g_sound, &out_data[0]);
-        ma_sound_get_length_in_seconds(&g_sound, &out_data[1]);
+        std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
+        if (g_usingSymphonia && g_symSource.buffer)
+        {
+            uint32_t ch = g_symSource.buffer->channels;
+            uint32_t sr = g_symSource.buffer->sample_rate;
+            if (ch == 0 || sr == 0)
+                return;
+
+            out_data[0] = (float)g_symSource.cursor_frames / (float)sr;
+            out_data[1] = (float)(g_symSource.buffer->total_samples / ch) / (float)sr;
+        }
+        else
+        {
+            ma_sound_get_cursor_in_seconds(&g_sound, &out_data[0]);
+            ma_sound_get_length_in_seconds(&g_sound, &out_data[1]);
+        }
     }
     out_data[2] = g_bLvl.load(std::memory_order_relaxed);
     out_data[3] = g_bPan.load(std::memory_order_relaxed);
@@ -466,6 +500,7 @@ extern "C" void get_audio_metrics(float *out_data, float *out_level)
 
 extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, float *rms_out)
 {
+    std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
     if (g_usingSymphonia && g_symSource.buffer)
     {
         uint64_t total = g_symSource.buffer->total_samples;

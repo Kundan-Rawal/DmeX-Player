@@ -42,6 +42,7 @@ pub struct TrackMeta {
 pub struct RustAudioBuffer {
     pub data: *mut f32,
     pub total_samples: u64,
+    pub capacity: u64, // <-- CRITICAL: Track the exact memory size
     pub channels: u32,
     pub sample_rate: u32,
 }
@@ -126,11 +127,12 @@ pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer 
 
     all_samples.shrink_to_fit();
     let total_samples = all_samples.len() as u64;
+    let capacity = all_samples.capacity() as u64; // <-- CRITICAL: Capture exact allocator capacity
     let data_ptr = all_samples.as_mut_ptr();
     std::mem::forget(all_samples); 
 
     let buf = Box::new(RustAudioBuffer {
-        data: data_ptr, total_samples, channels, sample_rate
+        data: data_ptr, total_samples, capacity, channels, sample_rate // <-- Pass it here
     });
 
     Box::into_raw(buf)
@@ -141,8 +143,9 @@ pub extern "C" fn rust_free_audio_buffer(ptr: *mut RustAudioBuffer) {
     if ptr.is_null() { return; }
     unsafe {
         let buf = Box::from_raw(ptr);
-        let _vec = Vec::from_raw_parts(buf.data, buf.total_samples as usize, buf.total_samples as usize);
-    }
+        // CRITICAL: We now pass buf.capacity to perfectly match the memory allocator layout
+        let _vec = Vec::from_raw_parts(buf.data, buf.total_samples as usize, buf.capacity as usize);
+    } // Memory safely drops here without corrupting the heap
 }
 
 // ------------------------------------------------------------------
@@ -195,6 +198,16 @@ fn fetch_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
 }
 
 #[tauri::command]
+fn clear_library(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    // Violently wipe all rows from the database tables
+    conn.execute("DELETE FROM tracks", []).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM playlists", []).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM playlist_tracks", []).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn add_to_library(track: db::Track, state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.db_conn.lock().unwrap();
     match db::upsert_track(&conn, &track) {
@@ -237,13 +250,29 @@ async fn analyze_current_track() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn read_file_head(path: String, max_bytes: usize) -> Result<Vec<u8>, String> {
+async fn read_file_head(path: String, max_bytes: usize) -> Result<String, String> {
     use std::io::Read;
     tauri::async_runtime::spawn_blocking(move || {
         let file = std::fs::File::open(&path).map_err(|e| format!("Cannot open {}: {}", path, e))?;
         let mut buf = Vec::with_capacity(max_bytes);
         file.take(max_bytes as u64).read_to_end(&mut buf).map_err(|e| format!("Read error: {}", e))?;
-        Ok(buf)
+        
+        // CRITICAL FIX: Native Base64 encoding to prevent JSON IPC memory exhaustion
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(buf.len() * 4 / 3 + 4);
+        let mut i = 0;
+        while i < buf.len() {
+            let b0 = buf[i] as u32;
+            let b1 = if i + 1 < buf.len() { buf[i + 1] as u32 } else { 0 };
+            let b2 = if i + 2 < buf.len() { buf[i + 2] as u32 } else { 0 };
+            let n = (b0 << 16) | (b1 << 8) | b2;
+            out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+            out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+            out.push(if i + 1 < buf.len() { ALPHABET[((n >> 6) & 63) as usize] as char } else { '=' });
+            out.push(if i + 2 < buf.len() { ALPHABET[(n & 63) as usize] as char } else { '=' });
+            i += 3;
+        }
+        Ok(out) // Returns a pure String, bypassing the 500MB JSON bottleneck
     }).await.map_err(|e| format!("Thread error: {}", e))?
 }
 
@@ -254,6 +283,13 @@ async fn read_file_head(path: String, max_bytes: usize) -> Result<Vec<u8>, Strin
 async fn scan_directory(path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || scan_audio_paths(&path)).await.map_err(|e| format!("Thread error: {}", e))
 }
+
+#[tauri::command]
+fn toggle_favorite(path: String, is_favorite: bool, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    db::toggle_favorite(&conn, &path, is_favorite).map_err(|e| e.to_string())
+}
+
 
 #[tauri::command]
 async fn scan_mobile_audio() -> Result<Vec<String>, String> {
@@ -268,6 +304,7 @@ async fn scan_mobile_audio() -> Result<Vec<String>, String> {
 // =======================================================
 // FENCED OPTIMIZATION: Drip-Feed Scanner ONLY for Android
 // =======================================================
+// THE FIX: Removed underscores from app_handle and folder_path
 #[tauri::command]
 async fn scan_android_music(app_handle: tauri::AppHandle, folder_path: String) -> Result<(), String> {
     #[cfg(not(target_os = "android"))]
@@ -281,14 +318,12 @@ async fn scan_android_music(app_handle: tauri::AppHandle, folder_path: String) -
             let mut chunk = Vec::new();
             let mut all_paths = Vec::new();
             
-            // If React says 'ALL', scan everything. Otherwise, scan the specific folder picked.
             if folder_path == "ALL" {
                 let roots = [
                     "/storage/emulated/0/Music", 
                     "/storage/emulated/0/Download", 
                     "/storage/emulated/0/Downloads", 
                     "/storage/emulated/0/DCIM",
-                    // Adding common places Android hides audio
                     "/storage/emulated/0/Audiobooks",
                     "/storage/emulated/0/Podcasts",
                     "/storage/emulated/0/WhatsApp/Media/WhatsApp Audio"
@@ -316,24 +351,102 @@ async fn scan_android_music(app_handle: tauri::AppHandle, folder_path: String) -
                 });
 
                 if chunk.len() >= 50 {
+                    use tauri::Emitter;
                     let _ = app_handle.emit("metadata_chunk", chunk.clone());
                     chunk.clear();
                 }
             }
 
             if !chunk.is_empty() {
+                use tauri::Emitter;
                 let _ = app_handle.emit("metadata_chunk", chunk);
             }
+            use tauri::Emitter;
             let _ = app_handle.emit("scan_complete", ());
         });
         Ok(())
     }
 }
 
+
+// ... (scan_android_music is right above this) ...
+
+// ==============================================================
+// 1. THE NEW ANDROID WORKER (Extracts art directly in native C++)
+// ==============================================================
 #[tauri::command]
-fn toggle_favorite(path: String, is_favorite: bool, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = state.db_conn.lock().unwrap();
-    db::toggle_favorite(&conn, &path, is_favorite).map_err(|e| e.to_string())
+async fn extract_and_cache_art(app: tauri::AppHandle, path: String, safe_album: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use symphonia::default::get_probe;
+        use symphonia::core::meta::MetadataOptions;
+        use symphonia::core::formats::FormatOptions;
+        use symphonia::core::io::MediaSourceStream;
+
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        let mut hint = symphonia::core::probe::Hint::new();
+        if let Some(ext) = std::path::Path::new(&path).extension().and_then(|e| e.to_str()) {
+            hint.with_extension(ext);
+        }
+
+        let mut probed = get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+            .map_err(|e| e.to_string())?;
+
+        // 1. Removed "mut" to fix the unused_mut warning
+        let metadata = probed.format.metadata();
+        
+        // 2. THE FIX: Bind the temporary value to a local variable so it survives the borrow checker
+        let binding = probed.metadata.get(); 
+        
+        let meta = match metadata.current() {
+            Some(m) => m,
+            None => match binding.as_ref().and_then(|m| m.current()) {
+                Some(m) => m,
+                None => return Ok("".to_string()),
+            }
+        };
+
+        let visuals = meta.visuals();
+        if visuals.is_empty() { return Ok("".to_string()); }
+        let vis = &visuals[0];
+
+        let ext = if vis.media_type.contains("png") { "png" } else { "jpg" };
+        let file_name = format!("art_{}.{}", safe_album, ext);
+
+        use tauri::Manager;
+        let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let art_dir = app_dir.join("art_cache");
+        if !art_dir.exists() {
+            std::fs::create_dir_all(&art_dir).map_err(|e| e.to_string())?;
+        }
+        
+        let file_path = art_dir.join(&file_name);
+        if !file_path.exists() {
+            std::fs::write(&file_path, &vis.data).map_err(|e| e.to_string())?;
+        }
+
+        Ok(file_path.to_string_lossy().to_string())
+    }).await.map_err(|e| format!("Thread error: {}", e))?
+}
+
+// ==============================================================
+// 2. THE EXISTING WINDOWS WORKER (Leave this exactly as it is!)
+// ==============================================================
+#[tauri::command]
+fn save_art_to_cache(app: tauri::AppHandle, file_name: String, data: Vec<u8>) -> Result<String, String> {
+    use tauri::Manager;
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let art_dir = app_dir.join("art_cache");
+    
+    if !art_dir.exists() {
+        std::fs::create_dir_all(&art_dir).map_err(|e| e.to_string())?;
+    }
+    
+    let file_path = art_dir.join(&file_name);
+    // Overwrite any corrupted/truncated files from previous scans
+    std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
+    
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -417,10 +530,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            fetch_library, add_to_library,
+            fetch_library, add_to_library, clear_library, save_art_to_cache, extract_and_cache_art,/* <-- ADDED HERE */
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist,
             audio_command, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
-            scan_android_music // <-- CRITICAL: Register the new command here!
+            scan_android_music
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

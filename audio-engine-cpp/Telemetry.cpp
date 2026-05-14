@@ -1,6 +1,7 @@
 #include "Telemetry.h"
 #include <cmath>
 
+
 // Define the global atomics we declared in the header
 std::atomic<float> g_audioLevel{0.0f};
 std::atomic<float> g_bLvl{0.0f}, g_bPan{0.0f};

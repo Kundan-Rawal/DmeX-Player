@@ -15,6 +15,7 @@ extern bool g_engineInitialized;
 extern float g_bassGain;
 extern std::mutex g_irMutex;
 extern std::mutex g_pathMutex;
+extern std::mutex g_audioMutex;
 extern std::string g_lastLoadedPath;
 
 // Effect Toggles (Notice g_isLimiterOn is intentionally DELETED)
@@ -27,9 +28,6 @@ extern bool g_isReverbOn;
 extern bool g_isConvolutionOn;
 
 // Node Instances
-extern ma_loshelf_node g_bassNode;
-extern ma_peak_node g_midNode;
-extern ma_hishelf_node g_trebleNode;
 extern StudioExciterNode g_exciterNode;
 extern StereoWidenerNode g_widenerNode;
 extern PsychoacousticNode g_spatializerNode;

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <atomic> // <--- ADD THIS
 #include <cmath>
+#include <mutex>
 
 // Define global variables
 ma_engine g_engine;
@@ -15,6 +16,7 @@ bool g_engineInitialized = false;
 float g_bassGain = 0.0f;
 std::mutex g_irMutex;
 std::mutex g_pathMutex;
+std::mutex g_audioMutex;
 std::string g_lastLoadedPath;
 
 bool g_isRemasterOn = false;
@@ -47,79 +49,9 @@ void updateRouting()
 {
     if (!g_soundInitialized)
         return;
-
-    ma_node_detach_output_bus((ma_node *)&g_sound, 0);
-    ma_node_detach_output_bus((ma_node *)&g_trebleNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_audiophileEQNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_subwooferNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_exciterNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_widenerNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_spatializerNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_reverbNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_convolutionNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_compressorNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_limiterNode, 0);
-    ma_node_detach_output_bus((ma_node *)&g_meterNode, 0);
-
-    ma_node *cur = (ma_node *)&g_sound;
-
-    if (g_isConvolutionOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_convolutionNode, 0);
-        cur = (ma_node *)&g_convolutionNode;
-    }
-
-    // 1. TONE SHAPING FIRST
-    if (g_isFIRModeOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_audiophileEQNode, 0);
-        cur = (ma_node *)&g_audiophileEQNode;
-    }
-    else if (g_isRemasterOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_bassNode, 0);
-        cur = (ma_node *)&g_trebleNode;
-    }
-    if (g_bassGain > 0.01f)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_subwooferNode, 0);
-        cur = (ma_node *)&g_subwooferNode;
-    }
-
-    // 2. DYNAMICS (Normalize the track before adding 3D space!)
-    if (g_isCompressOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_compressorNode, 0);
-        cur = (ma_node *)&g_compressorNode;
-    }
-
-    // 3. SPATIAL & AIR (These now operate on a perfectly leveled signal)
-    if (g_isUpscaleOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_exciterNode, 0);
-        cur = (ma_node *)&g_exciterNode;
-    }
-    if (g_isWidenOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_widenerNode, 0);
-        cur = (ma_node *)&g_widenerNode;
-    }
-    if (g_spatializerNode.spatialIntensity > 0.001f)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_spatializerNode, 0);
-        cur = (ma_node *)&g_spatializerNode;
-    }
-    if (g_isReverbOn && !g_isConvolutionOn)
-    {
-        ma_node_attach_output_bus(cur, 0, &g_reverbNode, 0);
-        cur = (ma_node *)&g_reverbNode;
-    }
-
-    // 4. MASTERING
-    ma_node_attach_output_bus(cur, 0, &g_limiterNode, 0);
-    cur = (ma_node *)&g_limiterNode;
-    ma_node_attach_output_bus(cur, 0, &g_meterNode, 0);
-    ma_node_attach_output_bus((ma_node *)&g_meterNode, 0, ma_engine_get_endpoint(&g_engine), 0);
+    // THE STATIC GRAPH FIX:
+    // We NEVER tear the graph down. We only plug the newly loaded track into the head of the chain.
+    ma_node_attach_output_bus((ma_node *)&g_sound, 0, &g_convolutionNode, 0);
 }
 
 extern "C" void init_audio_engine()
@@ -254,4 +186,16 @@ extern "C" void init_audio_engine()
     cMeter.pInputChannels = g_inCh;
     cMeter.pOutputChannels = g_outCh;
     ma_node_init(pg, &cMeter, NULL, &g_meterNode.baseNode);
+
+    ma_node_attach_output_bus(&g_convolutionNode, 0, &g_audiophileEQNode, 0);
+    ma_node_attach_output_bus(&g_audiophileEQNode, 0, &g_subwooferNode, 0);
+    ma_node_attach_output_bus(&g_subwooferNode, 0, &g_compressorNode, 0);
+    ma_node_attach_output_bus(&g_compressorNode, 0, &g_exciterNode, 0);
+    ma_node_attach_output_bus(&g_exciterNode, 0, &g_widenerNode, 0);
+    ma_node_attach_output_bus(&g_widenerNode, 0, &g_spatializerNode, 0);
+    ma_node_attach_output_bus(&g_spatializerNode, 0, &g_reverbNode, 0);
+    ma_node_attach_output_bus(&g_reverbNode, 0, &g_limiterNode, 0);
+    ma_node_attach_output_bus(&g_limiterNode, 0, &g_meterNode, 0);
+    ma_node_attach_output_bus(&g_meterNode, 0, ma_engine_get_endpoint(&g_engine), 0);
+
 }

@@ -9,9 +9,28 @@
    ════════════════════════════════════════════════════════════════════ */
 
 /* ─── 1. RESET ──────────────────────────────────────────────── */
-*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-* { font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
+*,*::before,*::after { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+  /* THE FIX: Kill the blue Android tap highlight globally */
+  -webkit-tap-highlight-color: transparent !important;
+}
 
+* { 
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; 
+  -webkit-font-smoothing: antialiased; 
+  /* THE FIX: Prevent long-press text selection and callout menus globally */
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* THE EXCEPTION: Allow text selection ONLY inside the search bar and new playlist inputs */
+input, textarea {
+  -webkit-user-select: auto !important;
+  user-select: auto !important;
+}
 /* Android system navigation bar fix:
    color-scheme:dark tells the WebView to use a dark system UI
    (dark status bar, dark navigation bar) when in dark mode.
@@ -301,6 +320,7 @@ body {
   width: 100% !important;
   height: 100% !important;
   border-radius: inherit !important; 
+  background-size: cover !important;
 }
 .track-item-details {
   display: flex !important;
@@ -539,344 +559,7 @@ body {
 .mobile-tabs       { display:none; }
 .mobile-search-bar { display:none; }
 
-/* ═══════════════════════════════════════════════════════════════════
-   MOBILE — ≤ 768px  (Samsung Music-style)
-   ═══════════════════════════════════════════════════════════════════ */
-@media (max-width: 768px) {
 
-  /* Layout */
-  .app-layout { flex-direction:column; }
-  .sidebar    { display:none; }
-  .app-container { width:100%; height:100vh; }
-
-  /* Mobile header */
-  .mobile-header {
-    display:flex; align-items:center; justify-content:space-between;
-    padding:14px 20px 10px; background:var(--bg-primary); flex-shrink:0;
-  }
-  .mobile-header .sidebar-logo { font-size:26px; }
-  .mobile-header-actions { display:flex; align-items:center; gap:8px; }
-  .mobile-icon-btn { width:38px; height:38px; background:var(--bg-surface); border:1px solid var(--border); border-radius:10px; color:var(--text-secondary); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.18s; font-size:16px; font-weight:700; }
-  .mobile-icon-btn:hover { background:var(--bg-raised); color:var(--text-primary); }
-  .mobile-icon-btn:disabled { opacity:0.4; cursor:not-allowed; }
-  .add-folder-mobile { background:var(--theme-color); border-color:var(--theme-color); color:var(--text-primary); font-size:20px; font-weight:900; }
-
-  /* Mobile search bar */
-  .mobile-search-bar { display:flex; align-items:center; gap:8px; margin:0 16px 8px; padding:9px 14px; background:var(--bg-search); border:1px solid var(--border); border-radius:12px; }
-  .mobile-search-bar svg { color:var(--text-muted); flex-shrink:0; }
-  .mobile-search-bar input { flex:1; background:none; border:none; outline:none; color:var(--text-primary); font-size:14px; }
-  .mobile-search-bar input::placeholder { color:var(--text-muted); }
-  .mobile-search-bar button { background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer; }
-
-  /* Horizontal tab bar */
-  .mobile-tabs { display:flex; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:0 16px 4px; gap:6px; flex-shrink:0; border-bottom:1px solid var(--border); }
-  .mobile-tabs::-webkit-scrollbar { display:none; }
-  .mobile-tabs button { flex-shrink:0; white-space:nowrap; padding:8px 16px; border:none; border-radius:20px; font-size:13px; font-weight:600; background:var(--bg-surface); color:var(--text-secondary); cursor:pointer; transition:all 0.2s; display:flex; align-items:center; gap:5px; }
-  .mobile-tabs button:hover { background:var(--bg-raised); color:var(--text-primary); }
-  .mobile-tabs button.active { background:var(--theme-color); color:var(--text-secondary); box-shadow:0 4px 12px color-mix(in srgb,var(--theme-color) 30%,transparent); }
-  .tab-count { font-size:10px; font-weight:700; background:rgba(255,255,255,0.25); border-radius:10px; padding:1px 6px; }
-  .mobile-tabs button:not(.active) .tab-count { background:var(--bg-raised); color:var(--text-muted); }
-
-  /* Hide desktop header */
-  .app-header { display:none; }
-  /* content-area: fill remaining height, virtual scroll handles its own overflow */
-  .content-area {
-    padding: 0;
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    margin-top: 0px;
-  }
-  /* Virtual scroll container: account for mini player height at bottom */
-  .virtual-scroll-container {
-    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px) + 8px);
-
-  }
-  .track-list-header { display:none; }
-
-  /* ── Track rows: Samsung Music style (flex, not grid) ── */
-  .track-item {
-    display:flex; align-items:center;
-    grid-template-columns:unset;
-    padding:10px 16px; border-radius:0;
-    border-left:none; border-bottom:1px solid var(--border);
-  }
-  .track-item:first-child { border-top:1px solid var(--border); }
-  .track-item:hover { border-radius:0; background:var(--track-hover); }
-  .track-item.active { border-left:none; background:var(--track-active-bg); }
-
-  /* title-cell = flex row, takes all space */
-  .title-cell {
-  display: flex !important;
-  align-items: center !important;
-}
-
-  /* Thumbnail square — profile emoji centered */
-  .track-item-icon {
-    width:48px; height:48px; flex-shrink:0;
-    border-radius:10px; margin-right:12px;
-    background:var(--track-color, rgba(200,34,42,0.15));
-    font-size:22px; opacity:1;
-  }
-  .track-item.active .track-item-icon { outline:2.5px solid var(--theme-color); outline-offset:2px; }
-
-  /* Hide desktop-only columns */
-  .hide-mobile { display:none; }
-  .track-item-name  { font-size:14px; }
-  .track-item-artist { font-size:12px; }
-  .time-cell { font-size:12px; color:var(--text-muted); white-space:nowrap; padding-right:0; }
-
-  /* ── Mini player: flush to bottom edge, no floating ──
-     The old bottom:12px left a visible gap where Android's nav bar showed
-     the content behind the player in white/grey.
-     Fix: bottom:0, full width, round only top corners, padding-bottom for
-     the gesture indicator bar via env(safe-area-inset-bottom).            */
-  .bottom-player {
-    left: 0;
-    width: 100vw;
-    bottom: 0;
-    height: auto;
-    border-radius: 20px 20px 0 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-  .mini-player-content { padding: 10px 18px 12px; height: auto; }
-  .art-circle { width:44px; height:44px; border-radius:10px; }
-  .track-title { font-size:13px; }
-  .artist-subtitle { font-size:11px; }
-  .controls { gap:12px; }
-  .control-btn { width:34px; height:34px; font-size:17px; }
-  .play-main { width:42px; height:42px; font-size:18px; }
-
-  /* Hide duplicate profile chip below artist name —
-     it already shows in the ep-header badge on mobile */
-  .player-profile-line { display:none; }
-
-  /* Shrink action icon buttons — less chunky on small screens */
-  .ep-icon-btn { width:34px; height:34px; border-radius:9px; font-size:15px; }
-  .ep-actions  { gap:8px; margin-bottom:12px; }
-  .taste-pill  { height:32px; font-size:11px; }
-
-  /* Volume slider: hidden — user controls system volume instead */
-  .ep-volume-row { display:none; }
-
-  /* ── Mobile DSP full-screen page ──────────────────────────────
-     Sits over the expanded player, same BG as app, with a back btn. */
-  .mobile-dsp-page {
-    position: absolute;
-    inset: 0;
-    z-index: 50;
-    background: var(--bg-primary);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .mobile-dsp-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 18px 20px 14px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .mobile-dsp-back {
-    width: 36px; height: 36px;
-    background: none; border: none;
-    color: var(--text-primary);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .mobile-dsp-title {
-    font-size: 18px; font-weight: 700;
-    color: var(--text-primary); letter-spacing: -0.3px;
-  }
-  .mobile-dsp-body {
-    flex: 1; overflow-y: auto; padding: 16px;
-  }
-  /* Strip the glass card look — bg is already solid on the DSP page */
-  .mobile-dsp-body .studio-dashboard {
-    border-radius: 0; border: none;
-    background: none;
-    backdrop-filter: none; -webkit-backdrop-filter: none;
-    max-height: none; padding: 0;
-  }
-  /* Expanded player: single column — FIXED HEIGHT, NO SCROLL on the container.
-     The ep-controls-section uses flex column with progress pushed to bottom via margin-top:auto */
-  .bottom-player.expanded { border-radius:0; }
-  .ep-header { padding:20px 24px; }
-
-  /* ep-content: fixed column, no overflow — children control their own sizing */
-  /* ── 1. The Container ── */
-  .ep-content {
-    flex-direction: column;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 24px 40px !important; /* INCREASED: Lifts everything away from bottom edge */
-    gap: 0;
-    height: calc(100vh - 90px);
-    overflow: hidden;
-  }
-
-  /* ── 2. Normal Mode ── */
-  .ep-left {
-    flex-direction: column;
-    align-items: center;
-    width: 100%;
-    flex-shrink: 0;
-  }
-  .ep-art {
-    width: min(62vw, 260px);
-    height: min(62vw, 260px);
-    margin-bottom: 18px;
-    border-radius: 18px;
-    position: relative;
-    cursor: pointer;
-  }
-  .ep-right {
-    width: 100%;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .ep-controls-section {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* FIX: Pushes the action buttons perfectly flush with the progress bar */
-  .ep-actions {
-    margin-top: auto;
-    justify-content: space-between !important;
-    padding: 0 40px; /* Pushes the outer buttons inward slightly */
-    width: 100%;
-    margin-bottom: 10px;
-    flex-shrink: 0;
-    border: none;
-  }
-  .ep-progress-container {
-    margin-top: 0;
-    margin-bottom: 14px;
-    flex-shrink: 0;
-  }
-  .ep-main-controls {
-    padding: 0 8px;
-    flex-shrink: 0;
-  }
-
-  .ep-track-header { margin-bottom: 10px; }
-  .player-smart-section { margin-bottom: 10px; flex-shrink: 0; }
-  .ep-title { font-size: 22px; text-align: center!important;margin: auto; }
-  .ep-artist-marquee { text-align: center; }
-  .ep-artist-inner { justify-content: center; }
-  .ep-artist { font-size: 13px; text-align: center; }
-  .player-taste-pills { flex-direction: row; }
-  .ep-ctrl-btn { width: 44px; height: 44px; font-size: 22px; }
-  .ep-play-btn { width: 72px; height: 72px; font-size: 32px;;}
-
-  /* ── 3. Synced Lyrics Badge ── */
-  .lyrics-art-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    position: absolute;
-    bottom: 10px;
-    left: 10px;
-    background: rgba(0,0,0,0.45);
-    backdrop-filter: blur(6px);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 4px 8px;
-    border-radius: 8px;
-    pointer-events: none;
-  }
-  .mobile-album-gradient { 
-    display: block; position: absolute; bottom: 0; left: 0; right: 0; height: 50%; 
-    background: linear-gradient(to top, color-mix(in srgb,var(--theme-color) 20%,transparent) 0%, transparent 100%); 
-    z-index: 1; pointer-events: none; 
-  }
-  [data-theme="dark"] .mobile-album-gradient { display: none; }
-
-  /* ── 4. THE LYRICS SWAP MECHANIC ── */
-  .lyrics-mode.ep-content {
-    display: flex;
-    flex-direction: column;
-  }
-  .lyrics-mode .ep-art {
-    display: none !important; 
-  }
-  
-  /* NEW FIX: Completely hide Title, Artist, and DSP pills in Lyrics Mode */
-  .lyrics-mode .ep-track-header,
-  .lyrics-mode .player-smart-section {
-    display: none !important;
-  }
-
-  .lyrics-mode .ep-left {
-    order: 2;
-    flex: 0 0 auto;
-    width: 100%;
-  }
-  .lyrics-mode .ep-right {
-    order: 1;
-    flex: 1;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .lyrics-mode .ep-controls-section {
-    flex: 0 0 auto; 
-  }
-  .lyrics-display.full {
-    padding: 10px 0 20px;
-    height: 100%;
-    border: none;
-    mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
-    -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
-  }
-  
-  /* FIX: Even smaller lyrics, tighter gaps for maximum screen real estate */
-  .lyric-line {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    line-height: 1.4;
-    margin-bottom: 6px;
-    transition: all 0.4s cubic-bezier(0.25,1,0.5,1);
-    text-align: center;
-  }
-  .lyric-line.active {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 10px;
-    transform: scale(1.05);
-    transform-origin: center;
-  }
-  
-  .studio-dashboard { border-radius: 16px; padding: 20px 18px; }
-
-  .app-layout {
-    height: 100dvh;
-  }
-  .bottom-player {
-  /* Pushes the play controls up so they don't overlap the transparent Android home button */
-  padding-bottom: env(safe-area-inset-bottom, 24px); 
-}
-
-.mobile-header {
-  /* Pushes the DmeX logo down so it doesn't overlap the transparent time/battery text */
-  padding-top: env(safe-area-inset-top, 35px);
-}
-  .expanded-player-content {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-}
 /* ════════════════════════════════════════════════════════════════════
    NEW COMPONENTS: Folder Modal, Scan Progress, Empty State
    ════════════════════════════════════════════════════════════════════ */
@@ -1069,86 +752,14 @@ body {
   padding-top: max(40px, env(safe-area-inset-top)) !important;
 }
 
-@media (max-width: 768px) {
-  .ep-header {
-    padding-top: max(25px, env(safe-area-inset-top)) !important;
-    padding-bottom: 10px !important;
-    z-index: 20;
-  }
-  .ep-art { margin-top: 5px; margin-bottom: 25px !important; }
-  .player-smart-section { margin-bottom: 32px !important; }
-  
-  .ep-content {
-    height: auto !important;
-    flex: 1 1 auto !important;
-    padding-bottom: 0px !important; 
-    padding-top: 15px !important;
-  }
-  .ep-right {
-    flex: 1 1 auto !important;
-    display: flex !important;
-    flex-direction: column !important;
-    width: 100% !important;
-  }
-  .ep-controls-section {
-    flex: 1 1 auto !important;
-    display: flex !important;
-    flex-direction: column !important;
-    height: 100% !important;
-  }
-  .ep-actions {
-    margin-top: auto !important; 
-    padding-top: 20px !important; 
-    justify-content: space-between !important;
-  }
+/* ====================================================================
+   SAMSUNG ONE UI MOBILE OVERRIDES (≤ 768px)
+   Perfect AMOLED blacks, sleek pill player, horizontal tabs
+   ==================================================================== */
 
-  .mobile-header { background: transparent !important; }
-  .mobile-tabs { background: transparent !important; border-bottom: none !important; padding-top: 5px !important; padding-bottom: 15px;}
-  .app-container { background: transparent !important; border-bottom: none !important; box-shadow: none !important; }
+/* Hard override for any stray Android-specific inline backgrounds */
+[data-platform="android"] .track-item-icon { background: rgba(255,255,255,0.08) !important; }
 
-  .blob-1 { width: 140vw !important; height: 140vw !important; filter: blur(55px) !important; }
-  .blob-2 { width: 130vw !important; height: 140vw !important; filter: blur(50px) !important; }
-  .blob-3 { width: 110vw !important; height: 110vw !important; filter: blur(45px) !important; }
-  
-  [data-theme="dark"] .blob { opacity: 0.70 !important; }
-  [data-theme="light"] .blob { opacity: 0.50 !important; }
-
-  .ep-play-btn{
-    box-shadow: none !important;
-  }
-  .marquee-container:not(.scrolling) {
-    display: flex;
-    justify-content: center;
-  }
-  .ep-artist-marquee:not(.scrolling) {
-    display: flex;
-    justify-content: center;
-  }
-  .ep-title-wrapper:not(.marquee) {
-    justify-content: center;
-    width: 100%;
-  }
-  .ep-artist-inner:not(.marquee) {
-    justify-content: center;
-    width: 100%;
-  }
-  /* Disable tap highlights, backgrounds, and scaling for media controls */
-.no-touch-effects {
-  -webkit-tap-highlight-color: transparent !important;
-  background-color: transparent !important;
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-.no-touch-effects:active,
-.no-touch-effects:hover,
-.no-touch-effects:focus {
-  background-color: transparent !important;
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-}
 
 .glass-options-menu {
   position: absolute;
@@ -1312,16 +923,6 @@ body {
   justify-content: center; 
 }
 
-@media (min-width: 769px) {
-  .folder-modal-overlay {
-    align-items: center; 
-  }
-  
-  .folder-modal {
-    border-radius: 16px;
-    animation: popIn 0.2s cubic-bezier(0.25, 1, 0.5, 1);
-  }
-}
 
 @keyframes popIn {
   from { transform: scale(0.95); opacity: 0; }
@@ -1533,54 +1134,7 @@ body {
 }
 
 
-/* ==========================================================================
-   ANDROID HARDWARE OPTIMIZATIONS & SAFE AREA
-   ========================================================================== */
 
-/* 1. Kill the Black Blob (Force flat background on Light Mode) */
-[data-platform="android"][data-theme="light"].app-layout,
-[data-platform="android"][data-theme="light"] .app-layout {
-  background: var(--bg-primary) !important;
-}
-@media (max-width: 768px) {
-  .mobile-header { background: var(--bg-primary) !important; }
-}
-
-/* 2. Theme-Aware Glassmorphism Assassin */
-[data-platform="android"] .taste-pill,
-[data-platform="android"] .ep-icon-btn,
-[data-platform="android"] .ep-ctrl-btn,
-[data-platform="android"] .play-main,
-[data-platform="android"] .glass-options-menu,
-[data-platform="android"] .glass-boost-btn,
-[data-platform="android"] .art-circle,
-[data-platform="android"] .ep-profile-badge,
-[data-platform="android"] .profile-chip,
-[data-platform="android"] .mobile-icon-btn { /* ADDED: Search and Theme buttons */
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  /* CRITICAL FIX: Switched from hardcoded white to theme variables so Light Mode works perfectly */
-  background: var(--bg-surface) !important; 
-  border: 1px solid var(--border) !important;
-  box-shadow: none !important;
-}
-
-/* Make the active pills and buttons pop with the theme color */
-[data-platform="android"] .taste-pill.active,
-[data-platform="android"] .glass-boost-btn.active {
-  background: rgba(var(--theme-color-rgb, 200, 34, 42), 0.15) !important;
-  border: 1px solid var(--theme-color) !important;
-}
-[data-platform="android"] .blob,
-[data-platform="android"] [ref*="blob"],
-[data-platform="android"] [ref*="corner"] {
-  /* PC uses 80px-100px. We use 25px. 
-     This is the "Sweet Spot" for the Exynos 850 GPU to maintain 60fps. */
-  filter: blur(25px) !important; 
-  will-change: transform;
-  transform: translateZ(0); /* Force hardware layer */
-  backface-visibility: hidden;
-}
 
 /* 2. Fix the 8B Blobs visibility on Android */
 [data-platform="android"] .ambient-background div[ref] {
@@ -1598,7 +1152,7 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 24px 30px 16px;
 }
-.samsung-logo-area { font-size: 24px; letter-spacing: -0.5px; }
+.samsung-logo-area { font-size: 24px; letter-spacing: -0.5px;} 
 
 .samsung-actions { display: flex; align-items: center; gap: 20px; }
 .samsung-icon-btn { 
@@ -1783,3 +1337,478 @@ body {
 .samsung-list-count { font-size: 13px; color: var(--text-muted); }
 .delete-pl-btn { background: none; border: none; color: #f44336; font-size: 18px; cursor: pointer; opacity: 0.6; }
 .delete-pl-btn:hover { opacity: 1; }
+
+
+
+/* ====================================================================
+   SAMSUNG ONE UI MOBILE OVERRIDES (RESTORED)
+   ==================================================================== */
+@media (max-width: 768px) {
+  /* 1. Core Layout - Respecting Light/Dark Themes */
+  .app-layout { flex-direction: column; height: 100dvh; }
+  .sidebar { display: none; }
+  .app-container { width: 100%; height: 100vh; }
+  .content-area { padding: 0 !important; margin: 0 !important; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  
+  /* RESTORED THE CURVES */
+  .samsung-track-container { 
+    border-radius: 32px 32px 0 0 !important; 
+    padding: 16px 0 0 !important; 
+    flex: 1; display: flex; flex-direction: column; 
+    background: var(--bg-sidebar) !important; 
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+  }
+  .app-header, .track-list-header { display: none !important; }
+
+  /* Pure AMOLED Black ONLY for Dark Mode */
+  [data-theme="dark"] .app-layout,
+  [data-theme="dark"] .app-container,
+  [data-theme="dark"] .content-area,
+  [data-theme="dark"] .samsung-header-wrapper {
+    background: #000 !important;
+  }
+
+  /* 2. Header Actions (WITH PROPER STATUS BAR SPACING) */
+  .samsung-system-titlebar { display: none !important; }
+  .samsung-header-wrapper { 
+    flex-shrink: 0; 
+    padding-top: max(40px, env(safe-area-inset-top)) !important; /* Pushed down from status bar */
+  }
+  .samsung-top-bar { padding: 8px 24px 24px !important; }
+  .samsung-logo-area { font-size: 26px !important; font-weight: 700; color: var(--text-primary) !important; letter-spacing: -0.5px; }
+  .samsung-actions { gap: 20px; }
+  .samsung-icon-btn { font-size: 24px; opacity: 1; color: var(--text-primary); }
+
+
+  /* 3. Horizontal Scrollable Tabs */
+  .samsung-nav-tabs {
+    display: flex !important; justify-content: flex-start !important;
+    gap: 24px !important; padding: 0 24px 16px !important;
+    overflow-x: auto !important; scrollbar-width: none !important; -webkit-overflow-scrolling: touch;
+  }
+  .samsung-nav-tabs::-webkit-scrollbar { display: none; }
+.samsung-nav-tabs button {
+    font-size: 18px !important; 
+    padding: 4px 0 !important; 
+    white-space: nowrap;
+    
+    /* Lock the snap point to the exact center of the button */
+    scroll-snap-align: center !important; 
+    
+    /* CRITICAL FIX: Removed transform and opacity transitions. 
+       The JS engine handles them now. We only transition color and font-weight. */
+    transition: color 0.15s ease, font-weight 0.1s ease !important;
+    
+    transform-origin: center bottom;
+    font-weight: 500 !important;
+    
+    /* Tell the GPU we are mathematically scaling these constantly */
+    will-change: transform, opacity;
+  }
+
+  /* When the item hits the center and becomes active, shift color and weight */
+  .samsung-nav-tabs button.active {
+    font-weight: 800 !important; 
+    color: var(--text-primary) !important; 
+    /* Removed the hardcoded transform: scale(1.15) here */
+  }  
+
+  /* 4. Sorting Row */
+  .samsung-track-container > div:first-of-type { padding: 8px 24px 12px !important; margin: 0 !important; }
+  .samsung-track-container > div:first-of-type > div { background: transparent !important; border: none !important; padding: 0 !important; font-size: 14px !important; color: var(--text-muted) !important; }
+  
+  /* 5. Track List Items (CLEAN & PREMIUM) */
+  .virtual-scroll-container { padding-bottom: 90px !important; } 
+  .track-item { 
+    display: flex !important; align-items: center !important; 
+    padding: 12px 24px !important; /* Better vertical breathing room */
+    border: none !important; background: transparent !important; border-radius: 0 !important; 
+  }
+  .track-item:hover, .track-item.active { background: var(--track-hover) !important; border: none !important; }
+  .title-cell { display: flex !important; align-items: center !important; width: 100% !important; padding-right: 0 !important; }
+  
+  .track-item-icon {
+    width: 50px !important; height: 50px !important; flex-shrink: 0 !important;
+    border-radius: 6px !important; margin-right: 18px !important; /* Slightly larger, crisp corners */
+    background: var(--bg-surface) !important; 
+    color: var(--text-muted) !important; font-size: 20px !important; 
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    box-shadow: none !important; outline: none !important; overflow: hidden !important;
+  }
+  .track-thumb-art { width: 100% !important; height: 100% !important; background-size: cover; background-position: center; border-radius: inherit; }
+  
+  /* Clean, legible typography */
+  .track-item-name { 
+    font-size: 16px !important; font-weight: 500 !important; 
+    color: var(--text-primary) !important; margin-bottom: 4px !important; 
+    letter-spacing: -0.2px !important;
+  }
+  .track-item-artist { 
+    font-size: 13.5px !important; font-weight: 400 !important; 
+    color: var(--text-secondary) !important; 
+  }
+  
+  .hide-mobile { display: none !important; }
+  
+  /* Nuke the useless 3-dots completely */
+  .time-cell { display: none !important; }
+
+
+
+  /* 6. The Floating Pill Player */
+  .bottom-player:not(.expanded) {
+    position: fixed !important; bottom: max(16px, env(safe-area-inset-bottom)) !important;
+    left: 12px !important; width: calc(100vw - 24px) !important; height: 56px !important;
+    border-radius: 28px !important; background: var(--bg-sidebar) !important; 
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important; border: 1px solid var(--border) !important;
+    padding: 0 !important; transform: none !important; z-index: 1000 !important;
+  }
+  .mini-player-content { padding: 0 16px !important; height: 100% !important; display: flex; flex-direction: column; justify-content: center; }
+  .progress-container.mini { display: none !important; } 
+  .art-circle { width: 36px !important; height: 36px !important; border-radius: 50% !important; background-color: var(--bg-surface) !important;}
+  .art-circle span { font-size: 16px !important; }
+  .track-title { font-size: 14px !important; font-weight: 500 !important; color: var(--text-primary) !important; }
+  .artist-subtitle { font-size: 12px !important; color: var(--text-secondary) !important; }
+  .controls { gap: 16px !important; }
+  .control-btn { width: 32px !important; height: 32px !important; font-size: 20px !important; color: var(--text-primary) !important; background: transparent !important; }
+  .play-main { width: 32px !important; height: 32px !important; font-size: 22px !important; color: var(--text-primary) !important; background: transparent !important; box-shadow: none !important; }
+
+  /* 7. FAB */
+  .bulk-scan-fab { bottom: calc(85px + env(safe-area-inset-bottom)) !important; right: 16px !important; padding: 8px 14px !important; border-radius: 20px !important; background: var(--bg-sidebar) !important; border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+  .bulk-scan-fab .fab-text { font-size: 12px !important; font-weight: 500 !important; color: var(--text-primary) !important; }
+
+  /* ====================================================================
+     8. RESTORED ORIGINAL EXPANDED PLAYER & LYRICS
+     ==================================================================== */
+  .bottom-player.expanded { border-radius:0; }
+  .ep-header { padding:20px 24px; padding-top: max(20px, env(safe-area-inset-top)) !important; }
+
+  /* Restore original layout */
+  .ep-content { flex-direction: column; align-items: center; justify-content: space-between; padding: 0 24px 40px !important; gap: 0; height: calc(100vh - 90px) !important; overflow: hidden; }
+  .ep-left { flex-direction: column; align-items: center; width: 100%; flex-shrink: 0; }
+  .ep-art { width: min(62vw, 260px) !important; height: min(62vw, 260px) !important; margin-bottom: 18px !important; border-radius: 18px !important; position: relative; cursor: pointer; }
+  .ep-right { width: 100%; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  
+  .ep-controls-section { flex: 1; display: flex; flex-direction: column; }
+  .ep-actions { margin-top: auto; justify-content: space-between !important; padding: 0 40px !important; width: 100%; margin-bottom: 10px; flex-shrink: 0; border: none; }
+  
+  .ep-progress-container { margin-top: 0; margin-bottom: 14px; flex-shrink: 0; }
+  .ep-main-controls { padding: 0 8px; flex-shrink: 0; }
+  .ep-track-header { margin-bottom: 10px; }
+  
+  /* Restore indicators */
+  .player-smart-section { margin-bottom: 10px; flex-shrink: 0; display: block !important; }
+  .player-profile-line { display: block !important; } /* RESTORES THE ANALYZING INDICATOR */
+  
+  .ep-title { font-size: 22px !important; text-align: center!important; margin: auto; font-weight: 700 !important; color: var(--text-primary) !important; }
+  .ep-artist-marquee { text-align: center; }
+  .ep-artist-inner { justify-content: center; }
+  .ep-artist { font-size: 13px !important; text-align: center; color: var(--text-secondary) !important; }
+  
+  .player-taste-pills { flex-direction: row; }
+  .ep-ctrl-btn { width: 44px !important; height: 44px !important; font-size: 22px !important; color: var(--text-primary) !important;}
+  .ep-play-btn { width: 72px !important; height: 72px !important; font-size: 32px !important; background: var(--theme-color) !important; color: #fff !important; box-shadow: 0 8px 24px rgba(0,0,0,0.2) !important;}
+
+  /* Synced Lyrics Badge */
+  .lyrics-art-badge { display: flex; align-items: center; gap: 4px; position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.45); backdrop-filter: blur(6px); color: #fff; font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 8px; pointer-events: none; }
+  .mobile-album-gradient { display: block !important; position: absolute; bottom: 0; left: 0; right: 0; height: 50%; background: linear-gradient(to top, color-mix(in srgb,var(--theme-color) 20%,transparent) 0%, transparent 100%); z-index: 1; pointer-events: none; }
+  [data-theme="dark"] .mobile-album-gradient { display: none !important; }
+
+  /* Lyrics Swap Mechanic */
+  .lyrics-mode.ep-content { display: flex !important; flex-direction: column !important; }
+  .lyrics-mode .ep-art { display: none !important; }
+  .lyrics-mode .ep-track-header, .lyrics-mode .player-smart-section { display: none !important; }
+  .lyrics-mode .ep-left { order: 2; flex: 0 0 auto; width: 100%; display: flex !important; }
+  .lyrics-mode .ep-right { order: 1; flex: 1; width: 100%; display: flex !important; flex-direction: column; overflow: hidden; }
+  .lyrics-mode .ep-controls-section { flex: 0 0 auto; }
+  .lyrics-display.full { padding: 10px 0 20px !important; height: 100%; border: none; mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent); -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent); }
+  
+  .lyric-line { font-size: 14px; font-weight: 500; color: var(--text-secondary); line-height: 1.4; margin-bottom: 6px; transition: all 0.4s cubic-bezier(0.25,1,0.5,1); text-align: center; }
+  .lyric-line.active { font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; transform: scale(1.05); transform-origin: center; }
+  
+  .studio-dashboard { border-radius: 16px; padding: 20px 18px; }
+  .mobile-dsp-page { background: var(--bg-primary) !important; }
+  /* ─── THE GREAT MOBILE PURGE: Strip all backgrounds, borders, shadows, and glassmorphism ─── */
+  .ep-icon-btn, .taste-pill, .ep-profile-badge {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Completely Hide Volume Row & "Identified" Pill */
+  .ep-volume-row { display: none !important; }
+  .player-profile-line { display: none !important; }
+
+  /* Raw SVG Controls: Nuke Backgrounds, Borders, and Shadows */
+  .ep-ctrl-btn, .ep-play-btn {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--text-primary) !important;
+  }
+
+  /* Kill all popping, scaling, and hover animations */
+  .ep-ctrl-btn:hover, .ep-ctrl-btn:active, 
+  .ep-play-btn:hover, .ep-play-btn:active,
+  .ep-icon-btn:hover, .ep-icon-btn:active,
+  .taste-pill:hover, .taste-pill:active {
+    transform: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  
+  /* Ensure the Play button SVG scales correctly without its background circle */
+  .ep-play-btn { width: 56px !important; height: 56px !important; font-size: 56px !important; }
+
+  /* ====================================================================
+   THE GREAT MOBILE PURGE: PERFORMANCE, EMOJIS, AND THEME FIXES
+   ==================================================================== */
+@media (max-width: 768px) {
+
+  /* 1. NUKE ALL GLASSMORPHISM (Fixes Android Scroll Lag) */
+  .bottom-player, .glass-options-menu, .bulk-scan-fab, 
+  .playlist-popup-glass, .mobile-dsp-page, .lyrics-art-badge, .drag-ghost {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  
+  /* Replace blurs with 92% opaque solid backgrounds for performance */
+  .glass-options-menu, .bulk-scan-fab, .playlist-popup-glass {
+    background: rgba(18, 18, 18, 0.95) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  }
+  .mobile-dsp-page {
+    background: rgba(10, 10, 10, 0.98) !important;
+  }
+
+  /* 2. THE SAUSAGE KILLER: Edge-to-Edge Mini Player with Dynamic Colors */
+  .bottom-player:not(.expanded) {
+    width: calc(100vw - 16px) !important;
+    left: 8px !important;
+    bottom: 8px !important;
+    height: 60px !important;
+    border-radius: 12px !important;
+    /* RESTORES DYNAMIC THEME COLOR: Mixed with 85% black to look premium */
+    background: color-mix(in srgb, var(--theme-color) 85%, #111) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5) !important;
+  }
+
+  /* 3. Horizontal Scrollable Tabs (SAMSUNG PHYSICS) */
+  .samsung-nav-tabs {
+    display: flex !important; 
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 28px !important; 
+    /* Removed horizontal padding so spacers handle the edge-to-edge scroll */
+    padding: 0 0 16px !important; 
+    overflow-x: auto !important; 
+    scrollbar-width: none !important; 
+    -webkit-overflow-scrolling: touch;
+    
+    /* THE PHYSICS: Force elements to aggressively snap into the middle */
+    scroll-snap-type: x mandatory !important;
+    scroll-behavior: smooth !important;
+  }
+  .samsung-nav-tabs::-webkit-scrollbar { display: none; }
+
+  /* Invisible blocks that allow the first and last tabs to reach the exact center of the screen */
+  .nav-spacer {
+    flex-shrink: 0;
+    width: calc(50vw - 40px); 
+    height: 1px;
+  }
+
+  .samsung-nav-tabs button {
+    font-size: 18px !important; 
+    color: var(--text-muted) !important; 
+    padding: 4px 0 !important; 
+    white-space: nowrap;
+    
+    /* Lock the snap point to the center of the button */
+    scroll-snap-align: center !important; 
+    
+    /* Smoothly animate the scale, weight, and color changes */
+    transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1), 
+                color 0.25s ease, 
+                font-weight 0.2s ease !important;
+    
+    /* By default, shrink the item away from the center */
+    transform: scale(0.85); 
+    transform-origin: center bottom;
+    font-weight: 500 !important;
+    will-change: transform, color;
+  }
+
+  /* When the item hits the center and becomes active, blow it up */
+  .samsung-nav-tabs button.active {
+    transform: scale(1.15) !important; 
+    font-weight: 800 !important; 
+    color: var(--text-primary) !important; 
+  }
+
+  /* 4. FORCE THE MARQUEE */
+  .mini-marquee-inner {
+    animation: miniScroll 12s linear infinite !important;
+    min-width: 100% !important;
+  }
+  .mini-text-block {
+    mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+  }
+
+  /* 5. THE EMOJI ERADICATOR: Pure CSS SVG Injection */
+  /* Hide the hardcoded 🎵 spans entirely */
+  .track-item-icon span, .art-circle span, .ep-art span, .empty-icon { 
+    display: none !important; 
+  }
+  
+  /* Inject a crisp SVG directly into elements that lack a background-image */
+  .track-item-icon:not([style*="url"]), 
+  .art-circle:not([style*="url"]), 
+  .ep-art:not([style*="url"]) {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 18V5l12-2v13'></path><circle cx='6' cy='18' r='3'></circle><circle cx='18' cy='16' r='3'></circle></svg>") !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    background-size: 40% !important;
+    background-color: rgba(255, 255, 255, 0.05) !important;
+  }
+
+  /* 6. Clean up text colors to ensure readability on the dynamic background */
+  .track-title { color: #ffffff !important; }
+  .artist-subtitle { color: rgba(255,255,255,0.7) !important; }
+  .control-btn, .play-main { color: #ffffff !important; }
+
+
+  /* 2. THE SAUSAGE KILLER: Edge-to-Edge Mini Player with Dynamic Colors */
+  .bottom-player:not(.expanded) {
+    width: calc(100vw - 16px) !important;
+    left: 8px !important;
+    /* FIX: Lifted to clear Android system nav buttons */
+    bottom: max(20px, env(safe-area-inset-bottom)) !important; 
+    /* FIX: Restored the completely round pill shape */
+    border-radius: 35px !important;
+    background: color-mix(in srgb, var(--theme-color) 85%, #111) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5) !important;
+  }
+
+  /* FIX: Restored FAB color so it isn't completely black */
+  .bulk-scan-fab {
+    background: var(--bg-raised) !important;
+    border: 1px solid var(--border) !important;
+    /* Lifted slightly higher to clear the newly raised mini-player */
+    bottom: calc(95px + env(safe-area-inset-bottom)) !important; 
+  }
+
+  /* 3. THE HITBOX FIX: Stretch the clickable area across the entire player */
+  .track-info {
+    flex: 1 !important;
+    max-width: none !important;
+    height: 100% !important; 
+    overflow: hidden !important; /* Required to prevent flex blowout */
+  }
+  .mini-player-content {
+    padding: 0 16px 0 8px !important;
+  }
+
+  /* 4. FORCE THE MARQUEE */
+  .mini-text-block {
+    flex: 1 1 auto !important;
+    min-width: 0 !important; /* CRITICAL: Forces flex child to allow text overflow */
+    overflow: hidden !important;
+    mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+  }
+  
+  .mini-marquee-inner {
+    display: inline-flex !important;
+    white-space: nowrap !important;
+    /* Forced animation. If it wasn't moving, it's moving now. */
+    animation: miniScroll 12s linear infinite !important;
+    padding-right: 30px !important;
+  }
+
+  .expanded-player-content, .mini-player-content {
+    will-change: opacity, transform !important;
+    backface-visibility: hidden !important;
+    transform: translateZ(0) !important;
+    /* Optimize the fade curve for mobile */
+    transition: opacity 0.25s cubic-bezier(0.25, 1, 0.5, 1) !important; 
+  }
+
+  /* 2. THE GPU KILLSWITCH (ANIMATION FREEZING) */
+  /* If the UI is expanding or collapsing, instantly pause all heavy physics */
+  .freeze-anim .blob,
+  .freeze-anim .mini-marquee-inner,
+  .freeze-anim .ep-title-wrapper.marquee,
+  .freeze-anim .ep-artist-inner.marquee,
+  .freeze-anim .dot-pulse {
+    animation-play-state: paused !important;
+  }
+}
+}
+@media (max-width: 768px) {
+  
+  /* 1. FORCE THE STATUS BAR SPACING */
+  /* This directly targets the top bar and physically shoves it down 60px to clear the camera cutout */
+  .samsung-top-bar { 
+    padding: max(60px, calc(env(safe-area-inset-top) + 20px)) 24px 24px !important; 
+  }
+  
+  /* Remove duplicate wrapper padding to prevent double-spacing */
+  .samsung-header-wrapper {
+    padding-top: 0 !important;
+  }
+
+  /* 2. COMPLETELY ANNIHILATE THE 3 VERTICAL DOTS ON TRACKS */
+  /* Targets both the container and the pseudo-element CSS trick */
+  .time-cell, 
+  .time-cell::after, 
+  .track-item .time-cell { 
+    display: none !important; 
+    content: none !important; 
+    opacity: 0 !important; 
+    width: 0 !important; 
+    pointer-events: none !important;
+  }
+  .samsung-logo-area{
+    font-size: 20px !important;
+    padding-left :0px !important;
+  }
+  .samsung-nav-tabs{
+    font-size: 10px !important;
+    padding :15px !important;
+    font-weight:100 !important;
+  }
+  .samsung-actions{
+    padding-right:0px !important ;
+  }
+  /* 3. STRIP CSS ANIMATIONS SO JAVASCRIPT CAN TAKE OVER THE SIZING */
+  .samsung-nav-tabs button {
+    /* Only transition color and font-weight. Block CSS from touching transform or opacity. */
+    transition: color 0.15s ease, font-weight 0.1s ease !important;
+  }
+  
+  .samsung-nav-tabs button,
+  .samsung-nav-tabs button.active {
+    /* If there are any residual !important scales lingering in your CSS, this kills them */
+    transform: none; 
+    opacity: 1; 
+  }
+  .ep-header{
+    padding-top:60px !important;
+    padding-bottom: 20px !important;
+  }
+  .glass-options-menu{
+    top:100px !important;
+  }
+  .ep-actions{
+    margin-top: 80px !important;
+  }
+}
+
+

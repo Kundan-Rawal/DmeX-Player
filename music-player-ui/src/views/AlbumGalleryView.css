@@ -1,0 +1,204 @@
+/* ====================================================================
+   ALBUM GALLERY - DYNAMIC 2D BENTO GRID 
+   ==================================================================== */
+
+.album-scroll-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 120px; 
+}
+
+.album-actions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px 0;
+}
+
+.album-count-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* 1. THE 2D GRID ENGINE */
+.bento-grid-v2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-auto-rows: 200px;
+  grid-auto-flow: dense;
+  gap: 24px; /* INCREASED PADDING BETWEEN CARDS */
+  padding: 16px 24px 24px; 
+  width: 100%;
+}
+
+/* 2. STRICT PERFECT SQUARE SHAPES */
+.bento-1x1 { grid-column: span 1; grid-row: span 1; }
+.bento-2x2 { grid-column: span 2; grid-row: span 2; } /* Massive Showcase */
+
+/* 3. CARD STYLING */
+.bento-card-v2 {
+  border-radius: 20px;
+  position: relative;
+  background-color: var(--bg-surface);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  /* Hardware acceleration for smooth hovers */
+  transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1), 
+              box-shadow 0.25s ease, 
+              filter 0.25s ease;
+  will-change: transform, box-shadow;
+}
+
+/* 4. THE PREMIUM HOVER EFFECTS */
+.bento-card-v2:hover { 
+  /* Physical lift off the page instead of just scaling */
+  transform: scale(1.04) translateY(-6px); 
+  z-index: 10;
+  /* Removed the cheap border. Added deep, rich, double-layered ambient shadows */
+  box-shadow: 0 24px 48px rgba(0,0,0,0.6), 0 12px 24px rgba(0,0,0,0.4); 
+  /* Subtle pop in contrast and brightness to make the art shine */
+  filter: brightness(1.15) contrast(1.05);
+}
+
+.bento-card-v2:active { 
+  transform: scale(0.98); 
+  filter: brightness(0.9);
+}
+
+.bento-fallback-v2 {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); opacity: 0.5;
+}
+
+.bento-overlay-v2 {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%);
+  padding: 40px 16px 16px;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  pointer-events: none;
+  height: 100%; 
+}
+
+.bento-title-v2 {
+  color: #ffffff;
+  font-size: 16px; font-weight: 800; line-height: 1.2;
+  margin-bottom: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+}
+
+/* Scale up the font size for the Massive showcase blocks */
+.bento-2x2 .bento-title-v2 { font-size: 22px; -webkit-line-clamp: 3; }
+
+.bento-subtitle-v2 {
+  color: rgba(255,255,255,0.75);
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+
+/* ====================================================================
+   ALBUM DETAIL HEADER (When an album is clicked)
+   ==================================================================== */
+.album-detail-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  padding: 24px 36px 32px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.album-detail-art {
+  width: 180px; height: 180px;
+  border-radius: 16px;
+  background-size: cover; background-position: center;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.4);
+  flex-shrink: 0;
+}
+
+.album-detail-info { flex: 1; }
+.album-detail-badge { font-size: 12px; font-weight: 800; color: var(--theme-color); letter-spacing: 1.5px; margin-bottom: 8px; }
+.album-detail-title { font-size: 36px; font-weight: 900; color: #fff; margin-bottom: 8px; line-height: 1.1; letter-spacing: -0.5px; }
+.album-detail-artist { font-size: 15px; color: var(--text-secondary); font-weight: 600; margin-bottom: 20px; }
+.album-detail-actions { display: flex; gap: 12px; align-items: center; }
+
+.play-all-btn { 
+  background: var(--theme-color); color: #fff; border: none; 
+  padding: 14px 32px; border-radius: 40px; font-weight: 800; font-size: 15px; 
+  cursor: pointer; display: flex; align-items: center; gap: 8px;
+  transition: transform 0.2s cubic-bezier(0.25,1,0.5,1); 
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--theme-color) 40%, transparent); 
+}
+.play-all-btn:hover { transform: scale(1.05); filter: brightness(1.1); }
+
+.back-albums-btn { 
+  background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); 
+  padding: 13px 24px; border-radius: 40px; font-weight: 700; font-size: 14px; 
+  cursor: pointer; 
+  transition: background 0.2s; 
+}
+.back-albums-btn:hover { background: var(--bg-raised); }
+
+@media (max-width: 768px) {
+  .album-detail-header { flex-direction: column; align-items: center; text-align: center; padding: 24px 16px; }
+  .album-detail-art { width: 220px; height: 220px; margin-bottom: 16px; }
+  .album-detail-actions { justify-content: center; width: 100%; }
+  .play-all-btn { flex: 1; justify-content: center; }
+}
+
+/* ==================================================================== */
+/* ANDROID SPECIFIC ALBUM MOSAIC OVERRIDE                               */
+/* ==================================================================== */
+/* ==================================================================== */
+/* ANDROID SPECIFIC ALBUM MOSAIC OVERRIDE                               */
+/* ==================================================================== */
+
+[data-platform="android"] .bento-grid-v2 {
+  /* Establish the strict 2-column mobile base */
+  grid-template-columns: repeat(2, 1fr) !important;
+  /* Base square size */
+  grid-auto-rows: 160px !important; 
+  gap: 12px !important;
+  padding: 12px !important;
+}
+
+/* THE MOSAIC RESTORATION: Allow 2x2 blocks to consume the entire screen width */
+[data-platform="android"] .bento-2x2 {
+  grid-column: span 2 !important;
+  grid-row: span 2 !important; 
+}
+
+/* Standard small square text */
+[data-platform="android"] .bento-title-v2 {
+  font-size: 14px !important;
+  -webkit-line-clamp: 2 !important;
+}
+[data-platform="android"] .bento-subtitle-v2 {
+  font-size: 11px !important;
+}
+[data-platform="android"] .bento-overlay-v2 {
+  padding: 30px 12px 12px !important;
+}
+
+/* Massive 2x2 showcase text (Needs to scale up because the block is huge) */
+[data-platform="android"] .bento-2x2 .bento-title-v2 {
+  font-size: 20px !important;
+  -webkit-line-clamp: 3 !important;
+}
+[data-platform="android"] .bento-2x2 .bento-subtitle-v2 {
+  font-size: 13px !important;
+}
+[data-platform="android"] .bento-2x2 .bento-overlay-v2 {
+  padding: 60px 16px 16px !important;
+}
