@@ -305,8 +305,9 @@ async fn scan_mobile_audio() -> Result<Vec<String>, String> {
 // FENCED OPTIMIZATION: Drip-Feed Scanner ONLY for Android
 // =======================================================
 // THE FIX: Removed underscores from app_handle and folder_path
+#[allow(unused_variables)]
 #[tauri::command]
-async fn scan_android_music(_app_handle: tauri::AppHandle, _folder_path: String) -> Result<(), String> {
+async fn scan_android_music(app_handle: tauri::AppHandle, folder_path: String) -> Result<(), String> {
     #[cfg(not(target_os = "android"))]
     {
         Ok(())

@@ -26,6 +26,7 @@ extern bool g_isWidenOn;
 extern bool g_isCompressOn;
 extern bool g_isReverbOn;
 extern bool g_isConvolutionOn;
+extern bool g_isAndroidSpeaker;
 
 // Node Instances
 extern StudioExciterNode g_exciterNode;

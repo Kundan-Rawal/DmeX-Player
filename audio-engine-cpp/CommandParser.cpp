@@ -456,6 +456,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
         g_limiterNode.boost = 1.0f + (val * 1.2f);
         g_limiterNode.gainEnv = 1.0f;
     }
+    else if (command == "ANDROID_SPEAKER")
+    {
+        g_isAndroidSpeaker = (stoi(args) == 1);
+    }
 }
 
 extern "C" void get_audio_metrics(float *out_data, float *out_level)

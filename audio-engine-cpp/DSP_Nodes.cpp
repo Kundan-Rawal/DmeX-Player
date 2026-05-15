@@ -13,6 +13,7 @@ extern bool g_isUpscaleOn;
 extern bool g_isWidenOn;
 extern bool g_isCompressOn;
 extern bool g_isReverbOn;
+extern bool g_isAndroidSpeaker;
 
 // ================================================================
 // STUDIO AURAL EXCITER
@@ -342,6 +343,9 @@ ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
 // ================================================================
 // SUBWOOFER NODE (Dynamic Thump Expander)
 // ================================================================
+// ================================================================
+// SUBWOOFER NODE (Dynamic Thump Expander & Speaker Protection)
+// ================================================================
 static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     SubwooferNode *p = (SubwooferNode *)pNode;
@@ -350,38 +354,69 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    if (g_bassGain < 0.001f)
-    {
-        for (ma_uint32 i = 0; i < fc; ++i)
-        {
-            pOut[i * 2] = pIn[i * 2];
-            pOut[i * 2 + 1] = pIn[i * 2 + 1];
-        }
-        return;
-    }
-
-    // CRITICAL FIX: Dropped to ~75Hz.
-    // This strictly isolates the kick drum punch and sub-rumble, completely protecting the mids/vocals from mud.
-    const float LP_COEF = 0.010f;
-    float drive = g_bassGain * 1.5f;
-
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
+
+#ifdef __ANDROID__
+        if (g_isAndroidSpeaker)
+        {
+            // 1. ALWAYS protect the Android speaker, even if bass boost is 0
+            const float HP_COEF = 0.018f; // ~120Hz
+            p->hp1L += HP_COEF * (L - p->hp1L);
+            p->hp1R += HP_COEF * (R - p->hp1R);
+            float safeL = L - p->hp1L;
+            float safeR = R - p->hp1R;
+
+            float harmL = 0.0f, harmR = 0.0f;
+
+            // 2. Only generate psychoacoustic harmonics if the user requested bass
+            if (g_bassGain >= 0.001f)
+            {
+                const float LP_COEF = 0.012f; // ~80Hz
+                p->lp1L += LP_COEF * (L - p->lp1L);
+                p->lp1R += LP_COEF * (R - p->lp1R);
+
+                float drive = g_bassGain * 4.0f;
+                auto waveshape = [](float x)
+                {
+                    float ax = fabsf(x);
+                    if (ax > 1.0f)
+                        ax = 1.0f;
+                    return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
+                };
+                harmL = waveshape(p->lp1L * drive);
+                harmR = waveshape(p->lp1R * drive);
+            }
+
+            // Mix the hallucinated bass back into the safe mids
+            pOut[i * 2] = safeL + harmL;
+            pOut[i * 2 + 1] = safeR + harmR;
+            continue; // Skip the earphone logic
+        }
+#endif
+
+        // ==========================================
+        // NORMAL EARPHONE / WINDOWS MODE
+        // ==========================================
+        if (g_bassGain < 0.001f)
+        {
+            // Safe to bypass only if we are in earphone mode and bass is 0
+            pOut[i * 2] = L;
+            pOut[i * 2 + 1] = R;
+            continue;
+        }
+
+        const float LP_COEF = 0.010f;
+        float drive = g_bassGain * 1.5f;
 
         p->lp1L += LP_COEF * (L - p->lp1L);
         p->lp2L += LP_COEF * (p->lp1L - p->lp2L);
         p->lp1R += LP_COEF * (R - p->lp1R);
         p->lp2R += LP_COEF * (p->lp1R - p->lp2R);
 
-        // CRITICAL FIX: Ripped out the tanhf() castration.
-        // Massive, clean linear gain (up to 6x boost). The transient punch is preserved,
-        // and your Master Limiter at the end of the chain will catch and glue any clipping.
-        float subL = p->lp2L * drive * 4.0f;
-        float subR = p->lp2R * drive * 4.0f;
-
-        pOut[i * 2] = L + subL;
-        pOut[i * 2 + 1] = R + subR;
+        pOut[i * 2] = L + (p->lp2L * drive * 4.0f);
+        pOut[i * 2 + 1] = R + (p->lp2R * drive * 4.0f);
     }
 }
 
@@ -420,7 +455,7 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float inL = pIn[i * 2], inR = pIn[i * 2 + 1];
-        
+
         // 1. Calculate the High-Passed Signal
         float hpL = p->hpfL.process(inL);
         float hpR = p->hpfR.process(inR);
@@ -538,6 +573,9 @@ ma_node_vtable g_multiband_compressor_vtable = {multiband_compressor_process, NU
 // ================================================================
 // MASTERING SOFT-CLIPPER WITH LOOKAHEAD
 // ================================================================
+// ================================================================
+// MASTERING SOFT-CLIPPER WITH LOOKAHEAD
+// ================================================================
 static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     LimiterNode *p = (LimiterNode *)pNode;
@@ -546,15 +584,80 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    // Hard ceiling
+    // Hard ceiling for the safety clipper
     float thresh = (p->boost > 1.01f) ? 0.92f : 0.98f;
+
+#ifdef __ANDROID__
+    if (g_isAndroidSpeaker)
+    {
+        // THE LOUDNESS WAR CLIPPER (Android Speakers Only)
+        // Bypasses the clean envelope to aggressively maximize RMS volume.
+        for (ma_uint32 i = 0; i < fc; ++i)
+        {
+            float L = pIn[i * 2] * p->boost;
+            float R = pIn[i * 2 + 1] * p->boost;
+
+            auto clip = [](float x)
+            {
+                float ax = fabsf(x);
+                // Clean up to 70% volume.
+                if (ax < 0.70f)
+                    return x;
+                // Hyperbolic tangent saturation for the top 30% to prevent hard clipping crackle.
+                float over = ax - 0.70f;
+                float lim = 0.70f + 0.30f * tanhf(over / 0.30f);
+                return (x > 0) ? lim : -lim;
+            };
+
+            pOut[i * 2] = clip(L);
+            pOut[i * 2 + 1] = clip(R);
+        }
+        return; // Exit early, skipping the clean Lookahead limiter below
+    }
+#endif
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
+        // 1. Read raw input and apply the user's boost
         float L = pIn[i * 2] * p->boost;
         float R = pIn[i * 2 + 1] * p->boost;
 
-        // Instantaneous Soft Clipper (Zero release time = zero pumping)
+        // 2. Peak Detection (Find the loudest channel)
+        float peak = fmaxf(fabsf(L), fabsf(R));
+
+        // 3. Calculate Target Gain (How much do we need to duck to prevent clipping?)
+        float targetGain = 1.0f;
+        if (peak > thresh)
+        {
+            targetGain = thresh / peak;
+        }
+
+        // 4. Smooth the Envelope (Fast Attack, Slow Release)
+        if (targetGain < p->gainEnv)
+        {
+            // Volume is too high -> Duck quickly (Attack)
+            p->gainEnv = p->gainEnv * p->attackCoef + targetGain * (1.0f - p->attackCoef);
+        }
+        else
+        {
+            // Volume is safe -> Recover slowly (Release)
+            p->gainEnv = p->gainEnv * p->releaseCoef + targetGain * (1.0f - p->releaseCoef);
+        }
+
+        // 5. Read the DELAYED Signal (The signal from ~2ms ago)
+        float delayedL = p->dlyL[p->dlyIdx];
+        float delayedR = p->dlyR[p->dlyIdx];
+
+        // 6. Push the CURRENT signal into the delay buffer for the future
+        p->dlyL[p->dlyIdx] = L;
+        p->dlyR[p->dlyIdx] = R;
+        p->dlyIdx = (p->dlyIdx + 1) % LIMITER_LOOKAHEAD_SAMPLES;
+
+        // 7. Apply the smoothed gain envelope to the delayed signal
+        float outL = delayedL * p->gainEnv;
+        float outR = delayedR * p->gainEnv;
+
+        // 8. Safety Soft-Clip (Catches any micro-transients that slipped past the attack phase)
         auto clip = [thresh](float x)
         {
             float ax = fabsf(x);
@@ -565,8 +668,8 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
             return (x > 0) ? lim : -lim;
         };
 
-        pOut[i * 2] = clip(L);
-        pOut[i * 2 + 1] = clip(R);
+        pOut[i * 2] = clip(outL);
+        pOut[i * 2 + 1] = clip(outR);
     }
 }
 ma_node_vtable g_limiter_vtable = {limiter_process, NULL, 1, 1, 0};

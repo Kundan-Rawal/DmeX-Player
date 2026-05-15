@@ -26,6 +26,7 @@ bool g_isWidenOn = false;
 bool g_isCompressOn = false;
 bool g_isReverbOn = false;
 bool g_isConvolutionOn = false;
+bool g_isAndroidSpeaker = false;
 
 ma_uint32 g_channels = 2;
 ma_uint32 g_inCh[1] = {2};

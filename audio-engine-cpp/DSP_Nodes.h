@@ -130,10 +130,9 @@ struct ReverbNode
 struct SubwooferNode
 {
     ma_node_base baseNode;
-    // Restored: Stereo states for wide headphone bass
     float lp1L, lp2L, lp1R, lp2R;
+    float hp1L, hp1R; // <--- ADD THESE TWO VARIABLES
 };
-
 struct ConvolutionNode
 {
     ma_node_base baseNode;

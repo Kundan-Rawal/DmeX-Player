@@ -225,9 +225,25 @@ export const ExpandedControls = ({
           </svg>
         </button>
         <button className="ep-ctrl-btn no-touch-effects" onClick={e=>{e.stopPropagation();handlePrev();}}><svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
-        <button className="ep-play-btn no-touch-effects" onClick={handlePlayPause}>
-          {isPlaying?<svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path fillRule="evenodd" clipRule="evenodd" d="M5.163 3.819C5 4.139 5 4.559 5 5.4v13.2c0 .84 0 1.26.163 1.581a1.5 1.5 0 0 0 .656.655c.32.164.74.164 1.581.164h.2c.84 0 1.26 0 1.581-.163a1.5 1.5 0 0 0 .656-.656c.163-.32.163-.74.163-1.581V5.4c0-.84 0-1.26-.163-1.581a1.5 1.5 0 0 0-.656-.656C8.861 3 8.441 3 7.6 3h-.2c-.84 0-1.26 0-1.581.163a1.5 1.5 0 0 0-.656.656zm9 0C14 4.139 14 4.559 14 5.4v13.2c0 .84 0 1.26.164 1.581a1.5 1.5 0 0 0 .655.655c.32.164.74.164 1.581.164h.2c.84 0 1.26 0 1.581-.163a1.5 1.5 0 0 0 .655-.656c.164-.32.164-.74.164-1.581V5.4c0-.84 0-1.26-.163-1.581a1.5 1.5 0 0 0-.656-.656C17.861 3 17.441 3 16.6 3h-.2c-.84 0-1.26 0-1.581.163a1.5 1.5 0 0 0-.655.656z"/></svg>:<svg viewBox="-3 0 28 28" width="28" height="28" fill="currentColor"><path d="M440.415,583.554 L421.418,571.311 C420.291,570.704 419,570.767 419,572.946 L419,597.054 C419,599.046 420.385,599.36 421.418,598.689 L440.415,586.446 C441.197,585.647 441.197,584.353 440.415,583.554" transform="translate(-419.000000, -571.000000)"/></svg>}
-        </button>
+        <button style={{ background: 'transparent', border: 'none', cursor: 'pointer' }} className="your-play-btn-class" onClick={handlePlayPause}>
+  <svg 
+    width="36" 
+    height="36" 
+    viewBox="0 0 24 24" /* DO NOT TOUCH THIS. This is the math grid. */
+    fill="currentColor"
+    style={{ background: 'transparent' }} 
+  >
+    <path
+      style={{ transition: 'd 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55)' }} 
+      d={isPlaying 
+        // PAUSE STATE (Two bars)
+        ? "M 6 5 L 9 5 L 9 19 L 6 19 Z M 14 5 L 17 5 L 17 19 L 14 19 Z" 
+        // PLAY STATE (Right bar stretches to a point and merges with the left)
+        : "M 6 5 L 9 5 L 9 19 L 6 19 Z M 9 5 L 19 12 L 19 12 L 9 19 Z"
+      }
+    />
+  </svg>
+</button>
         <button className="ep-ctrl-btn no-touch-effects" onClick={e=>{e.stopPropagation();handleNext();}}><svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
         <button className="ep-ctrl-btn no-touch-effects" onClick={handleToggleRepeat}>
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{transform:`rotate(${repeatDeg}deg)`,transition:'transform 0.52s cubic-bezier(.4,0,.2,1)'}}>
