@@ -306,7 +306,18 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float iL = pIn[i * 2], iR = pIn[i * 2 + 1];
-        float feed = ((iL + iR) * 0.5f) * 0.2f + ((iL - iR) * 0.5f) * 0.8f;
+
+        // 1. Calculate the High-Passed Signal
+        float hpL = r->hpfL.process(iL);
+        float hpR = r->hpfR.process(iR);
+
+        // 2. The 20% Bass Bleed Algorithm (80% HPF + 20% RAW)
+        float bleedL = (hpL * 0.80f) + (iL * 0.20f);
+        float bleedR = (hpR * 0.80f) + (iR * 0.20f);
+
+        // 3. Feed the calculated bleed into the reverb combs
+        float feed = ((bleedL + bleedR) * 0.5f) * 0.2f + ((bleedL - bleedR) * 0.5f) * 0.8f;
+
         float oL = 0, oR = 0;
         for (int j = 0; j < 4; ++j)
         {
@@ -317,6 +328,8 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         oR *= 0.25f;
         oL = ap_tick(&r->apL[1], ap_tick(&r->apL[0], oL));
         oR = ap_tick(&r->apR[1], ap_tick(&r->apR[0], oR));
+
+        // 4. Output: The dry signal (iL/iR) is STILL 100% UNTOUCHED
         pOut[i * 2] = iL * dry + oL * r->wetMix;
         pOut[i * 2 + 1] = iR * dry + oR * r->wetMix;
     }
@@ -407,12 +420,20 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float inL = pIn[i * 2], inR = pIn[i * 2 + 1];
-        float feedL = inL, feedR = inR;
+        
+        // 1. Calculate the High-Passed Signal
+        float hpL = p->hpfL.process(inL);
+        float hpR = p->hpfR.process(inR);
+
+        // 2. The 20% Bass Bleed Algorithm
+        float feedL = (hpL * 0.80f) + (inL * 0.20f);
+        float feedR = (hpR * 0.80f) + (inR * 0.20f);
 
         if (p->wetMix < 0.99f)
         {
-            feedL += inR * 0.30f;
-            feedR += inL * 0.30f;
+            float tempL = feedL;
+            feedL += feedR * 0.30f;
+            feedR += tempL * 0.30f;
         }
 
         p->historyL[p->historyIdx] = feedL;
@@ -437,6 +458,7 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
         wetL = p->lpStateL;
         wetR = p->lpStateR;
 
+        // 3. Output: The dry signal (inL/inR) is STILL 100% UNTOUCHED
         pOut[i * 2] = inL * dry + wetL * wet;
         pOut[i * 2 + 1] = inR * dry + wetR * wet;
         p->historyIdx = (p->historyIdx + 1) % p->irLength;

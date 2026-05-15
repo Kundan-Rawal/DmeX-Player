@@ -133,14 +133,21 @@ extern "C" void init_audio_engine()
     g_reverbNode.wetMix = 0.0f;
     g_reverbNode.damp = 0.50f;
     reverb_init_filters(&g_reverbNode);
+    // PRIME THE REVERB HIGHPASS FILTERS
+    g_reverbNode.hpfL.init((float)sr, 150.0f);
+    g_reverbNode.hpfR.init((float)sr, 150.0f);
+
     ma_node_config cRev = ma_node_config_init();
     cRev.vtable = &g_reverb_vtable;
     cRev.pInputChannels = g_inCh;
     cRev.pOutputChannels = g_outCh;
-    // CRITICAL FIX: The Reverb node was never plugged in!
     ma_node_init(pg, &cRev, NULL, &g_reverbNode.baseNode);
 
     memset(&g_convolutionNode, 0, sizeof(g_convolutionNode));
+    // PRIME THE CONVOLUTION HIGHPASS FILTERS
+    g_convolutionNode.hpfL.init((float)sr, 150.0f);
+    g_convolutionNode.hpfR.init((float)sr, 150.0f);
+
     ma_node_config cConv = ma_node_config_init();
     cConv.vtable = &g_convolution_vtable;
     cConv.pInputChannels = g_inCh;
@@ -197,5 +204,4 @@ extern "C" void init_audio_engine()
     ma_node_attach_output_bus(&g_reverbNode, 0, &g_limiterNode, 0);
     ma_node_attach_output_bus(&g_limiterNode, 0, &g_meterNode, 0);
     ma_node_attach_output_bus(&g_meterNode, 0, ma_engine_get_endpoint(&g_engine), 0);
-
 }

@@ -3,6 +3,56 @@
 #include "miniaudio.h"
 #include <atomic>
 #include <vector>
+#include <cmath>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+// ================================================================
+// AUXILIARY HIGH-PASS FILTER (For Spatial/Reverb Sends)
+// ================================================================
+#include "miniaudio.h"
+#include <atomic>
+#include <vector>
+#include <cmath>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+// ================================================================
+// AUXILIARY HIGH-PASS FILTER (For Spatial/Reverb Sends)
+// ================================================================
+struct BiquadHPF
+{
+    float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+    float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+
+    void init(float sample_rate, float cutoff_hz)
+    {
+        float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
+        float alpha = sinf(w0) / (2.0f * 0.707f);
+        float a0 = 1.0f + alpha;
+
+        b0 = ((1.0f + cosf(w0)) / 2.0f) / a0;
+        b1 = -(1.0f + cosf(w0)) / a0;
+        b2 = ((1.0f + cosf(w0)) / 2.0f) / a0;
+        a1 = (-2.0f * cosf(w0)) / a0;
+        a2 = (1.0f - alpha) / a0;
+        x1 = x2 = y1 = y2 = 0.0f;
+    }
+
+    float process(float in_sample)
+    {
+        float out_sample = b0 * in_sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = in_sample;
+        y2 = y1;
+        y1 = out_sample;
+        return out_sample;
+    }
+};
 
 struct StudioExciterNode
 {
@@ -74,6 +124,7 @@ struct ReverbNode
     CombFilter combL[4], combR[4];
     AllPassFilter apL[2], apR[2];
     float roomSize, wetMix, damp;
+    BiquadHPF hpfL, hpfR; // <-- ADD THIS
 };
 
 struct SubwooferNode
@@ -93,6 +144,7 @@ struct ConvolutionNode
     float wetMix;
     float hpStateL, hpStateR;
     float lpStateL, lpStateR;
+    BiquadHPF hpfL, hpfR; // <-- ADD THIS
 };
 
 #define COMP_LOOKAHEAD_SAMPLES 44
