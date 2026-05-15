@@ -1,6 +1,7 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback,useState } from 'react';
 import { NavView, IS_MOBILE } from '../../types'; 
 import { getCurrentWindow } from '@tauri-apps/api/window';
+const IS_ANDROID = /android/i.test(navigator.userAgent);
 
 interface TopNavProps {
   currentView: NavView;
@@ -19,7 +20,8 @@ export const TopNav = ({
 }: TopNavProps) => {
   const appWindow = !IS_MOBILE ? getCurrentWindow() : null;
   const navRef = useRef<HTMLElement>(null);
-  const stateUpdateTimeoutRef = useRef<NodeJS.Timeout>();
+  const stateUpdateTimeoutRef = useRef<number | undefined>(undefined);
+  const [isKebabOpen, setIsKebabOpen] = useState(false);
 
   const TABS = [
     { id: 'FAVORITES', label: 'Favourites' },
@@ -34,12 +36,13 @@ export const TopNav = ({
   // ====================================================================
   const updateScales = useCallback(() => {
     if (!navRef.current || !IS_MOBILE) return;
+    
+    // THE FIX: Use activeId to identify which tab should be at 1.20x scale
     const activeId = currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : 
                      currentView.startsWith('ALBUM_') ? 'ALBUMS' : currentView;
+                     
     const container = navRef.current;
-    
     const centerLine = container.scrollLeft + container.clientWidth / 2;
-    // Hard limit: If a button is 140px away from the center, it shrinks to its minimum size.
     const maxDist = 140; 
 
     let closestView: string | null = null;
@@ -48,24 +51,26 @@ export const TopNav = ({
     Array.from(container.children).forEach((child) => {
       if (child.tagName === 'BUTTON') {
         const el = child as HTMLElement;
+        const viewId = el.dataset.view;
         const elCenter = el.offsetLeft + el.offsetWidth / 2;
         const distance = Math.abs(centerLine - elCenter);
         
         let ratio = 1 - (distance / maxDist);
         if (ratio < 0) ratio = 0;
         
-        // Smooth scaling curve
         const easeRatio = ratio * (2 - ratio); 
-        const scale = 0.85 + (easeRatio * 0.35); // 0.85x min, 1.20x max
-        const opacity = 0.4 + (easeRatio * 0.6); // 40% min, 100% max
+        
+        // OPTIMIZATION: If this button is the activeId, we give it priority scaling
+        const isCurrent = viewId === activeId;
+        const scale = (isCurrent ? 1.0 : 0.85) + (easeRatio * 0.35);
+        const opacity = (isCurrent ? 0.7 : 0.4) + (easeRatio * 0.6);
 
-        // CRITICAL: Force the style with 'important' to bypass your broken CSS file
         el.style.setProperty('transform', `scale(${scale})`, 'important');
-        el.style.setProperty('opacity', opacity.toString(), 'important');
+        el.style.setProperty('opacity', Math.min(opacity, 1).toString(), 'important');
 
         if (distance < minDiff) {
           minDiff = distance;
-          closestView = el.dataset.view || null;
+          closestView = viewId || null;
         }
       }
     });
@@ -100,7 +105,12 @@ export const TopNav = ({
   // THE JERK KILLER: Only auto-scroll if the change came from a click or another page.
   useEffect(() => {
     if (!navRef.current || !IS_MOBILE) return;
-    const activeId = currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : currentView;
+    
+    // THE FIX: Use the variable you declared!
+    const activeId = currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : 
+                     currentView.startsWith('ALBUM_') ? 'ALBUMS' : currentView;
+    
+    // Use activeId here instead of raw currentView
     const activeBtn = navRef.current.querySelector(`button[data-view="${activeId}"]`) as HTMLElement;
     if (!activeBtn) return;
 
@@ -108,8 +118,6 @@ export const TopNav = ({
     const center = container.scrollLeft + container.clientWidth / 2;
     const btnCenter = activeBtn.offsetLeft + activeBtn.offsetWidth / 2;
 
-    // If the button is physically further than 20px from the center, scroll it.
-    // If it's closer than 20px, it means the user's finger dragged it there. Leave it alone.
     if (Math.abs(center - btnCenter) > 20) {
       activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }
@@ -141,20 +149,77 @@ export const TopNav = ({
           </div>
 
           <div className="samsung-actions">
-            {/* THE NUCLEAR BUTTON */}
-            <button className="samsung-icon-btn" onClick={handleClearLibrary} disabled={isLoading} style={{ color: '#e83040' }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>
-
-            <button className="samsung-icon-btn" onClick={handleAddFolder} disabled={isLoading}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
-            </button>
-            <button className="samsung-icon-btn" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            </button>
-            <button className="samsung-icon-btn" onClick={toggleTheme}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-            </button>
+            {IS_ANDROID ? (
+              /* ============================================================== */
+              /* ANDROID LAYOUT: Search Icon + 3-Dot Kebab Menu                 */
+              /* ============================================================== */
+              <>
+                <button className="samsung-icon-btn" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                </button>
+                
+                <div style={{ position: 'relative' }}>
+                  <button className="samsung-icon-btn" onClick={() => setIsKebabOpen(!isKebabOpen)}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                  </button>
+                  
+                  {isKebabOpen && (
+                    <>
+                      {/* Invisible backdrop to catch clicks outside the menu */}
+                      <div style={{ position: 'fixed', inset: 0, zIndex: 998 }} onClick={() => setIsKebabOpen(false)} />
+                      
+                      {/* THE GLASSMORPHISM BOMB: Dark blurred background with subtle white borders */}
+                      <div className="fade-in" style={{ 
+                        position: 'absolute', top: '100%', right: 0, zIndex: 999, marginTop: '24px', 
+                        background: 'rgba(15, 15, 15, 0.75)', 
+                        backdropFilter: 'blur(20px)',
+                        WebkitBackdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)', 
+                        borderRadius: '16px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px', 
+                        minWidth: '200px', boxShadow: '0 16px 40px rgba(0,0,0,0.6)' 
+                      }}>
+                        
+                        <button onClick={() => { handleAddFolder(); setIsKebabOpen(false); }} style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', color: '#ffffff', fontSize: '15px', fontWeight: 600, cursor: 'pointer', borderRadius: '8px' }}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                          Add Folder
+                        </button>
+                        
+                        <button onClick={() => { toggleTheme(); setIsKebabOpen(false); }} style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', color: '#ffffff', fontSize: '15px', fontWeight: 600, cursor: 'pointer', borderRadius: '8px' }}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                          Toggle Theme
+                        </button>
+                        
+                        <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.1)', margin: '4px 0' }} />
+                        
+                        <button onClick={() => { handleClearLibrary(); setIsKebabOpen(false); }} style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', color: '#ff4444', fontSize: '15px', fontWeight: 600, cursor: 'pointer', borderRadius: '8px' }}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                          Flush Directory
+                        </button>
+                        
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* ============================================================== */
+              /* WINDOWS LAYOUT: The Unaltered 4-Button Array                   */
+              /* ============================================================== */
+              <>
+                <button className="samsung-icon-btn" onClick={handleClearLibrary} disabled={isLoading} style={{ color: '#e83040' }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+                <button className="samsung-icon-btn" onClick={handleAddFolder} disabled={isLoading}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
+                <button className="samsung-icon-btn" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                </button>
+                <button className="samsung-icon-btn" onClick={toggleTheme}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                </button>
+              </>
+            )}
           </div>
         </header>
 

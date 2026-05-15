@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState, memo, useMemo,useCallback } from "react";
-import { Track, NavView, Taste, DSPSettings, CustomPlaylist, IS_ANDROID, IS_MOBILE, LyricLine } from './types/index';
+import React, { useEffect, useRef, useState, useMemo,useCallback } from "react";
+import { Track, NavView, Taste, CustomPlaylist, IS_ANDROID, IS_MOBILE, LyricLine } from './types/index';
 import { open } from "@tauri-apps/plugin-dialog";
-import { readFile, readTextFile, writeTextFile, writeFile, mkdir, exists } from "@tauri-apps/plugin-fs";
-import { appDataDir, join } from "@tauri-apps/api/path";
+import { readFile, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+// import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import * as mm from "music-metadata";
@@ -15,7 +15,7 @@ import { vaultGet, vaultSet, initVault } from './services/vault';
 import { formatTime, parseLRC } from './utils/formatters';
 import { PlaylistGalleryView } from './views/PlaylistGalleryView';
 import { PROFILES, FIR_GAINS, classifyAudio, applyTaste, AudioProfile } from './config/audio';
-import { isHexDark, getPalette, getMime, stripExt, generateThumbnail } from './utils/helpers';
+import { isHexDark, getPalette, getMime, stripExt } from './utils/helpers';
 import { FolderModal, PlaylistPopup } from './modals/modals';
 import { VirtualList, DraggablePlaylistView } from './components/library/TrackLists';
 import { TopNav } from './components/layout/TopNav';
@@ -99,7 +99,7 @@ function App() {
   const isExpandedRef = useRef(false);
   useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
 
-  const [isAnimatingUI, setIsAnimatingUI] = useState(false);
+  const [, setIsAnimatingUI] = useState(false);
   
   // THE SAMSUNG FIX: Track when the player is transitioning
   useEffect(() => {
@@ -227,35 +227,34 @@ function App() {
   // O(1) favoritesSet is used inside VirtualList's TrackRow render below.
   const displayedTracks = useMemo(() => {
     let base = playlist;
-    if (currentView==='FAVORITES') {
+
+    // 1. VIEW ROUTING
+    if (currentView === 'FAVORITES') {
       base = playlist.filter(t => favorites.includes(t.path));
-    } else if (currentView==='BOLLYWOOD') {
+    } else if (currentView === 'BOLLYWOOD') {
       base = playlist.filter(t => {
         const s = `${t.genre||''} ${t.album||''} ${t.path}`.toLowerCase();
         return s.includes('bollywood') || s.includes('hindi') || s.includes('indian');
       });
-    } else if (currentView==='TOPTRACKS') {
+    } else if (currentView === 'TOPTRACKS') {
       base = [...playlist].filter(t=>(t.playCount||0)>0).sort((a,b)=>(b.playCount||0)-(a.playCount||0)).slice(0,50);
     } else if (activePlaylistId) {
       const pl = customPlaylists.find(p=>p.id===activePlaylistId);
       if (pl) base = pl.trackPaths.map(path=>playlist.find(t=>t.path===path)).filter((t):t is Track=>t!==undefined);
     } else if (activeAlbumName) {
-      // THE NEW ALBUM FILTER
       base = playlist.filter(t => (t.album || 'Unknown Album') === activeAlbumName);
-    }else if (activePlaylistId) {
-      const pl = customPlaylists.find(p=>p.id===activePlaylistId);
-      if (pl) base = pl.trackPaths.map(path=>playlist.find(t=>t.path===path)).filter((t):t is Track=>t!==undefined);
     }
-    if (debouncedSearchQuery.trim()) {
+    // DELETED YOUR REDUNDANT activePlaylistId DUPLICATE HERE
+
+    // 2. THE SEARCH ENGINE
+    if (debouncedSearchQuery && debouncedSearchQuery.trim() !== '') {
       const q = debouncedSearchQuery.toLowerCase();
       base = base.filter(t => String(t?.name||'').toLowerCase().includes(q) || String(t?.artist||'').toLowerCase().includes(q) || String(t?.album||'').toLowerCase().includes(q));
     }
 
-    // CRITICAL FIX: The Dynamic Sorter
-    // Don't accidentally auto-sort custom playlists or the Top Tracks view
+    // 3. THE DYNAMIC SORTER
     if (currentView === 'TOPTRACKS' || activePlaylistId) return base;
 
-    // We MUST copy the array [...base] because .sort() mutates the original array, which causes React to panic.
     return [...base].sort((a, b) => {
       if (sortMode === 'TITLE') return String(a.name || '').localeCompare(String(b.name || ''));
       if (sortMode === 'ARTIST') return String(a.artist || 'Unknown').localeCompare(String(b.artist || 'Unknown'));
@@ -263,12 +262,11 @@ function App() {
       if (sortMode === 'YEAR') {
         const yA = parseInt(a.year || '0') || 0;
         const yB = parseInt(b.year || '0') || 0;
-        return yB - yA; // Sorts Newest to Oldest
+        return yB - yA; 
       }
       return 0;
     });
-  }, [playlist, currentView, favorites , customPlaylists, debouncedSearchQuery, sortMode, activePlaylistId, activeAlbumName]);
-
+  }, [playlist, currentView, favorites, customPlaylists, debouncedSearchQuery, sortMode, activePlaylistId, activeAlbumName]);
 
 
   // CHANGE: favorites → Set<string>, memoized.
@@ -1036,12 +1034,69 @@ function App() {
       
 
       <div className="app-container">
-        {mobileSearchOpen&&(
-          <div className="mobile-search-bar" style={{margin: '16px 36px 0'}}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input autoFocus type="text" placeholder="Search tracks…" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
-            {searchQuery&&<button onClick={()=>setSearchQuery('')}>×</button>}
-          </div>
+        {/* THE SEARCH BAR OVERRIDE: Absolute positioning guarantees it renders on top of everything */}
+        {/* THE SEARCH BAR OVERRIDE */}
+        {mobileSearchOpen && (
+          <>
+            {/* THE CLICK-OUTSIDE FIX: This invisible layer catches taps and destroys the search bar */}
+            <div style={{ position: 'fixed', inset: 0, zIndex: 998 }} onClick={() => setMobileSearchOpen(false)} />
+            
+            <div className="fade-in" style={{
+              position: 'absolute', 
+              top: IS_ANDROID ? '65px' : '75px', 
+              left: '16px', 
+              right: '16px', 
+              zIndex: 999,
+              background: 'rgba(15, 15, 15, 0.85)', 
+              backdropFilter: 'blur(24px)',
+              WebkitBackdropFilter: 'blur(24px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)', 
+              borderRadius: '24px', 
+              padding: '12px 18px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px', 
+              boxShadow: '0 16px 40px rgba(0,0,0,0.6)'
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              
+              <input 
+                autoFocus 
+                type="text" 
+                placeholder="Search tracks, artists, albums..." 
+                value={searchQuery} 
+                onChange={e => setSearchQuery(e.target.value)} 
+                style={{
+                  flex: 1, 
+                  background: 'transparent', 
+                  border: 'none', 
+                  color: '#ffffff', 
+                  fontSize: '16px', 
+                  outline: 'none',
+                  width: '100%'
+                }}
+              />
+              
+              {/* THE SVG REPLACEMENT: Replaced the raw text with a clean X icon */}
+              {searchQuery ? (
+                <button 
+                  onClick={() => setSearchQuery('')} 
+                  style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#ffffff" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setMobileSearchOpen(false)} 
+                  style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              )}
+            </div>
+          </>
         )}
 
         {/* TIER 0: THE DEDICATED SYSTEM TITLEBAR */}
@@ -1294,7 +1349,6 @@ function App() {
               visMode={visMode} 
               themeColor={themeColor} 
               isDarkMode={isDarkMode} 
-              blobColors={blobColors} 
               audioLevel={audioLevel} 
             />
             {showDSPPage&&renderMobileDSPPage()}

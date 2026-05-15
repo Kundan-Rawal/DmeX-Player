@@ -16,7 +16,7 @@ mod db; // Import our new database module
 
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{State, Manager, Emitter};
+use tauri::{State, Manager};
 
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
 
@@ -306,7 +306,7 @@ async fn scan_mobile_audio() -> Result<Vec<String>, String> {
 // =======================================================
 // THE FIX: Removed underscores from app_handle and folder_path
 #[tauri::command]
-async fn scan_android_music(app_handle: tauri::AppHandle, folder_path: String) -> Result<(), String> {
+async fn scan_android_music(_app_handle: tauri::AppHandle, _folder_path: String) -> Result<(), String> {
     #[cfg(not(target_os = "android"))]
     {
         Ok(())

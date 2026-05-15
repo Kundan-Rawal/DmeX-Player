@@ -1,4 +1,3 @@
-import React from 'react';
 import { Track } from '../../types'; // Adjust path if needed
 
 interface BulkScannerProps {

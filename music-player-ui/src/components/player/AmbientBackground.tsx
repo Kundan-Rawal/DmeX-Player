@@ -8,12 +8,11 @@ interface AmbientBackgroundProps {
   visMode: 'ORBIT' | 'RADAR';
   themeColor: string;
   isDarkMode: boolean;
-  blobColors: string[];
   audioLevel: number;
 }
 
 export const AmbientBackground = ({
-  isExpandedRef, audioLevelRef, spatialData, visMode, themeColor, isDarkMode, blobColors, audioLevel
+  isExpandedRef, audioLevelRef, spatialData, visMode, themeColor, isDarkMode, audioLevel
 }: AmbientBackgroundProps) => {
   const visModeRef = useRef(visMode);
   useEffect(() => { visModeRef.current = visMode; }, [visMode]);

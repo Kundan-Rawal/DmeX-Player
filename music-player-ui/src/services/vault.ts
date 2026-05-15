@@ -5,7 +5,7 @@ let store: Store | null = null;
 // Singleton pattern guarantees we only load the database into RAM once.
 export const initVault = async (): Promise<Store> => {
   if (!store) {
-    store = await load('library.json', { autoSave: false });
+    store = await load('library.json', { autoSave: false, defaults: {} });
   }
   return store;
 };
