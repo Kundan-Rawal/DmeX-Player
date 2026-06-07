@@ -1,20 +1,29 @@
 import { Track } from '../types'; // Adjust path if needed
+import { invoke } from '@tauri-apps/api/core';
 
 const geminiMetadataCleaner = async (track: Track) => {
-  const API_KEY = "AIzaSyAoOyi6NwaoVzcSIplFsTk3zHopfCl0WWg"; 
+  let API_KEY = "AIzaSyBHgD7iM5hqWEGw1bUv3u35bUjgL2TF6pY"; 
+  try {
+    const customKey = await invoke<string | null>('get_setting', { key: 'gemini_api_key' });
+    if (customKey) API_KEY = customKey;
+  } catch (e) {}
   const formattedDuration = `${Math.floor(track.duration / 60)}:${Math.floor(track.duration % 60).toString().padStart(2, '0')}`;
 
   const prompt = `
-    Identify official music metadata. 
+    You are an expert music metadata researcher.
     Input: "${track.name}" by "${track.artist}"
     Context: Duration ${formattedDuration}, Year ${track.year}
     
     RULES:
-    1. TITLE: Clean official title. Strip all website domains (.co, .com).
-    2. ARTISTS: Return an array of the most likely primary artists to query a database with. Do not group them.
-    
-    Return EXACTLY this JSON format and nothing else:
-    {"title": "Clean Title", "artists": ["Artist 1", "Artist 2"]}
+    1. YOU MUST USE THE GOOGLE SEARCH TOOL to find the exact real-world song matching this input. Do not guess.
+    2. "Shometyle", "Celebnob", "NewDjSongRemix", "Remix", "Pagalworld", website domains (.com, .in), and uploader tags are FAKE. Ignore them.
+    3. Identify the TRUE, OFFICIAL track title and the TRUE primary artist(s).
+    4. STRIP OUT ALBUM AND MOVIE NAMES from the title. If the input is "Movie - Song" or "Album - Track" (e.g. "Dil Bechara- Taare Ginn"), the clean title is ONLY "Taare Ginn".
+    5. First, briefly explain your search results and reasoning.
+    6. Then, output EXACTLY this JSON format in a markdown block:
+    \`\`\`json
+    {"title": "Clean Title", "artists": ["Actual Artist 1"]}
+    \`\`\`
   `;
 
   try {
@@ -23,7 +32,8 @@ const geminiMetadataCleaner = async (track: Track) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { response_mime_type: "application/json", temperature: 0.1 } 
+        tools: [{ googleSearch: {} }],
+        generationConfig: { temperature: 0.2 } 
       })
     });
 
@@ -36,7 +46,17 @@ const geminiMetadataCleaner = async (track: Track) => {
     if (!res.ok || !data.candidates) return null;
 
     const text = data.candidates[0].content.parts[0].text;
-    return JSON.parse(text.replace(/```json|```/g, "").trim());
+    const match = text.match(/```json([\s\S]*?)```/);
+    if (match) {
+      return JSON.parse(match[1].trim());
+    } else {
+      const start = text.indexOf('{');
+      const end = text.lastIndexOf('}');
+      if (start !== -1 && end !== -1) {
+        return JSON.parse(text.slice(start, end + 1));
+      }
+    }
+    return null;
   } catch (e) {
     return null;
   }

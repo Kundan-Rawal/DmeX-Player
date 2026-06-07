@@ -150,10 +150,6 @@ function App() {
   const [visMode, setVisMode]         = useState<'ORBIT'|'RADAR'>('ORBIT');
   const [speakerMode, setSpeakerMode] = useState<'NONE'|'LOW'|'MED'|'HIGH'>('NONE');
 
-  const [isPhoneSpeaker, setIsPhoneSpeaker] = useState(false);
-  const isPhoneSpeakerRef = useRef(false);
-  useEffect(() => { isPhoneSpeakerRef.current = isPhoneSpeaker; }, [isPhoneSpeaker]);
-
   const smartTasteRef      = useRef<Taste>('QUALITY');
   const detectedProfileRef = useRef<AudioProfile | null>(null);
   const loadIdRef          = useRef(0);
@@ -771,7 +767,6 @@ function App() {
         writeToEngine(`BASS ${bassLevelRef.current}`),
         writeToEngine(`LIMITER ${speakerModeRef.current==='NONE'?0:speakerModeRef.current==='LOW'?0.3:speakerModeRef.current==='MED'?0.6:1.0}`),
         writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
-        writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`)
       ]);
       if(id!==loadIdRef.current) return;
       await writeToEngine(`LOAD ${track.path}`);
@@ -1032,7 +1027,7 @@ function App() {
                       currentView;
 
   return (
-    <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
+    <div className="app-layout" data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
       
       {showFolderModal&&<FolderModal onClose={()=>setShowFolderModal(false)} onScan={scanAndAdd}/>}
       {playlistModalTracks.length>0&&<PlaylistPopup playlists={customPlaylists} newPlaylistName={newPlaylistName} setNewPlaylistName={setNewPlaylistName} onClose={()=>setPlaylistModalTracks([])} onCreate={createPlaylist} onAdd={id=>addToPlaylist(id)}/>}
@@ -1389,7 +1384,7 @@ function App() {
                       }
                     }}
                   >
-                    {React.createElement(detectedProfile.icon as any, {size: 16})} {detectedProfile.label} {!isProfileActive && '(Raw)'}
+                    {detectedProfile.icon} {detectedProfile.label} {!isProfileActive && '(Raw)'}
                   </div>
                 )}
                 <button className={`ep-icon-btn ${showOptionsMenu?'active-glow':''}`} onClick={e=>{e.stopPropagation();setShowOptionsMenu(!showOptionsMenu);}}>⋮</button>
@@ -1427,38 +1422,6 @@ function App() {
                           <button className={`glass-boost-btn ${!isFIRMode?'active':''}`} style={!isFIRMode?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined} onClick={()=>{setIsFIRMode(false);writeToEngine('FIRMODE 0');}}>Standard</button>
                           <button className={`glass-boost-btn ${isFIRMode?'active':''}`} style={isFIRMode?{background:'rgba(165,214,167,0.2)',borderColor:'#a5d6a7',color:'#a5d6a7'}:undefined} onClick={()=>{setIsFIRMode(true);writeToEngine('FIRMODE 1');}}>✦ Audiophile</button>
                         </div>
-                        {/* NEW: HARDWARE OUTPUT TOGGLE */}
-                      <div className="glass-menu-section" style={{marginTop:14}}>
-                        <div className="glass-label-row" style={{marginBottom:10}}>
-                          <span>Hardware Output</span>
-                          <span style={{color:'var(--theme-color)',fontWeight:600,fontSize:'0.8rem'}}>
-                            {isPhoneSpeaker ? (IS_ANDROID ? 'Phone Speaker' : 'Laptop Speaker') : 'Headphones'}
-                          </span>
-                        </div>
-                        <div className="glass-boost-grid">
-                          <button 
-                            className={`glass-boost-btn ${!isPhoneSpeaker?'active':''}`}
-                            style={!isPhoneSpeaker?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined}
-                            onClick={()=>{
-                              setIsPhoneSpeaker(false);
-                              writeToEngine('ANDROID_SPEAKER 0');
-                            }}
-                          >
-                            🎧 Headphones
-                          </button>
-                          
-                          <button 
-                            className={`glass-boost-btn ${isPhoneSpeaker?'active':''}`}
-                            style={isPhoneSpeaker?{background:'rgba(255,59,48,0.28)',borderColor:'rgba(255,59,48,0.55)',color:'#ff3b30'}:undefined}
-                            onClick={()=>{
-                              setIsPhoneSpeaker(true);
-                              writeToEngine('ANDROID_SPEAKER 1');
-                            }}
-                          >
-                            📱 {IS_ANDROID ? 'Phone Speaker' : 'Laptop Speaker'}
-                          </button>
-                        </div>
-                      </div>
                       </div>
                     </div>
                   </>

@@ -14,6 +14,8 @@ extern bool g_isWidenOn;
 extern bool g_isCompressOn;
 extern bool g_isReverbOn;
 extern bool g_isAndroidSpeaker;
+extern bool g_isLaptopSpeaker;
+extern bool g_is8DModeOn;
 
 // ================================================================
 // STUDIO AURAL EXCITER
@@ -76,8 +78,12 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
         float M = (L + R) * 0.5f, S = (L - R) * 0.5f;
-        pOut[i * 2] = M + (S * p->width);
-        pOut[i * 2 + 1] = M - (S * p->width);
+        float effectiveWidth = p->width;
+        if (g_isLaptopSpeaker) {
+            effectiveWidth = 1.0f + ((p->width - 1.0f) * 0.4f);
+        }
+        pOut[i * 2] = M + (S * effectiveWidth);
+        pOut[i * 2 + 1] = M - (S * effectiveWidth);
     }
 }
 ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
@@ -190,8 +196,8 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
     const float SMOOTH_COEF = 0.002f;
     // CRITICAL FIX: Dropped crossover from 0.032f (245Hz) down to 0.012f (~90Hz)
     // This stops the bass boost from touching the guitars and lower vocals.
-    const float F_BASS = 0.012f;
-    const float F_TREBLE = 0.65f;
+    const float F_BASS = 0.008f;   // ~112Hz: Keeps bass completely below the kick drum fundamental
+    const float F_TREBLE = 0.25f;
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
@@ -399,6 +405,37 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         // ==========================================
         // NORMAL EARPHONE / WINDOWS MODE
         // ==========================================
+        if (g_isLaptopSpeaker)
+        {
+            // LAPTOP SPEAKER BASS PROTECTION
+            // High-pass real sub-bass to prevent physical distortion, replace with psychoacoustic harmonics
+            const float HP_COEF = 0.015f; // ~100Hz
+            p->hp1L += HP_COEF * (L - p->hp1L);
+            p->hp1R += HP_COEF * (R - p->hp1R);
+            float safeL = L - p->hp1L;
+            float safeR = R - p->hp1R;
+
+            float harmL = 0.0f, harmR = 0.0f;
+            if (g_bassGain >= 0.001f)
+            {
+                const float LP_COEF = 0.012f; // ~80Hz
+                p->lp1L += LP_COEF * (L - p->lp1L);
+                p->lp1R += LP_COEF * (R - p->lp1R);
+                float drive = g_bassGain * 3.5f; // Slightly tamed for laptop
+                auto waveshape = [](float x)
+                {
+                    float ax = fabsf(x);
+                    if (ax > 1.0f) ax = 1.0f;
+                    return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
+                };
+                harmL = waveshape(p->lp1L * drive);
+                harmR = waveshape(p->lp1R * drive);
+            }
+            pOut[i * 2] = safeL + harmL;
+            pOut[i * 2 + 1] = safeR + harmR;
+            continue;
+        }
+
         if (g_bassGain < 0.001f)
         {
             // Safe to bypass only if we are in earphone mode and bass is 0
@@ -407,17 +444,29 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        const float LP_COEF = 0.010f;
-        float drive = g_bassGain * 1.5f;
+        const float LP_COEF = 0.011f;  // ~80Hz — captures kick body AND sub
+        float drive = g_bassGain * 1.2f;  // Slightly tamed multiplier
 
         p->lp1L += LP_COEF * (L - p->lp1L);
         p->lp2L += LP_COEF * (p->lp1L - p->lp2L);
         p->lp1R += LP_COEF * (R - p->lp1R);
         p->lp2R += LP_COEF * (p->lp1R - p->lp2R);
 
-        pOut[i * 2] = L + (p->lp2L * drive * 4.0f);
-        pOut[i * 2 + 1] = R + (p->lp2R * drive * 4.0f);
+        // Fix: Use linear drive + soft saturation to prevent crushing fractional values
+        float bassL = p->lp2L * drive * 3.0f;
+        float bassR = p->lp2R * drive * 3.0f;
+
+        // Soft saturation wave-shaper to keep the bass punchy without digital clipping
+        auto saturate = [](float x) {
+            float ax = fabsf(x);
+            if (ax > 1.0f) ax = 1.0f;
+            return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
+        };
+
+        pOut[i * 2] = L + saturate(bassL);
+        pOut[i * 2 + 1] = R + saturate(bassR);
     }
+
 }
 
 ma_node_vtable g_subwoofer_vtable = {subwoofer_process, NULL, 1, 1, 0};
@@ -619,8 +668,9 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         // 1. Read raw input and apply the user's boost
-        float L = pIn[i * 2] * p->boost;
-        float R = pIn[i * 2 + 1] * p->boost;
+        float multiplier = g_isLaptopSpeaker ? 2.5f : 1.0f; // Aggressively boost laptop speakers into the lookahead limiter for major RMS gains
+        float L = pIn[i * 2] * p->boost * multiplier;
+        float R = pIn[i * 2 + 1] * p->boost * multiplier;
 
         // 2. Peak Detection (Find the loudest channel)
         float peak = fmaxf(fabsf(L), fabsf(R));
@@ -673,3 +723,98 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     }
 }
 ma_node_vtable g_limiter_vtable = {limiter_process, NULL, 1, 1, 0};
+
+// ================================================================
+// TRUE 8D OBJECT-BASED SPATIALIZER (LR4 + HAAS)
+// ================================================================
+static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+{
+    // 1. THE ACOUSTIC SHIELD: Absolute zero footprint when disabled.
+    if (!g_is8DModeOn)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
+        *pFrameCountOut = *pFrameCountIn;
+        return;
+    }
+
+    DynamicSpatializerNode *p = (DynamicSpatializerNode *)pNode;
+    const float *pIn = ppFramesIn[0];
+    float *pOut = ppFramesOut[0];
+    ma_uint32 fc = *pFrameCountIn;
+    *pFrameCountOut = fc;
+
+    // LFO Speed: 0.15 Hz (One full circle around the head every 6.6 seconds)
+    float lfoStep = (2.0f * (float)M_PI * 0.15f) / 44100.0f;
+
+    for (ma_uint32 i = 0; i < fc; i++)
+    {
+        float inL = pIn[i * 2];
+        float inR = pIn[i * 2 + 1];
+
+        // 2. THE CASCADING CROSSOVER (Shatter the signal into Low, Mid, High)
+        float lowL, midHighL, lowR, midHighR;
+        p->crossLowL.process(inL, lowL, midHighL);
+        p->crossLowR.process(inR, lowR, midHighR);
+
+        float midL, highL, midR, highR;
+        p->crossHighL.process(midHighL, midL, highL);
+        p->crossHighR.process(midHighR, midR, highR);
+
+        // 3. THE SUB-BASS ANCHOR (Locked dead center)
+        float outLowL = lowL;
+        float outLowR = lowR;
+
+        // 4. THE ATMOSPHERIC ROOF (Static extreme Mid/Side widening for Highs)
+        float midSide_M = (highL + highR) * 0.5f;
+        float midSide_S = (highL - highR) * 0.5f;
+        float outHighL = midSide_M + (midSide_S * 1.5f);
+        float outHighR = midSide_M - (midSide_S * 1.5f);
+
+        // 5. THE 3D DRIFTER (Modulate only the Mids)
+        p->lfoPhase += lfoStep;
+        if (p->lfoPhase > 2.0f * (float)M_PI)
+            p->lfoPhase -= 2.0f * (float)M_PI;
+
+        float lfoVal = sinf(p->lfoPhase); // Ranges -1.0 (Left) to +1.0 (Right)
+
+        // Constant Power Panning Law
+        float angle = (lfoVal + 1.0f) * 0.25f * (float)M_PI;
+        float panGainL = cosf(angle);
+        float panGainR = sinf(angle);
+
+        // Mono-sum the mid band before panning it so it acts like a single solid object
+        float monoMid = (midL + midR) * 0.5f;
+        float pannedMidL = monoMid * panGainL;
+        float pannedMidR = monoMid * panGainR;
+
+        // 6. DYNAMIC HAAS DELAY (Psychoacoustic time-shifting)
+        // Delay the opposite ear by up to 12ms to trick the brain's localization
+        p->delayL[p->writeIdx] = pannedMidL;
+        p->delayR[p->writeIdx] = pannedMidR;
+
+        float maxDelaySamples = 12.0f * (44100.0f / 1000.0f); // 12ms
+
+        // If sound is left (lfoVal < 0), delay the Right ear. Vice versa.
+        int delayOffsetL = (lfoVal > 0.0f) ? (int)(lfoVal * maxDelaySamples) : 0;
+        int delayOffsetR = (lfoVal < 0.0f) ? (int)(-lfoVal * maxDelaySamples) : 0;
+
+        int readIdxL = (p->writeIdx - delayOffsetL + HAAS_BUFFER_SIZE) % HAAS_BUFFER_SIZE;
+        int readIdxR = (p->writeIdx - delayOffsetR + HAAS_BUFFER_SIZE) % HAAS_BUFFER_SIZE;
+
+        float haasMidL = p->delayL[readIdxL];
+        float haasMidR = p->delayR[readIdxR];
+
+        p->writeIdx = (p->writeIdx + 1) % HAAS_BUFFER_SIZE;
+
+        // 7. SUMMING MIXER (Reassemble the shattered pieces)
+        pOut[i * 2] = outLowL + haasMidL + outHighL;
+        pOut[i * 2 + 1] = outLowR + haasMidR + outHighR;
+    }
+}
+
+ma_node_vtable g_dynamic_spatializer_vtable = {
+    dynamic_spatializer_process,
+    NULL,
+    1, // 1 input bus
+    1, // 1 output bus
+    0};

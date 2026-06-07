@@ -1,4 +1,5 @@
 import { Track } from '../../types'; // Adjust path if needed
+import { PauseCircle, Zap, Play, Pause, XCircle } from 'lucide-react';
 
 interface BulkScannerProps {
   playlist: Track[];
@@ -45,7 +46,7 @@ export const BulkScanner = ({
               {bulkScanActive ? (
                 <div className="bulk-scan-active-view">
                   <div className="bulk-scan-info">
-                    <span className="bulk-scan-label">{bulkScanPaused ? '⏸ Paused' : '⚡ Scanning'}</span>
+                    <div className="bulk-scan-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{bulkScanPaused ? <><PauseCircle size={14} /> Paused</> : <><Zap size={14} /> Scanning</>}</div>
                     <span className="bulk-scan-pct">{bulkScanDone} / {bulkScanTotal} ({pct}%)</span>
                   </div>
                   <div className="bulk-scan-bar" style={{ marginBottom: 20 }}>
@@ -53,10 +54,10 @@ export const BulkScanner = ({
                   </div>
                   <div className="bulk-scan-actions" style={{ display: 'flex', gap: 10 }}>
                     {bulkScanPaused 
-                      ? <button className="folder-modal-scan-all" style={{ flex: 1 }} onClick={resumeBulkScan}>▶ Resume</button> 
-                      : <button className="folder-modal-scan-all" style={{ flex: 1, background: 'var(--bg-raised)', color: 'var(--text-primary)' }} onClick={pauseBulkScan}>⏸ Pause</button>
+                      ? <button className="folder-modal-scan-all" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} onClick={resumeBulkScan}><Play size={16} /> Resume</button> 
+                      : <button className="folder-modal-scan-all" style={{ flex: 1, background: 'var(--bg-raised)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} onClick={pauseBulkScan}><Pause size={16} /> Pause</button>
                     }
-                    <button className="folder-modal-scan-all" style={{ flex: 1, background: '#e83040' }} onClick={stopBulkScan}>✕ Stop</button>
+                    <button className="folder-modal-scan-all" style={{ flex: 1, background: '#e83040', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} onClick={stopBulkScan}><XCircle size={16} /> Stop</button>
                   </div>
                 </div>
               ) : (

@@ -76,7 +76,7 @@ body {
   --nav-active-left:  var(--theme-color);
   --track-hover:      rgba(255,255,255,0.04);
   --track-active-bg:  color-mix(in srgb,var(--theme-color) 10%,transparent);
-  --blob-opacity:     0.55;
+  --blob-opacity:     1;
   --scrollbar:        rgba(255,255,255,0.12);
   --scrollbar-hover:  rgba(255,255,255,0.22);
   --dsp-bg:           rgba(0,0,0,0.35);
@@ -137,7 +137,7 @@ body {
   --track-hover:      rgba(0,0,0,0.03);
   --track-active-bg:  color-mix(in srgb,var(--theme-color) 7%,transparent);
   /* BLOB FIX: 0.45 + mix-blend-mode:multiply in light mode */
-  --blob-opacity:     0.45;
+  --blob-opacity:     1;
   --scrollbar:        rgba(0,0,0,0.14);
   --scrollbar-hover:  rgba(0,0,0,0.25);
   --dsp-bg:           rgba(255,255,255,0.75);
@@ -355,7 +355,7 @@ body {
 .progress-container.mini:hover .progress-bar::-webkit-slider-thumb { width:10px; height:10px; }
 .player-interface { display:flex; justify-content:space-between; align-items:center; width:100%; }
 .track-info { display:flex; align-items:center; gap:14px; max-width:60%; cursor:pointer; }
-.art-circle { width:46px; height:46px; border-radius:10px; flex-shrink:0; background-size:cover; background-position:center; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.25); }
+.art-circle { width:50px; height:50px; border-radius:10px; flex-shrink:0; background-size:cover; background-position:center; display:flex; align-items:center; justify-content:center; }
 .art-circle span { font-size:18px; }
 /* ── Mini player text — single-line marquee on overflow ──────────
    .track-info is a flex child with max-width:60%.
@@ -395,14 +395,38 @@ body {
 
 .ambient-background { position:absolute; inset:0; z-index:0; overflow:hidden; background:var(--bg-expanded); transition:background 0.35s ease; }
 .blob { position:absolute; border-radius:50%; filter:blur(80px); opacity:var(--blob-opacity); will-change:transform; }
-.blob-1 { top:-10%; left:-10%; width:55vw; height:55vw; background:var(--blob-1); animation:orbit1 12s infinite alternate ease-in-out; }
-.blob-2 { bottom:-10%; right:-10%; width:50vw; height:55vw; background:var(--blob-2); animation:orbit2 15s infinite alternate ease-in-out; }
-.blob-3 { top:30%; left:30%; width:40vw; height:40vw; background:var(--blob-3); animation:orbit3 14s infinite alternate ease-in-out; }
+.blob-1 { top:-10%; left:-10%; width:55vw; height:55vw; background:var(--blob-1); animation:orbit1 6s infinite alternate ease-in-out; }
+.blob-2 { bottom:-10%; right:-10%; width:50vw; height:55vw; background:var(--blob-2); animation:orbit2 8s infinite alternate ease-in-out; }
+.blob-3 { top:30%; left:30%; width:40vw; height:40vw; background:var(--blob-3); animation:orbit3 7s infinite alternate ease-in-out; }
+.blob-4 { 
+  bottom: -5%; 
+  left: -5%; 
+  width: 45vw; 
+  height: 45vw; 
+  background: var(--theme-color); 
+  animation: orbit4 9s infinite alternate ease-in-out; 
+}
+
+@keyframes orbit4 { 
+  0%   { transform: translate(0,0) scale(0.95) rotate(0deg); } 
+  100% { transform: translate(30vw, -45vh) scale(1.4) rotate(-90deg); } 
+}
 /* BLOB FIX: multiply = vivid ink on white canvas */
 [data-theme="light"] .blob { mix-blend-mode:multiply; }
-@keyframes orbit1 { 0%{transform:translate(0,0) scale(1) rotate(0deg)} 100%{transform:translate(30vw,20vh) scale(1.2) rotate(40deg)} }
-@keyframes orbit2 { 0%{transform:translate(0,0) scale(1.2) rotate(0deg)} 100%{transform:translate(-30vw,-20vh) scale(0.9) rotate(-40deg)} }
-@keyframes orbit3 { 0%{transform:translate(0,0) scale(0.9) rotate(0deg)} 100%{transform:translate(20vw,-25vh) scale(1.3) rotate(80deg)} }
+
+/* Accelerated travel paths */
+@keyframes orbit1 { 
+  0%   { transform:translate(0,0) scale(1) rotate(0deg); } 
+  100% { transform:translate(45vw, 30vh) scale(1.25) rotate(60deg); } 
+}
+@keyframes orbit2 { 
+  0%   { transform:translate(0,0) scale(1.2) rotate(0deg); } 
+  100% { transform:translate(-45vw, -30vh) scale(0.85) rotate(-60deg); } 
+}
+@keyframes orbit3 { 
+  0%   { transform:translate(0,0) scale(0.9) rotate(0deg); } 
+  100% { transform:translate(35vw, -40vh) scale(1.35) rotate(120deg); } 
+}
 
 .mobile-album-gradient { display:none; }
 .fade-in { animation:fadeIn 0.35s ease-in-out forwards; opacity:0; }
@@ -740,6 +764,25 @@ body {
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+/* 🚀 PERFORMANCE: Fake Glass Method ONLY applied in RADAR (Spatial) Mode */
+.radar-mode .ep-icon-btn, 
+.radar-mode .taste-pill, 
+.radar-mode .ep-profile-badge, 
+.radar-mode .vol-btn {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.radar-mode .taste-pill.active,
+.radar-mode .ep-icon-btn.active,
+.radar-mode .ep-icon-btn:active {
+  background: color-mix(in srgb, var(--theme-color) 15%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--theme-color) 30%, transparent) !important;
+  color: var(--theme-color) !important;
 }
 
 .mobile-dsp-page {
@@ -1466,7 +1509,7 @@ body {
   }
   .mini-player-content { padding: 0 16px !important; height: 100% !important; display: flex; flex-direction: column; justify-content: center; }
   .progress-container.mini { display: none !important; } 
-  .art-circle { width: 36px !important; height: 36px !important; border-radius: 50% !important; background-color: var(--bg-surface) !important;}
+  .art-circle { width: 50px !important; height: 50px !important; border-radius: 50% !important; background-color: var(--bg-surface) !important;}
   .art-circle span { font-size: 16px !important; }
   .track-title { font-size: 14px !important; font-weight: 500 !important; color: var(--text-primary) !important; }
   .artist-subtitle { font-size: 12px !important; color: var(--text-secondary) !important; }
@@ -1527,7 +1570,7 @@ body {
   .lyric-line { font-size: 14px; font-weight: 500; color: var(--text-secondary); line-height: 1.4; margin-bottom: 6px; transition: all 0.4s cubic-bezier(0.25,1,0.5,1); text-align: center; }
   .lyric-line.active { font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; transform: scale(1.05); transform-origin: center; }
   
-  .studio-dashboard { border-radius: 16px; padding: 20px 18px; }
+  .studio-dashboard { border-radius: 12px; padding: 20px 18px; }
   .mobile-dsp-page { background: var(--bg-primary) !important; }
   /* ─── THE GREAT MOBILE PURGE: Strip all backgrounds, borders, shadows, and glassmorphism ─── */
   .ep-icon-btn, .taste-pill, .ep-profile-badge {
@@ -1751,6 +1794,9 @@ body {
   }
 }
 }
+
+
+
 @media (max-width: 768px) {
   
   /* 1. FORCE THE STATUS BAR SPACING */
@@ -1809,6 +1855,118 @@ body {
   .ep-actions{
     margin-top: 80px !important;
   }
+
+
+  /* ====================================================================
+     THE TRANSITION FIX (ANTI-SQUISH + OPTIMIZED INSTANT/DELAYED FILL)
+     ==================================================================== */
+  /* 1. Synchronize the expanding background container timing */
+  .bottom-player {
+    transition: all 0.5s cubic-bezier(0.2, 0.9, 0.1, 1) !important;
+  }
+
+  /* 2. Base fixed layout (prevents the flexbox squish) */
+  .expanded-player-content {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: auto !important;
+    width: 100vw !important;
+    height: 100vh !important; 
+    will-change: opacity, transform !important;
+    z-index: 2000 !important;
+    transform-origin: bottom center !important;
+  }
+
+  .mini-player-content {
+    position: fixed !important;
+    bottom: max(20px, env(safe-area-inset-bottom)) !important;
+    left: 8px !important;
+    top: auto !important;
+    width: calc(100vw - 16px) !important;
+    height: 60px !important; 
+    will-change: opacity, transform !important;
+    padding: 0 16px 0 8px !important;
+    z-index: 2001 !important;
+    transform-origin: center !important;
+  }
+
+  /* 3. When EXPANDED (Full Screen View) */
+  .bottom-player.expanded .expanded-player-content {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) scale(1) !important;
+    /* Fades in smoothly, transforms instantly */
+    transition: opacity 0.1s ease 0.1s !important; 
+  }
+
+  .bottom-player.expanded .mini-player-content {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateY(-20px) scale(0.95) !important;
+    /* Zero transitions = instant snap. Property removed entirely. */
+  }
+
+  /* 4. When MINIMIZED (Pill View) */
+  .bottom-player:not(.expanded) .expanded-player-content {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    transform: translateY(80px) scale(0.85) !important;
+    /* Opacity drops instantly, only transform is animated */
+    transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.1, 1) !important;
+  }
+
+  .bottom-player:not(.expanded) .mini-player-content {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) scale(1) !important;
+    /* Fades in slightly delayed, transforms smoothly */
+    transition: opacity 0.1s ease 0.1s, transform 1s cubic-bezier(0.2, 0.9, 0.1, 1) !important;
+  }
+  .dsp-container{
+  width: 100%;
+  position: absolute;
+}
+
+}
+
+.dsp-container{
+  width: 100%;
+  position: relative;
+  top:80px;
+}
+
+.mainclasstastepilllabel{
+  margin-bottom: 5px;
+  margin-left: 3px;
 }
 
 
+@media (max-width: 768px) {
+  .artist-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+  .artist-card-name {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 768px) {
+  .content-area {
+    border-top-left-radius: 28px !important;
+    border-top-right-radius: 28px !important;
+    background-color: var(--bg-base) !important;
+    overflow: hidden;
+  }
+  
+  [data-theme="light"] .content-area {
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
+    border-top: 1px solid rgba(0,0,0,0.05);
+  }
+
+  .track-item-icon{
+  background-color: #080808 !important;
+  }
+}

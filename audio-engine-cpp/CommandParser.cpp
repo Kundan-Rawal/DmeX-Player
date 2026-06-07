@@ -229,8 +229,21 @@ extern "C" void execute_audio_command(const char *cmd_in)
         ma_engine_set_volume(&g_engine, stof(args));
     else if (command == "SEEK" && g_soundInitialized)
     {
-        ma_uint32 sr = ma_engine_get_sample_rate(&g_engine);
-        ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(stof(args) * (float)sr));
+        ma_uint32 target_sr = 44100; // default fallback
+        if (g_usingSymphonia && g_symSource.buffer) {
+            target_sr = g_symSource.buffer->sample_rate;
+        } else {
+            ma_data_source* pDS = ma_sound_get_data_source(&g_sound);
+            if (pDS) {
+                ma_format fmt;
+                ma_uint32 channels;
+                ma_data_source_get_data_format(pDS, &fmt, &channels, &target_sr, NULL, 0);
+            } else {
+                target_sr = ma_engine_get_sample_rate(&g_engine);
+            }
+        }
+        
+        ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(stof(args) * (float)target_sr));
 
         g_subwooferNode.lp1L = g_subwooferNode.lp2L = g_subwooferNode.lp1R = g_subwooferNode.lp2R = 0.0f;
         memset(g_spatializerNode.haasBufL, 0, sizeof(g_spatializerNode.haasBufL));
@@ -303,47 +316,56 @@ extern "C" void execute_audio_command(const char *cmd_in)
     }
     else if (command == "LOAD_IR")
     {
-        if (g_convolutionNode.irDataL)
-        {
-            free(g_convolutionNode.irDataL);
-            g_convolutionNode.irDataL = nullptr;
-        }
-        if (g_convolutionNode.irDataR)
-        {
-            free(g_convolutionNode.irDataR);
-            g_convolutionNode.irDataR = nullptr;
-        }
-        if (g_convolutionNode.historyL)
-        {
-            free(g_convolutionNode.historyL);
-            g_convolutionNode.historyL = nullptr;
-        }
-        if (g_convolutionNode.historyR)
-        {
-            free(g_convolutionNode.historyR);
-            g_convolutionNode.historyR = nullptr;
-        }
-
-        if (args.empty())
+        // 1. UNIVERSAL FIX: Stop the memory leaks and thread crashes on ALL platforms
         {
             std::lock_guard<std::mutex> lock(g_irMutex);
+            if (g_convolutionNode.irDataL)
+            {
+                free(g_convolutionNode.irDataL);
+                g_convolutionNode.irDataL = nullptr;
+            }
+            if (g_convolutionNode.irDataR)
+            {
+                free(g_convolutionNode.irDataR);
+                g_convolutionNode.irDataR = nullptr;
+            }
+            if (g_convolutionNode.historyL)
+            {
+                free(g_convolutionNode.historyL);
+                g_convolutionNode.historyL = nullptr;
+            }
+            if (g_convolutionNode.historyR)
+            {
+                free(g_convolutionNode.historyR);
+                g_convolutionNode.historyR = nullptr;
+            }
+
             g_convolutionNode.irLength = 0;
             g_convolutionNode.historyIdx = 0;
             g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
             g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
             g_convolutionNode.wetMix = 0.0f;
             g_isConvolutionOn = false;
-            return;
         }
+
+        if (args.empty())
+            return;
 
         ma_decoder_config dcfg = ma_decoder_config_init(ma_format_f32, 2, 44100);
         ma_decoder dec;
         if (ma_decoder_init_file(args.c_str(), &dcfg, &dec) != MA_SUCCESS)
             return;
 
-        float *tempInterleaved = (float *)calloc(MAX_IR_SAMPLES * 2, sizeof(float));
+// 2. THE WINDOWS SHIELD: PC gets 2048 samples. Android gets throttled to 512.
+#ifdef __ANDROID__
+        const int read_samples = 1024;
+#else
+        const int read_samples = MAX_IR_SAMPLES;
+#endif
+
+        float *tempInterleaved = (float *)calloc(read_samples * 2, sizeof(float));
         ma_uint64 framesRead = 0;
-        ma_decoder_read_pcm_frames(&dec, tempInterleaved, MAX_IR_SAMPLES, &framesRead);
+        ma_decoder_read_pcm_frames(&dec, tempInterleaved, read_samples, &framesRead);
         ma_decoder_uninit(&dec);
 
         if (framesRead == 0)
@@ -370,13 +392,42 @@ extern "C" void execute_audio_command(const char *cmd_in)
             g_convolutionNode.historyL = newHistL;
             g_convolutionNode.historyR = newHistR;
             g_convolutionNode.irLength = (int)framesRead;
-            g_convolutionNode.historyIdx = 0;
-            g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
-            g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
         }
     }
     else if (command == "LOAD_IR_DUAL")
     {
+        // 1. UNIVERSAL FIX: Stop the memory leaks and thread crashes on ALL platforms
+        {
+            std::lock_guard<std::mutex> lock(g_irMutex);
+            if (g_convolutionNode.irDataL)
+            {
+                free(g_convolutionNode.irDataL);
+                g_convolutionNode.irDataL = nullptr;
+            }
+            if (g_convolutionNode.irDataR)
+            {
+                free(g_convolutionNode.irDataR);
+                g_convolutionNode.irDataR = nullptr;
+            }
+            if (g_convolutionNode.historyL)
+            {
+                free(g_convolutionNode.historyL);
+                g_convolutionNode.historyL = nullptr;
+            }
+            if (g_convolutionNode.historyR)
+            {
+                free(g_convolutionNode.historyR);
+                g_convolutionNode.historyR = nullptr;
+            }
+
+            g_convolutionNode.irLength = 0;
+            g_convolutionNode.historyIdx = 0;
+            g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
+            g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
+            g_convolutionNode.wetMix = 0.0f;
+            g_isConvolutionOn = false;
+        }
+
         size_t delimiter = args.find('|');
         if (delimiter == string::npos)
             return;
@@ -388,9 +439,17 @@ extern "C" void execute_audio_command(const char *cmd_in)
 
         if (ma_decoder_init_file(pathL.c_str(), &dcfg, &decL) != MA_SUCCESS)
             return;
-        float *tempL = (float *)calloc(MAX_IR_SAMPLES, sizeof(float));
+
+        // 2. THE WINDOWS SHIELD: PC gets 2048 samples. Android gets throttled to 512.
+#ifdef __ANDROID__
+        const int read_samples = 1024;
+#else
+        const int read_samples = MAX_IR_SAMPLES;
+#endif
+
+        float *tempL = (float *)calloc(read_samples, sizeof(float));
         ma_uint64 framesL = 0;
-        ma_decoder_read_pcm_frames(&decL, tempL, MAX_IR_SAMPLES, &framesL);
+        ma_decoder_read_pcm_frames(&decL, tempL, read_samples, &framesL);
         ma_decoder_uninit(&decL);
 
         if (ma_decoder_init_file(pathR.c_str(), &dcfg, &decR) != MA_SUCCESS)
@@ -398,9 +457,9 @@ extern "C" void execute_audio_command(const char *cmd_in)
             free(tempL);
             return;
         }
-        float *tempR = (float *)calloc(MAX_IR_SAMPLES, sizeof(float));
+        float *tempR = (float *)calloc(read_samples, sizeof(float));
         ma_uint64 framesR = 0;
-        ma_decoder_read_pcm_frames(&decR, tempR, MAX_IR_SAMPLES, &framesR);
+        ma_decoder_read_pcm_frames(&decR, tempR, read_samples, &framesR);
         ma_decoder_uninit(&decR);
 
         ma_uint64 maxFrames = (framesL > framesR) ? framesL : framesR;
@@ -415,10 +474,12 @@ extern "C" void execute_audio_command(const char *cmd_in)
         float *newIrR = (float *)calloc(maxFrames, sizeof(float));
         float *newHistL = (float *)calloc(maxFrames, sizeof(float));
         float *newHistR = (float *)calloc(maxFrames, sizeof(float));
+
         for (ma_uint64 i = 0; i < framesL; i++)
             newIrL[i] = tempL[i];
         for (ma_uint64 i = 0; i < framesR; i++)
             newIrR[i] = tempR[i];
+
         free(tempL);
         free(tempR);
 
@@ -429,9 +490,6 @@ extern "C" void execute_audio_command(const char *cmd_in)
             g_convolutionNode.historyL = newHistL;
             g_convolutionNode.historyR = newHistR;
             g_convolutionNode.irLength = (int)maxFrames;
-            g_convolutionNode.historyIdx = 0;
-            g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
-            g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
         }
     }
     else if (command == "REVERB")
@@ -456,9 +514,18 @@ extern "C" void execute_audio_command(const char *cmd_in)
         g_limiterNode.boost = 1.0f + (val * 1.2f);
         g_limiterNode.gainEnv = 1.0f;
     }
+    // Add this inside your if/else if chain block
+    // else if (command == "TOGGLE_8D")
+    // {
+    //     g_is8DModeOn = (args == "1");
+    // }
     else if (command == "ANDROID_SPEAKER")
     {
         g_isAndroidSpeaker = (stoi(args) == 1);
+    }
+    else if (command == "LAPTOP_SPEAKER")
+    {
+        g_isLaptopSpeaker = (stoi(args) == 1);
     }
 }
 

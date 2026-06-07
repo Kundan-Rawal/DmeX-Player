@@ -59,14 +59,14 @@ export const AmbientBackground = ({
   const DUST_COUNT = IS_ANDROID ? 0 : 500;
 
   const blobState = useRef([
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00015, sy:0.00011 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00012, sy:0.00016 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00017, sy:0.00013 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00014, sy:0.00018 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00011, sy:0.00014 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00016, sy:0.00012 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00013, sy:0.00017 },
-    { px:Math.random()*10, py:Math.random()*10, sx:0.00018, sy:0.00015 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.15, sy:0.11 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.12, sy:0.16 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.17, sy:0.13 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.14, sy:0.18 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.11, sy:0.14 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.16, sy:0.12 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.13, sy:0.17 },
+    { px:Math.random()*10, py:Math.random()*10, sx:0.18, sy:0.15 },
   ]);
   const dustState = useRef([...Array(DUST_COUNT)].map(()=>({ active:false,x:0,y:0,vx:0,vy:0,scale:0,opacity:0,isLeft:true })));
 

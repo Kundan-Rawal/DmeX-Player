@@ -1,5 +1,6 @@
 import React from 'react';
 import { Track, CustomPlaylist } from '../types'; // Adjust path if needed
+import { Heart, Play, Plus, Trash2 } from 'lucide-react';
 
 interface PlaylistGalleryProps {
   playlist: Track[];
@@ -35,29 +36,39 @@ export const PlaylistGalleryView: React.FC<PlaylistGalleryProps> = ({
         </div>
 
         <div className="smart-card" onClick={() => setCurrentView('FAVORITES')}>
-          <div className="smart-card-art fav-art">
-            <div className="fav-heart-icon">♥</div>
+          <div className="smart-card-art grid-art">
+            {playlist.filter(t => favoritesSet.has(t.path)).slice(0, 4).map((t, i) => (
+              <div key={i} className="mini-art-tile" style={{ backgroundImage: `url(${t.thumb || albumArt || ''})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+            ))}
+            {playlist.filter(t => favoritesSet.has(t.path)).length === 0 && (
+              <div className="fav-heart-icon" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Heart size={24} fill="currentColor" strokeWidth={0} /></div>
+            )}
           </div>
           <p className="smart-title">Favourite tracks</p>
           <p className="smart-count">{favoritesSet.size} tracks</p>
         </div>
 
-        <div className="smart-card" onClick={() => setCurrentView('ALL')}>
-          <div className="smart-card-art most-played-art">
-            <div className="play-icon">▶</div>
+        <div className="smart-card" onClick={() => setCurrentView('TOPTRACKS')}>
+          <div className="smart-card-art grid-art">
+            {playlist.filter(t => (t.playCount || 0) > 0).sort((a,b) => (b.playCount || 0) - (a.playCount || 0)).slice(0, 4).map((t, i) => (
+              <div key={i} className="mini-art-tile" style={{ backgroundImage: `url(${t.thumb || albumArt || ''})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+            ))}
+            {playlist.filter(t => (t.playCount || 0) > 0).length === 0 && (
+              <div className="play-icon" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Play size={24} fill="currentColor" strokeWidth={0} /></div>
+            )}
           </div>
           <p className="smart-title">Most played</p>
-          <p className="smart-count">All tracks</p>
+          <p className="smart-count">{playlist.filter(t => (t.playCount || 0) > 0).length} tracks</p>
         </div>
       </div>
 
       {/* TIER 2: The Custom Playlists Header */}
       <div className="custom-playlist-header">
         <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>My Playlists</h2>
-        <button className="samsung-add-playlist-btn" onClick={() => {
+        <button className="samsung-add-playlist-btn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => {
           const name = prompt("Enter playlist name:");
           if (name) createPlaylist(name);
-        }}>+</button>
+        }}><Plus size={18} /></button>
       </div>
 
       {/* TIER 3: The Custom Playlists List */}
@@ -74,7 +85,7 @@ export const PlaylistGalleryView: React.FC<PlaylistGalleryProps> = ({
                 <p className="samsung-list-title">{pl.name}</p>
                 <p className="samsung-list-count">{pl.trackPaths.length} tracks</p>
               </div>
-              <button className="delete-pl-btn" onClick={(e) => { e.stopPropagation(); deletePlaylist(pl.id); }}>🗑</button>
+              <button className="delete-pl-btn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => { e.stopPropagation(); deletePlaylist(pl.id); }}><Trash2 size={16} /></button>
             </div>
           ))
         )}

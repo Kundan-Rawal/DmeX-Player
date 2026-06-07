@@ -2,6 +2,8 @@ import React, { memo, useState, useRef, useEffect, useCallback } from "react";
 import { Track, IS_ANDROID } from "../../types"; // Adjust path if necessary
 import { PROFILES } from "../../config/audio";
 import { trackAccentColor } from "../../utils/helpers";
+import { Music, X, Heart } from 'lucide-react';
+// import { Position } from "@tauri-apps/api/dpi";
 
 const ITEM_HEIGHT = 72;
 const OVERSCAN = 3;
@@ -50,15 +52,23 @@ const TrackRow = memo(({
       onClick={() => { if (isSelectionMode) onToggleSelect(track.path); else onPlay(track); }}
       onTouchStart={handleTouchStart} onTouchEnd={cancelTouch} onTouchMove={cancelTouch} onTouchCancel={cancelTouch}>
       <div className="track-cell title-cell">
-        {isSelectionMode && <input type="checkbox" checked={isSelected} readOnly style={{ marginRight: '10px', transform: 'scale(1.2)', accentColor: 'var(--theme-color)' }} />}
-        <div className="track-item-icon">
+        {isSelectionMode && <input type="checkbox" checked={isSelected} readOnly style={{ marginRight: '10px', transform: 'scale(1.2)', accentColor: 'var(--theme-color)', position:'relative', left:'5px' }}/>}
+        <div className="track-item-icon" style={{ 
+          backgroundColor: 'var(--bg-raised)', 
+          border: '1px solid var(--border)',
+          borderRadius: '8px', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          overflow: 'hidden'
+        }}>
           {isActive && albumArt ? <div className="track-thumb-art" style={{ backgroundImage:`url(${albumArt})` }} />
             : track.thumb ? <div className="track-thumb-art" style={{ backgroundImage:`url(${track.thumb})` }} />
-            : <span>{profileData?.icon ?? '🎵'}</span>}
+            : <span style={{ color: 'var(--text-primary)', opacity: 0.6, display: 'flex', alignItems: 'center' }}>{profileData?.icon ? React.createElement(profileData.icon as any, {size: 16}) : <Music size={16} />}</span>}
         </div>
         <div className="track-item-details">
-          <span className="track-item-name">{isFav && <span className="fav-dot">♥ </span>}{track.name}</span>
-          <span className="track-item-artist">{track.artist}{track.profile && <span className="track-profile-icon">{profileData?.icon}</span>}</span>
+          <span className="track-item-name" style={{ display: 'flex', alignItems: 'center' }}>{isFav && <Heart size={14} fill="currentColor" strokeWidth={0} style={{ color: 'var(--theme-color)', marginRight: '6px' }} />}{track.name}</span>
+          <span className="track-item-artist">{track.artist}</span>
         </div>
       </div>
       <div className="track-cell hide-mobile">{track.album}</div>
@@ -66,7 +76,7 @@ const TrackRow = memo(({
       <div className="track-cell hide-mobile quality-badge">{track.quality}</div>
       <div className="track-cell time-cell" style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:'12px' }}>
         {activePlaylistId
-          ? <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,fontSize:15,background:'transparent',border:'none',opacity:0.8,color:'#ff4444' }} onClick={e=>{e.stopPropagation();onRemoveFromPlaylist(track);}}>✕</button>
+          ? <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,background:'transparent',border:'none',opacity:0.8,color:'#ff4444', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={e=>{e.stopPropagation();onRemoveFromPlaylist(track);}}><X size={16} /></button>
           : <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,fontSize:14,background:'transparent',border:'none',opacity:0.6 }} onClick={e=>{e.stopPropagation();onAddToPlaylist(track);}}>+</button>}
         {track.duration ? formatTime(track.duration) : '--:--'}
       </div>
@@ -225,21 +235,29 @@ export const DraggablePlaylistView = memo(({
                 {isSelectionMode
                   ? <input type="checkbox" checked={selectedTracks.has(track.path)} readOnly style={{ marginRight:'10px',transform:'scale(1.2)',accentColor:'var(--theme-color)' }} />
                   : <span className="drag-handle" style={{ cursor:'grab',paddingRight:'12px',paddingLeft:'4px',touchAction:'none' }} onPointerDown={e=>startDrag(e,track)}>⠿</span>}
-                <div className="track-item-icon">
+                <div className="track-item-icon" style={{ 
+                  backgroundColor: 'var(--bg-raised)', 
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  overflow: 'hidden'
+                }}>
                   {currentTrackPath===track.path && albumArt ? <div className="track-thumb-art" style={{ backgroundImage:`url(${albumArt})` }} />
                     : track.thumb ? <div className="track-thumb-art" style={{ backgroundImage:`url(${track.thumb})` }} />
-                    : <span>{profileData?.icon ?? '🎵'}</span>}
+                    : <span style={{ color: 'var(--text-secondary)', opacity: 1, display: 'flex', alignItems: 'center' }}>{profileData?.icon ? React.createElement(profileData.icon as any, {size: 16}) : <Music size={16} />}</span>}
                 </div>
                 <div className="track-item-details">
                   <span className="track-item-name">{track.name}</span>
-                  <span className="track-item-artist">{track.artist}{track.profile && <span className="track-profile-icon">{profileData?.icon}</span>}</span>
+                  <span className="track-item-artist">{track.artist}{track.profile && <span className="track-profile-icon" style={{ display: 'inline-flex', verticalAlign: 'middle', marginLeft: '4px' }}>{profileData?.icon && React.createElement(profileData.icon as any, {size: 12})}</span>}</span>
                 </div>
               </div>
               <div className="track-cell hide-mobile">{track.album}</div>
               <div className="track-cell hide-mobile">{track.year}</div>
               <div className="track-cell hide-mobile quality-badge">{track.quality}</div>
               <div className="track-cell time-cell" style={{ display:'flex',alignItems:'center',justifyContent:'flex-end',gap:12 }}>
-                {!isSelectionMode && <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,fontSize:15,background:'transparent',border:'none',opacity:0.7,color:'#ff5555' }} onClick={e=>{e.stopPropagation();onRemove(track);}}>✕</button>}
+                {!isSelectionMode && <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,background:'transparent',border:'none',opacity:0.7,color:'#ff5555', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e=>{e.stopPropagation();onRemove(track);}}><X size={16} /></button>}
                 {track.duration ? formatTime(track.duration) : '--:--'}
               </div>
             </li>

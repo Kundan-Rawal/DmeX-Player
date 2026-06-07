@@ -41,7 +41,7 @@ export const MiniPlayer = ({
       <div className="player-interface">
         <div className="track-info" onClick={() => setIsExpanded(true)}>
           {/* THE EMOJI PURGE: Removed the 🎵 span completely */}
-          <div className="art-circle" style={{ backgroundImage: albumArt ? `url(${albumArt})` : 'none', backgroundColor: albumArt ? 'transparent' : 'rgba(255,255,255,0.05)' }}></div>
+          <div className="art-circle" style={{ backgroundImage: albumArt ? `url(${albumArt})` : 'none', backgroundColor: albumArt ? 'transparent' : 'rgba(255,255,255,0.05)'}}></div>
           
           <div className="mini-text-block">
             {/* THE TITLE MARQUEE FIX */}
@@ -69,19 +69,19 @@ export const MiniPlayer = ({
               IS_ANDROID ? (
                 <div className="mini-marquee-clip scrolling">
                   <div className="mini-marquee-inner" style={{ animationDuration: '14s' }}>
-                    <span className="artist-subtitle" style={{ paddingRight: '48px' }}>{trackArtist}{detectedProfile && <span className="mini-profile"> {detectedProfile.icon}</span>}</span>
-                    <span className="artist-subtitle" style={{ paddingRight: '48px' }}>{trackArtist}{detectedProfile && <span className="mini-profile"> {detectedProfile.icon}</span>}</span>
+                    <span className="artist-subtitle" style={{ paddingRight: '48px'}}>{trackArtist}{detectedProfile && <span className="mini-profile" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '4px' }}> {detectedProfile.icon && React.createElement(detectedProfile.icon as any, {size: 12})}</span>}</span>
+                    <span className="artist-subtitle" style={{ paddingRight: '48px'}}>{trackArtist}{detectedProfile && <span className="mini-profile" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '4px' }}> {detectedProfile.icon && React.createElement(detectedProfile.icon as any, {size: 12})}</span>}</span>
                   </div>
                 </div>
               ) : (
                 <div className="mini-marquee-clip scrolling">
                   <Marquee speed={30} gradient={false} delay={1}>
-                    <span className="artist-subtitle" style={{ paddingRight: '48px' }}>{trackArtist}{detectedProfile && <span className="mini-profile"> {detectedProfile.icon}</span>}</span>
+                    <span className="artist-subtitle" style={{ paddingRight: '48px' }}>{trackArtist}</span>
                   </Marquee>
                 </div>
               )
             ) : (
-              <div className="mini-marquee-clip"><span className="artist-subtitle">{trackArtist}{detectedProfile && <span className="mini-profile"> {detectedProfile.icon}</span>}</span></div>
+              <div className="mini-marquee-clip"><span className="artist-subtitle">{trackArtist}{detectedProfile && <span className="mini-profile" style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '4px' }}> {detectedProfile.icon && React.createElement(detectedProfile.icon as any, {size: 12})}</span>}</span></div>
             )}
           </div>
 

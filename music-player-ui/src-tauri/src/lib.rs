@@ -1,5 +1,5 @@
 use walkdir::WalkDir;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
@@ -7,23 +7,20 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::audio::SampleBuffer;
+
 use std::fs::File;
-// use std::fs;
+use tauri::{State, Manager};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::ffi::CStr;
-
-mod db; // Import our new database module
-
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{State, Manager};
+
+mod db; 
 
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
 
 struct AppState {
     db_conn: Mutex<Connection>,
 }
-
 // ------------------------------------------------------------------
 // NEW: Drip-Feed Metadata Struct
 // ------------------------------------------------------------------
@@ -59,6 +56,8 @@ pub extern "C" fn Java_com_dmex_player_MainActivity_onAudioBecomingNoisy(
         execute_audio_command(cmd.as_ptr());
     }
 }
+
+
 
 #[no_mangle]
 pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer {
@@ -207,6 +206,7 @@ fn clear_library(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+
 #[tauri::command]
 fn add_to_library(track: db::Track, state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.db_conn.lock().unwrap();
@@ -214,6 +214,15 @@ fn add_to_library(track: db::Track, state: State<'_, AppState>) -> Result<(), St
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Failed to insert track: {}", e)),
     }
+}
+
+#[tauri::command]
+fn nuke_artist_cache(app: tauri::AppHandle) -> Result<(), String> {
+    let cache_dir = app.path().app_data_dir().unwrap().join("artist_art");
+    if cache_dir.exists() {
+        std::fs::remove_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -450,6 +459,9 @@ fn save_art_to_cache(app: tauri::AppHandle, file_name: String, data: Vec<u8>) ->
     Ok(file_path.to_string_lossy().to_string())
 }
 
+
+
+
 #[tauri::command]
 fn update_play_stats(path: String, seconds: i32, state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.db_conn.lock().unwrap();
@@ -472,6 +484,177 @@ fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::CustomPlaylist>, 
 fn save_playlist(playlist: db::CustomPlaylist, state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.db_conn.lock().unwrap();
     db::save_playlist(&conn, &playlist).map_err(|e| e.to_string())
+}
+
+
+#[tauri::command]
+fn cache_dsp_asset(app: tauri::AppHandle, file_name: String, data: Vec<u8>) -> Result<String, String> {
+    use tauri::Manager;
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dsp_dir = app_dir.join("dsp_cache");
+    
+    if !dsp_dir.exists() {
+        std::fs::create_dir_all(&dsp_dir).map_err(|e| e.to_string())?;
+    }
+    
+    let file_path = dsp_dir.join(&file_name);
+    
+    // Only write it once to save I/O overhead on subsequent loads
+    if !file_path.exists() {
+        std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
+    }
+    
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn extract_and_load_ir(app: tauri::AppHandle, asset_path: String) -> Result<String, String> {
+    use tauri::Manager;
+    
+    // 1. Isolate the raw filename from the path string (e.g., "SennheiserHD.wav")
+    let filename = asset_path.split('/').last().unwrap_or(&asset_path);
+    
+    // 2. Map filenames straight to compile-time embedded binary arrays. 
+    // This makes the files immune to APK zip restrictions, CSP policies, and filesystem sandboxes.
+    let bytes: &[u8] = match filename {
+        "DTSXHeadphonewide.wav" => include_bytes!("../resources/impulses/DTSXHeadphonewide.wav"),
+        "SennheiserHD.wav" => include_bytes!("../resources/impulses/SennheiserHD.wav"),
+        "Head360.wav" => include_bytes!("../resources/impulses/Head360.wav"),
+        "XHRQSurround.wav" => include_bytes!("../resources/impulses/XHRQSurround.wav"),
+        "xiaomipiston2.wav" => include_bytes!("../resources/impulses/xiaomipiston2.wav"),
+        "XHRStudioSurround.wav" => include_bytes!("../resources/impulses/XHRStudioSurround.wav"),
+        "dolbybassboost.wav" => include_bytes!("../resources/impulses/dolbybassboost.wav"),
+        "dolbydimension.wav" => include_bytes!("../resources/impulses/dolbydimension.wav"),
+        "OppoPM3.wav" => include_bytes!("../resources/impulses/OppoPM3.wav"),
+        "HyperXCloudalpha.wav" => include_bytes!("../resources/impulses/HyperXCloudalpha.wav"),
+        "AppleEarPods.wav" => include_bytes!("../resources/impulses/AppleEarPods.wav"),
+        "AppleAirPods.wav" => include_bytes!("../resources/impulses/AppleAirPods.wav"),
+        "AKGK240.wav" => include_bytes!("../resources/impulses/AKGK240.wav"),
+        "SteelSeriesArctic9X.wav" => include_bytes!("../resources/impulses/SteelSeriesArctic9X.wav"),
+        "dolbyheadR.wav" => include_bytes!("../resources/impulses/dolbyheadR.wav"),
+        "dolbyheadL.wav" => include_bytes!("../resources/impulses/dolbyheadL.wav"),
+        "dolbyvirtualspeakerL.wav" => include_bytes!("../resources/impulses/dolbyvirtualspeakerL.wav"),
+        "dolbyvirtualspeakerR.wav" => include_bytes!("../resources/impulses/dolbyvirtualspeakerR.wav"),
+        "Sony_WH1000XM2L.wav" => include_bytes!("../resources/impulses/Sony_WH1000XM2L.wav"),
+        "Sony_WH1000XM2R.wav" => include_bytes!("../resources/impulses/Sony_WH1000XM2R.wav"),
+        "AKGK701L.wav" => include_bytes!("../resources/impulses/AKGK701L.wav"),
+        "AKGK701R.wav" => include_bytes!("../resources/impulses/AKGK701R.wav"),
+        _ => return Err(format!("Unknown IR filename: {}", filename)),
+    };
+
+    // 3. Resolve the platform's standard app data directory
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dsp_dir = app_dir.join("dsp_cache");
+    if !dsp_dir.exists() {
+        std::fs::create_dir_all(&dsp_dir).map_err(|e| e.to_string())?;
+    }
+    
+    // 4. FORCE OVERWRITE: Delete the 'exists()' check to wipe out corrupted 404 files
+    let file_path = dsp_dir.join(filename);
+    std::fs::write(&file_path, bytes).map_err(|e| e.to_string())?;
+    
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn download_artist_art(artist_name: String, app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    let cache_dir = app_handle.path().app_data_dir().unwrap().join("artist_art");
+    if !cache_dir.exists() {
+        std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    }
+
+    // Clean up the artist name for the search query
+    // Strip out generic garbage like "feat.", "&", and commas so the API gets a clean name
+    let clean_artist = artist_name.split(|c| c == ',' || c == '&').next().unwrap_or(&artist_name);
+    let clean_artist = clean_artist.replace("feat.", "").replace("Feat.", "").trim().to_string();
+
+    let safe_name = artist_name.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+    let file_path = cache_dir.join(format!("{}.jpg", safe_name));
+
+    if file_path.exists() {
+        return Ok(Some(file_path.to_string_lossy().to_string()));
+    }
+
+    // DEEZER API: Strictly queries the Artist database, returning profile pictures.
+    let url = format!("https://api.deezer.com/search/artist?q={}&limit=1", urlencoding::encode(&clean_artist));
+    
+    let client = reqwest::blocking::Client::new();
+    let res = client.get(&url).send().map_err(|e| e.to_string())?;
+    
+    if res.status().is_success() {
+        let json: serde_json::Value = res.json().map_err(|e| e.to_string())?;
+        
+        // Deezer's JSON structure puts results inside a "data" array
+        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+            if let Some(first_artist) = data.first() {
+                // Try to grab the 1000x1000 portrait (picture_xl), fallback to 500x500 (picture_big)
+                if let Some(artwork_url) = first_artist.get("picture_xl").or_else(|| first_artist.get("picture_big")).and_then(|url| url.as_str()) {
+                    
+                    let img_bytes = client.get(artwork_url).send().map_err(|e| e.to_string())?.bytes().map_err(|e| e.to_string())?;
+                    
+                    let mut file = std::fs::File::create(&file_path).map_err(|e| e.to_string())?;
+                    
+                    // BRING THE WRITE TRAIT INTO SCOPE
+                    use std::io::Write;
+                    file.write_all(&img_bytes).map_err(|e| e.to_string())?;
+                    
+                    return Ok(Some(file_path.to_string_lossy().to_string()));
+                }
+            }
+        }
+    }
+    
+    Ok(None)
+}
+
+#[tauri::command]
+fn get_all_artist_images(app_handle: tauri::AppHandle) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut map = std::collections::HashMap::new();
+    let cache_dir = app_handle.path().app_data_dir().unwrap().join("artist_art");
+    if cache_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_file() {
+                        let path = entry.path();
+                        if let Some(ext) = path.extension() {
+                            if ext == "jpg" || ext == "png" || ext == "jpeg" {
+                                if let Some(stem) = path.file_stem() {
+                                    let key = stem.to_string_lossy().to_string();
+                                    let val = path.to_string_lossy().to_string();
+                                    map.insert(key, val);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(map)
+}
+
+#[tauri::command]
+fn get_setting(key: String, state: tauri::State<AppState>) -> Result<Option<String>, String> {
+    let conn = state.db_conn.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1").map_err(|e| e.to_string())?;
+    let mut rows = stmt.query(rusqlite::params![key]).map_err(|e| e.to_string())?;
+    if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let value: String = row.get(0).map_err(|e| e.to_string())?;
+        Ok(Some(value))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn set_setting(key: String, value: String, state: tauri::State<AppState>) -> Result<(), String> {
+    let conn = state.db_conn.lock().unwrap();
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+        rusqlite::params![key, value]
+    ).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -524,6 +707,14 @@ pub fn run() {
                 [],
             ).expect("Failed to create playlist_tracks table");
 
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )",
+                [],
+            ).expect("Failed to create settings table");
+
             app.manage(AppState {
                 db_conn: std::sync::Mutex::new(conn),
             });
@@ -531,9 +722,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            fetch_library, add_to_library, clear_library, save_art_to_cache, extract_and_cache_art,/* <-- ADDED HERE */
-            toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist,
-            audio_command, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
+            fetch_library, add_to_library, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
+            toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, get_all_artist_images, get_setting, set_setting,
+            audio_command, extract_and_load_ir, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music
         ])
         .run(tauri::generate_context!())

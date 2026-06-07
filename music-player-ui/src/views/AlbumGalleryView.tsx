@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { Track } from '../types';
 import './AlbumGalleryView.css';
+import { X } from 'lucide-react';
 
 interface AlbumGalleryProps {
   playlist: Track[];
@@ -8,9 +9,10 @@ interface AlbumGalleryProps {
 }
 
 export const AlbumGalleryView = ({ playlist, setCurrentView }: AlbumGalleryProps) => {
-  const [visibleCount, setVisibleCount] = useState(40); // Chunk size increased to fill the wider columns
+  const [visibleCount, setVisibleCount] = useState(40);
   const [isShuffled, setIsShuffled] = useState(false);
   const [shuffledAlbums, setShuffledAlbums] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 1. DATA AGGREGATOR
@@ -42,8 +44,13 @@ export const AlbumGalleryView = ({ playlist, setCurrentView }: AlbumGalleryProps
   }, [playlist]);
 
   const displayAlbums = useMemo(() => {
-    return isShuffled ? shuffledAlbums : baseAlbums;
-  }, [baseAlbums, isShuffled, shuffledAlbums]);
+    let result = isShuffled ? shuffledAlbums : baseAlbums;
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(a => a.name.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q));
+    }
+    return result;
+  }, [baseAlbums, isShuffled, shuffledAlbums, searchQuery]);
 
   // 2. THE LAZY LOADER (Smooth Append)
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -84,11 +91,31 @@ export const AlbumGalleryView = ({ playlist, setCurrentView }: AlbumGalleryProps
   return (
     <div className="album-scroll-container" ref={scrollRef} onScroll={handleScroll}>
       
-      <div className="album-actions-header">
-        <button className="dsp-btn" onClick={handleShuffle} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px',marginBottom:'10px' }}>
+      <div className="album-actions-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginBottom: '10px' }}>
+        
+        <div style={{ 
+          display: 'flex', alignItems: 'center', background: 'var(--bg-raised)', 
+          border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 12px', 
+          gap: '8px', flex: 1, minWidth: '200px'
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input 
+            type="text" placeholder="Search albums..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} 
+            style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <button className="dsp-btn" onClick={handleShuffle} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isShuffled ? 'Sort Newest' : 'Shuffle Albums'}
         </button>
-        <span className="album-count-text">{baseAlbums.length} Albums</span>
+        <span className="album-count-text">{displayAlbums.length} Albums</span>
       </div>
 
       <div className="bento-grid-v2">

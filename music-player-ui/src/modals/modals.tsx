@@ -3,12 +3,12 @@ import { CustomPlaylist } from '../types/index'; // Adjust path if needed
 
 export const FolderModal = memo(({ onClose, onScan }: { onClose:()=>void; onScan:(path:string)=>void }) => {
   const commonFolders = [
-    { label:'🎵 Music', path:'/storage/emulated/0/Music' },
-    { label:'⬇️ Downloads', path:'/storage/emulated/0/Download' },
-    { label:'📁 Downloads (alt)', path:'/storage/emulated/0/Downloads' },
-    { label:'📱 Internal Storage', path:'/storage/emulated/0' },
-    { label:'💾 SD Card', path:'/storage/sdcard1/Music' },
-    { label:'🗂️ SD Card Root', path:'/storage/sdcard1' },
+    { label:'Music', path:'/storage/emulated/0/Music' },
+    { label:'⬇Downloads', path:'/storage/emulated/0/Download' },
+    { label:'Downloads (alt)', path:'/storage/emulated/0/Downloads' },
+    { label:'Internal Storage', path:'/storage/emulated/0' },
+    { label:'SD Card', path:'/storage/sdcard1/Music' },
+    { label:'SD Card Root', path:'/storage/sdcard1' },
   ];
   return (
     <div className="folder-modal-overlay" onClick={onClose}>
@@ -57,6 +57,42 @@ export const PlaylistPopup = memo(({ playlists, onClose, onCreate, onAdd, newPla
           <input autoFocus className="playlist-popup-input" placeholder="New playlist name…" value={newPlaylistName} onChange={e=>setNewPlaylistName(e.target.value)} onPointerDown={e=>e.stopPropagation()} />
           <button type="submit" className="playlist-popup-create-btn" onPointerDown={e=>e.stopPropagation()}>Create</button>
         </form>
+      </div>
+    </div>
+  );
+});
+
+export const SettingsModal = memo(({ apiKey, setApiKey, onClose, onSave }: { apiKey: string, setApiKey: (k:string)=>void, onClose: ()=>void, onSave: ()=>void }) => {
+  return (
+    <div className="folder-modal-overlay" onClick={onClose}>
+      <div className="folder-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth: '400px', height: 'auto', paddingBottom: '20px' }}>
+        <div className="folder-modal-header"><h2>Settings</h2><button className="folder-modal-close" onClick={onClose}>×</button></div>
+        
+        <div style={{ padding: '0 20px', marginTop: '10px' }}>
+          <h3 style={{ fontSize: '14px', marginBottom: '8px', opacity: 0.8 }}>Gemini API Key (AI Lyrics)</h3>
+          <p style={{ fontSize: '12px', opacity: 0.6, marginBottom: '12px', lineHeight: '1.4' }}>
+            Enter your Google Gemini API Key to enable AI-powered lyrics fetching and metadata correction. 
+            Your key is saved locally in the database.
+          </p>
+          <input 
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="AIzaSy..."
+            style={{
+              width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgba(0,0,0,0.2)', color: 'inherit', outline: 'none', marginBottom: '20px', fontSize: '14px'
+            }}
+          />
+          
+          <button 
+            className="add-folder-btn" 
+            style={{ width: '100%' }}
+            onClick={() => { onSave(); onClose(); }}
+          >
+            Save Settings
+          </button>
+        </div>
       </div>
     </div>
   );

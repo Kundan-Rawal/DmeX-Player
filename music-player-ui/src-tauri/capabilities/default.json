@@ -18,6 +18,9 @@
     "fs:allow-audio-write-recursive",
     "fs:allow-download-write-recursive",
     "fs:allow-document-write-recursive",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-write-file",
     {
       "identifier": "shell:allow-execute",
       "allow": [{ "name": "bin/AudioEngine", "sidecar": true }]
@@ -37,6 +40,13 @@
     {
       "identifier": "fs:allow-read-dir",
       "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$APPDATA/dsp_cache",
+        "$APPDATA/dsp_cache/*"
+      ]
     }
   ]
 }

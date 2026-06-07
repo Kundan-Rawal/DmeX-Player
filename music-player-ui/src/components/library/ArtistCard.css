@@ -1,0 +1,80 @@
+/* The Grid Container (Put this on your main listing page) */
+.artist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+
+/* Individual Card */
+.artist-card-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px; /* Space between image and text */
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+.artist-card-root:hover {
+  transform: translateY(-4px);
+}
+
+/* Force a perfect square for the image/placeholder */
+.artist-card-art {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px; /* Match your album corner radius */
+  overflow: hidden;
+  background-color: var(--bg-surface-elevated, #1a1a1a);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Ensure real images fill the square */
+.artist-card-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Center the placeholder SVG */
+.artist-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #888);
+}
+.artist-placeholder svg {
+  width: 40%;
+  height: 40%;
+  opacity: 0.5;
+}
+
+/* Text formatting outside the image */
+.artist-card-info {
+  display: flex;
+  flex-direction: column;
+}
+.artist-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artist-card-count {
+  font-size: 12px;
+  color: var(--text-muted, #aaa);
+}
+
+@media (max-width: 768px) {
+  .artist-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+  .artist-card-name {
+    font-size: 13px;
+  }
+}

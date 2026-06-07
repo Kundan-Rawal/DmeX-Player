@@ -27,6 +27,9 @@ extern bool g_isCompressOn;
 extern bool g_isReverbOn;
 extern bool g_isConvolutionOn;
 extern bool g_isAndroidSpeaker;
+extern bool g_isLaptopSpeaker;
+extern bool g_is8DModeOn; // Add to toggles
+                          // Add to node instances
 
 // Node Instances
 extern StudioExciterNode g_exciterNode;
@@ -39,6 +42,7 @@ extern MultibandCompressorNode g_compressorNode;
 extern LimiterNode g_limiterNode;
 extern MeterNode g_meterNode;
 extern SubwooferNode g_subwooferNode;
+extern DynamicSpatializerNode g_8DNode;
 
 // Channel Config
 extern ma_uint32 g_channels;

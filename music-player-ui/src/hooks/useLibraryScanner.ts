@@ -25,16 +25,9 @@ export const useLibraryScanner = (
       try {
         const saved = await invoke<Track[]>('fetch_library');
         if (saved && saved.length > 0) {
-          // SELF-HEALING: Force the background enricher to rebuild RAM-only Blob URLs
-          const cleanSaved = saved.map(t => ({
-            ...t,
-            thumb: undefined,
-            metadataLoaded: false 
-          }));
-          
-          playlistRef.current = cleanSaved;
-          setPlaylist(cleanSaved);
-          setFavorites(cleanSaved.filter(t => t.isFavorite).map(t => t.path));
+          playlistRef.current = saved;
+          setPlaylist(saved);
+          setFavorites(saved.filter(t => t.isFavorite).map(t => t.path));
         }
       } catch (err) { console.error("CRITICAL: SQLite fetch_library failed", err); }
 

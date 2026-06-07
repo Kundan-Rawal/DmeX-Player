@@ -1,0 +1,42 @@
+App.tsx:1885:<div className="empty-icon">🎵</div>
+App.tsx:1905:✕
+App.tsx:1922:{activePlaylistId&&<button className="add-folder-btn" style={{padding:'0 16px',height:'34px',background:'#e81123',color:'#fff'}} onClick={()=>removeFromPlaylist(activePlaylistId,Array.from(selectedTracks))}>🗑 Remove</button>}
+App.tsx:1928:{!IS_ANDROID && <button className="dsp-btn" style={{marginRight: 'auto'}} onClick={()=>setIsSelectionMode(true)}>☑ Select Multiple</button>}
+App.tsx:2263:{!albumArt&&<span>🎵</span>}
+App.tsx:2326:{scanProgress ? `⏳ ${scanProgress}` : '🔍 Fetch Lyrics Online'}
+TopNav.tsx:140:<button className="win-btn close" onClick={() => appWindow.close()}>✕</button>
+BulkScanner.tsx:48:<span className="bulk-scan-label">{bulkScanPaused ? '⏸ Paused' : '⚡ Scanning'}</span>
+BulkScanner.tsx:59:<button className="folder-modal-scan-all" style={{ flex: 1, background: '#e83040' }} onClick={stopBulkScan}>✕ Stop</button>
+TrackLists.tsx:66:: <span style={{ color: 'var(--text-primary)', opacity: 0.6 }}>{profileData?.icon ?? '🎵'}</span>}
+TrackLists.tsx:69:<span className="track-item-name">{isFav && <span className="fav-dot">♥ </span>}{track.name}</span>
+TrackLists.tsx:78:? <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,fontSize:15,background:'transparent',border:'none',opacity:0.8,color:'#ff4444' }} onClick={e=>{e.stopPropagation();onRemoveFromPlaylist(track);}}>✕</button>
+TrackLists.tsx:248:: <span style={{ color: 'var(--text-secondary)', opacity: 1 }}>{profileData?.icon ?? '🎵'}</span>}
+TrackLists.tsx:259:{!isSelectionMode && <button className="ep-icon-btn no-touch-effects" style={{ width:28,height:28,fontSize:15,background:'transparent',border:'none',opacity:0.7,color:'#ff5555' }} onClick={e=>{e.stopPropagation();onRemove(track);}}>✕</button>}
+ExpandedPlayerUI.tsx:123:<button className="preset-btn studio" onClick={()=>applyPreset('STUDIO')}>🎧 Studio</button>
+ExpandedPlayerUI.tsx:124:<button className="preset-btn cinema" onClick={()=>applyPreset('CINEMATIC')}>🍿 Cinematic</button>
+ExpandedPlayerUI.tsx:125:<button className="preset-btn relax" onClick={()=>applyPreset('RELAX')}>🌙 Relax</button>
+ExpandedPlayerUI.tsx:286::isManualOverride?<span className="profile-chip" style={{color:'#ffa726',background:'rgba(255,167,38,0.15)'}}>⚙️ Manual Override Active</span>
+ExpandedPlayerUI.tsx:288::<span className="profile-chip muted">🎵 Standard Audio</span>}
+MiniPlayer.tsx:43:{/* THE EMOJI PURGE: Removed the 🎵 span completely */}
+MobileExpandedPlayer.tsx:248:: <span className="mep-badge mep-badge-muted">🎵 Standard Audio</span>
+MobileExpandedPlayer.tsx:290:<div className="glass-label-row" style={{ marginBottom: 10 }}><span>Background Visualizer</span><span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{p.visMode === 'ORBIT' ? 'Lava Lamps' : '🎱 8B Fast'}</span></div>
+MobileExpandedPlayer.tsx:292:<button className={`glass-boost-btn ${p.visMode === 'ORBIT' ? 'active' : ''}`} style={p.visMode === 'ORBIT' ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined} onClick={() => p.setVisMode('ORBIT')}>🫧 Orbit</button>
+MobileExpandedPlayer.tsx:293:<button className={`glass-boost-btn ${p.visMode === 'RADAR' ? 'active' : ''}`} style={p.visMode === 'RADAR' ? { background: 'rgba(200,34,42,0.25)', borderColor: 'var(--theme-color)', color: 'var(--theme-color)' } : undefined} onClick={() => p.setVisMode('RADAR')}>🎱 8B</button>
+MobileExpandedPlayer.tsx:299:<div className="glass-label-row" style={{ marginBottom: 6 }}><span>Audiophile EQ</span><span style={{ fontSize: '0.72rem', fontWeight: 600, color: p.isFIRMode ? '#a5d6a7' : 'var(--text-secondary)' }}>{p.isFIRMode ? '✦ Linear Phase' : 'Standard IIR'}</span></div>
+MobileExpandedPlayer.tsx:302:<button className={`glass-boost-btn ${p.isFIRMode ? 'active' : ''}`} style={p.isFIRMode ? { background: 'rgba(165,214,167,0.2)', borderColor: '#a5d6a7', color: '#a5d6a7' } : undefined} onClick={() => { p.setIsFIRMode(true); p.writeToEngine('FIRMODE 1'); }}>✦ Audiophile</button>
+MobileExpandedPlayer.tsx:313:<button className={`glass-boost-btn ${!p.isPhoneSpeaker ? 'active' : ''}`} style={!p.isPhoneSpeaker ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined} onClick={() => { p.setIsPhoneSpeaker(false); p.writeToEngine('ANDROID_SPEAKER 0'); }}>🎧 Headphones</button>
+MobileExpandedPlayer.tsx:314:<button className={`glass-boost-btn ${p.isPhoneSpeaker ? 'active' : ''}`} style={p.isPhoneSpeaker ? { background: 'rgba(255,59,48,0.28)', borderColor: 'rgba(255,59,48,0.55)', color: '#ff3b30' } : undefined} onClick={() => { p.setIsPhoneSpeaker(true); p.writeToEngine('ANDROID_SPEAKER 1'); }}>📱 Phone Speaker</button>
+MobileExpandedPlayer.tsx:336:{!p.albumArt && <span className="mep-art-icon">🎵</span>}
+MobileExpandedPlayer.tsx:369:{p.scanProgress ? `⏳ ${p.scanProgress}` : '🔍 Fetch Lyrics Online'}
+audio.ts:6:{ id:'CLASSICAL', label:'Classical / Orchestral', icon:'🎻', description:'High dynamic range · Natural wide field', settings:{ drive:0.2, widen:1.25, spatial:0.08, reverb:0.10, compress:false, remaster:false } },
+audio.ts:7:{ id:'BOLLYWOOD', label:'90s Bollywood Classics', icon:'🎙️', description:'Warm vintage analog · Vocals front & center', settings:{ drive:0.4, widen:1.12, spatial:0.05, reverb:0.05, compress:true, remaster:false } },
+audio.ts:8:{ id:'VOCAL', label:'Vocal / Acoustic', icon:'🎤', description:'Center-heavy · Lead vocals protected', settings:{ drive:0.4, widen:1.10, spatial:0.05, reverb:0.04, compress:true, remaster:false } },
+audio.ts:9:{ id:'ELECTRONIC', label:'Electronic / EDM', icon:'⚡', description:'Brickwall master · Exciter restores air', settings:{ drive:1.4, widen:1.25, spatial:0.08, reverb:0.04, compress:true, remaster:false } },
+audio.ts:10:{ id:'HIPHOP', label:'Hip-Hop / R&B', icon:'🎧', description:'Punchy · Tight dynamics', settings:{ drive:1.0, widen:1.15, spatial:0.06, reverb:0.03, compress:true, remaster:false } },
+audio.ts:11:{ id:'AMBIENT', label:'Ambient / Chill', icon:'🌊', description:'Low energy · Generous reverb space', settings:{ drive:0.1, widen:1.0, spatial:0.20, reverb:0.18, compress:false, remaster:false } },
+audio.ts:12:{ id:'POP', label:'Pop / Standard', icon:'🎵', description:'Balanced mix · Universal profile', settings:{ drive:0.7, widen:1.20, spatial:0.07, reverb:0.06, compress:true, remaster:false } },
+modals.tsx:27:<button className="folder-modal-scan-all" onClick={()=>{onScan('ALL');onClose();}}>📂 Scan All Common Folders</button>
+modals.tsx:49:<span className="playlist-popup-item-icon">📑</span>
+AlbumGalleryView.tsx:109:✕
+PlaylistGalleryView.tsx:43:<div className="fav-heart-icon" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>♥</div>
+PlaylistGalleryView.tsx:87:<button className="delete-pl-btn" onClick={(e) => { e.stopPropagation(); deletePlaylist(pl.id); }}>🗑</button>

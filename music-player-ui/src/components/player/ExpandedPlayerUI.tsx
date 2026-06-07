@@ -2,9 +2,16 @@ import React, { useMemo } from 'react';
 import Marquee from 'react-fast-marquee';
 import { Taste } from '../../types'; 
 import { AudioProfile } from '../../config/audio';
-import { resolveResource } from '@tauri-apps/api/path';
 import { formatTime } from '../../utils/formatters';
+import { Headphones, Video, Moon, Settings2, Disc } from 'lucide-react';
 
+import { HDCrystalIcon } from './HDCrystalIcon';
+import { ImmersiveIcon } from './ImmersiveIcon';
+import { ChillIcon } from './ChillIcon';
+
+import { invoke } from '@tauri-apps/api/core';
+
+// Exported so MobileExpandedPlayer can type its handler without duplicating the list.
 const REVERB_ENVIRONMENTS = [
   { id:'NONE', label:'Off', path:'' },
   { id:'DTSXHeadphonewide', label:'DTS:X Headphone Wide', path:'resources/impulses/DTSXHeadphonewide.wav' },
@@ -27,11 +34,9 @@ const REVERB_ENVIRONMENTS = [
   { id:'AKGK701', label:'AKG K701', path:'resources/impulses/AKGK701L.wav|resources/impulses/AKGK701R.wav' },
 ];
 
-const TASTES:{id:Taste;icon:string;label:string}[] = [
-  {id:'QUALITY',icon:'✨',label:'HD Clear'},
-  {id:'IMMERSIVE',icon:'🌌',label:'Immersive'},
-  {id:'CHILL',icon:'🌙',label:'Chill'}
-];
+// Convenience type for the env entries — used by the Android handler in MobileExpandedPlayer.
+export type ReverbEnv = typeof REVERB_ENVIRONMENTS[number];
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPONENT 1: DSP STUDIO
@@ -49,12 +54,27 @@ interface DSPStudioProps {
   setSmartTaste: (v: Taste) => void;
   setBassLevel: (v: number) => void;
   writeToEngine: (cmd: string) => Promise<void>;
+
+  // ── ANDROID ESCAPE HATCH ──────────────────────────────────────────────────
+  // When provided, DSPStudio delegates ALL acoustic-environment loading to this
+  // callback instead of running its internal resolveResource (Windows-only) path.
+  //
+  // On Android, resources live inside the APK and have no accessible filesystem
+  // path, so resolveResource() returns a useless string. The Android caller
+  // (MobileExpandedPlayer) must supply a handler that:
+  //   1. fetch()es the .wav from the bundled asset URL
+  //   2. writes the binary to AppData via plugin-fs
+  //   3. hands the real physical path to writeToEngine
+  //
+  // On Windows this prop is simply omitted and the internal logic runs as before.
+  onEnvSelect?: (env: ReverbEnv) => Promise<void>;
 }
 
 export const DSPStudio = ({
   isRemastered, setIsRemastered, isCompressed, setIsCompressed, selectedAcousticEnv, setSelectedAcousticEnv,
   isEnvDropdownOpen, setIsEnvDropdownOpen, upscaleDrive, setUpscaleDrive, widenWidth, setWidenWidth,
-  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, setIsManualOverride, setSmartTaste, setBassLevel, writeToEngine
+  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, setIsManualOverride, setSmartTaste, setBassLevel,
+  writeToEngine,  // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
 }: DSPStudioProps) => {
 
   const applyPreset = async (preset:'STUDIO'|'CINEMATIC'|'RELAX') => {
@@ -69,13 +89,41 @@ export const DSPStudio = ({
   const isConvActive = selectedAcousticEnv !== 'NONE';
   const disabledStyle = {opacity:isConvActive?0.3:1,pointerEvents:isConvActive?'none':'auto',transition:'opacity 0.3s'} as React.CSSProperties;
 
+  // ── Internal Windows handler (resolveResource path) ───────────────────────
+  // Only called when onEnvSelect is NOT provided (i.e. running on Windows).
+  // const handleEnvSelectWindows = async (env: ReverbEnv) => {
+  //   if (env.path) {
+  //     try {
+  //       if (env.path.includes('|')) {
+  //         const [pL, pR] = env.path.split('|');
+  //         const pathL = await resolveResource(pL);
+  //         const pathR = await resolveResource(pR);
+  //         writeToEngine(`LOAD_IR_DUAL ${pathL}|${pathR}`);
+  //       } else {
+  //         const path = await resolveResource(env.path);
+  //         writeToEngine(`LOAD_IR ${path}`);
+  //       }
+  //       writeToEngine(`CONVOLUTION 0.35`);
+  //       setIsManualOverride(true);
+  //       setSmartTaste('QUALITY' as Taste);
+  //     } catch (err) {
+  //       console.error("Failed to load IR:", err);
+  //     }
+  //   } else {
+  //     // "Off" selected
+  //     writeToEngine(`LOAD_IR `);
+  //     writeToEngine(`CONVOLUTION 0.0`);
+  //     setIsManualOverride(false);
+  //   }
+  // };
+
   return (
     <div className="studio-dashboard fade-in">
       <div className="studio-header"><h2>Fine Tune DSP</h2><p className="studio-subtitle">Manual override — resets on next track load</p></div>
       <div className="manual-presets" style={disabledStyle}>
-        <button className="preset-btn studio" onClick={()=>applyPreset('STUDIO')}>🎧 Studio</button>
-        <button className="preset-btn cinema" onClick={()=>applyPreset('CINEMATIC')}>🍿 Cinematic</button>
-        <button className="preset-btn relax" onClick={()=>applyPreset('RELAX')}>🌙 Relax</button>
+        <button className="preset-btn studio" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={()=>applyPreset('STUDIO')}><Headphones size={16} /> Studio</button>
+        <button className="preset-btn cinema" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={()=>applyPreset('CINEMATIC')}><Video size={16} /> Cinematic</button>
+        <button className="preset-btn relax" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={()=>applyPreset('RELAX')}><Moon size={16} /> Relax</button>
       </div>
       <div className="dsp-grid">
         <div className="dsp-card toggle-card">
@@ -94,15 +142,39 @@ export const DSPStudio = ({
               <div className="glass-options-menu fade-in" style={{position:'absolute',top:'100%',left:0,right:0,zIndex:99,marginTop:'8px',padding:'6px',maxHeight:'250px',overflowY:'auto'}}>
                 {REVERB_ENVIRONMENTS.map(env=>(
                   <div key={env.id} style={{padding:'12px 14px',borderRadius:'6px',cursor:'pointer',background:selectedAcousticEnv===env.id?'rgba(255,255,255,0.15)':'transparent',transition:'background 0.2s'}}
-                    onClick={async e=>{
-                      e.stopPropagation();setIsEnvDropdownOpen(false);setSelectedAcousticEnv(env.id);
-                      if(env.path){
-                        try{
-                          if(env.path.includes('|')){const [pL,pR]=env.path.split('|');writeToEngine(`LOAD_IR_DUAL ${await resolveResource(pL)}|${await resolveResource(pR)}`);}
-                          else writeToEngine(`LOAD_IR ${await resolveResource(env.path)}`);
-                          writeToEngine(`CONVOLUTION 0.35`);setIsManualOverride(true);setSmartTaste('QUALITY' as Taste);
-                        }catch(err){console.error(err);}
-                      }else{writeToEngine(`LOAD_IR `);writeToEngine(`CONVOLUTION 0.0`);setIsManualOverride(false);}
+                    onClick={async e => {
+                      e.stopPropagation();
+                      setIsEnvDropdownOpen(false);
+                      setSelectedAcousticEnv(env.id);
+
+                      if (env.path) {
+                        try {
+                          // The Unified Native Routing Wrapper
+                          const getPhysicalPath = async (rawPath: string) => {
+                                return await invoke<string>('extract_and_load_ir', { assetPath: rawPath });
+                          };
+
+                          if (env.path.includes('|')) {
+                            const [pL, pR] = env.path.split('|');
+                            const pathL = await getPhysicalPath(pL);
+                            const pathR = await getPhysicalPath(pR);
+                            await writeToEngine(`LOAD_IR_DUAL ${pathL}|${pathR}`);
+                          } else {
+                            const path = await getPhysicalPath(env.path);
+                            await writeToEngine(`LOAD_IR ${path}`);
+                          }
+                          
+                          await writeToEngine(`CONVOLUTION 0.35`);
+                          setIsManualOverride(true);
+                          setSmartTaste('QUALITY' as Taste);
+                        } catch (err) {
+                          console.error("Failed to load Convolution IR across bridge:", err);
+                        }
+                      } else {
+                        await writeToEngine(`LOAD_IR `);
+                        await writeToEngine(`CONVOLUTION 0.0`);
+                        setIsManualOverride(false);
+                      }
                     }}>{env.label}</div>
                 ))}
               </div>
@@ -147,6 +219,7 @@ interface ExpandedControlsProps {
   handlePrev: () => void; isPlaying: boolean; handlePlayPause: () => Promise<void>;
   handleNext: () => void; handleToggleRepeat: (e?: React.MouseEvent) => void;
   repeatDeg: number; repeatMode: 'OFF' | 'ALL' | 'ONE'; repeatBusy: boolean;
+  visMode?: 'ORBIT' | 'RADAR';
 }
 
 export const ExpandedControls = ({
@@ -157,20 +230,49 @@ export const ExpandedControls = ({
   repeatDeg, repeatMode, repeatBusy
 }: ExpandedControlsProps) => {
 
-  const isLong = trackTitle.length > 25;
-  const artistIsLong = trackArtist.length > 30;
+  // 1. INJECT ZERO-WIDTH SPACES FOR EMPTY STATES
+  const safeTitle = trackTitle && trackTitle.trim() !== '' ? trackTitle : '\u200B';
+  const safeArtist = trackArtist && trackArtist.trim() !== '' ? trackArtist : '\u200B';
 
+  const isLong = safeTitle.length > 25;
+  const artistIsLong = safeArtist.length > 30;
+
+  // 2. APPLY TO MARQUEES
   const TitleMarquee = useMemo(() => (
     isLong
-      ? <div className="marquee-container scrolling" key={"title-"+trackTitle}><Marquee speed={40} gradient={false} delay={1.5}><h1 className="ep-title" style={{paddingRight:'60px',margin:0}}>{trackTitle}</h1></Marquee></div>
-      : <div className="marquee-container" key={"title-"+trackTitle}><h1 className="ep-title">{trackTitle}</h1></div>
-  ), [isLong, trackTitle]);
+      ? <div className="marquee-container scrolling" key={"title-"+safeTitle}><Marquee speed={40} gradient={false} delay={1.5}><h1 className="ep-title" style={{paddingRight:'60px',margin:0}}>{safeTitle}</h1></Marquee></div>
+      : <div className="marquee-container" key={"title-"+safeTitle}><h1 className="ep-title">{safeTitle}</h1></div>
+  ), [isLong, safeTitle]);
 
   const ArtistMarquee = useMemo(() => (
     artistIsLong
-      ? <div className="ep-artist-marquee scrolling" key={"artist-"+trackArtist}><Marquee speed={35} gradient={false} delay={1.5}><h2 className="ep-artist" style={{paddingRight:'60px',margin:0}}>{trackArtist}</h2></Marquee></div>
-      : <div className="ep-artist-marquee" key={"artist-"+trackArtist}><h2 className="ep-artist">{trackArtist}</h2></div>
-  ), [artistIsLong, trackArtist]);
+      ? <div className="ep-artist-marquee scrolling" key={"artist-"+safeArtist}><Marquee speed={35} gradient={false} delay={1.5}><h2 className="ep-artist" style={{paddingRight:'60px',margin:0}}>{safeArtist}</h2></Marquee></div>
+      : <div className="ep-artist-marquee" key={"artist-"+safeArtist}><h2 className="ep-artist">{safeArtist}</h2></div>
+  ), [artistIsLong, safeArtist]);
+
+
+
+  const TASTES: { id: Taste; icon: React.ReactNode; label: string }[] = [
+    { 
+      id: 'QUALITY',   
+      icon: (
+        <HDCrystalIcon 
+          isActive={smartTaste === 'QUALITY'} 
+        />
+      ), 
+      label: 'HD Clear'
+    },
+    { 
+      id: 'IMMERSIVE', 
+      icon: <ImmersiveIcon isActive={smartTaste === 'IMMERSIVE'} />, 
+      label: 'Immersive' 
+    },
+    { 
+      id: 'CHILL',     
+      icon: <ChillIcon isActive={smartTaste === 'CHILL'} />, 
+      label: 'Chill'     
+    },
+  ];
 
   return (
     <div className="ep-controls-section">
@@ -182,14 +284,14 @@ export const ExpandedControls = ({
       <div className="player-smart-section">
         <div className="player-profile-line">
           {isAnalyzing?<span className="profile-analyzing"><span className="dot-pulse"/> Analyzing…</span>
-            :isManualOverride?<span className="profile-chip" style={{color:'#ffa726',background:'rgba(255,167,38,0.15)'}}>⚙️ Manual Override Active</span>
-            :detectedProfile?<span className="profile-chip">Identified: {detectedProfile.icon} {detectedProfile.label}</span>
-            :<span className="profile-chip muted">🎵 Standard Audio</span>}
+            :isManualOverride?<span className="profile-chip" style={{color:'#ffa726',background:'rgba(255,167,38,0.15)', display: 'inline-flex', alignItems: 'center', gap: '4px'}}><Settings2 size={16} /> Manual Override Active</span>
+            :detectedProfile?<span className="profile-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>Identified: {detectedProfile.icon && React.createElement(detectedProfile.icon as any, {size: 16})} {detectedProfile.label}</span>
+            :<span className="profile-chip muted" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Disc size={16} /> Standard Audio</span>}
         </div>
         <div className="player-taste-pills" style={{opacity:isManualOverride?0.4:1,transition:'opacity 0.2s ease'}}>
           {TASTES.map(t=>(
             <button key={t.id} className={`taste-pill ${!isManualOverride&&smartTaste===t.id?'active':''}`} onClick={()=>handleTasteChange(t.id)}>
-              <span>{t.icon}</span> {t.label}
+              <span>{t.icon}</span> <span className='mainclasstastepilllabel'>{t.label}</span>
             </button>
           ))}
         </div>
@@ -200,6 +302,7 @@ export const ExpandedControls = ({
         <button className="vol-btn" onClick={async()=>{const v=Math.min(1,volume+0.1);setVolume(v);await writeToEngine(`VOLUME ${v}`);}}><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
         <span className="vol-pct">{Math.round(volume*100)}%</span>
       </div>
+      
       <div className="ep-actions">
         <button className="ep-icon-btn" onClick={toggleFavorite} style={{color:isCurrentFavorite?'var(--theme-color)':undefined}}>{isCurrentFavorite?
         <svg  width="20" height="20" viewBox="0 0 24 24"><title >heart</title><path fill="currentColor" d="m12 21.35l-1.45-1.32C5.4 15.36 2 12.27 2 8.5C2 5.41 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.08C13.09 3.81 14.76 3 16.5 3C19.58 3 22 5.41 22 8.5c0 3.77-3.4 6.86-8.55 11.53z"/></svg>
@@ -243,7 +346,7 @@ export const ExpandedControls = ({
       }
     />
   </svg>
-</button>
+      </button>
         <button className="ep-ctrl-btn no-touch-effects" onClick={e=>{e.stopPropagation();handleNext();}}><svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
         <button className="ep-ctrl-btn no-touch-effects" onClick={handleToggleRepeat}>
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{transform:`rotate(${repeatDeg}deg)`,transition:'transform 0.52s cubic-bezier(.4,0,.2,1)'}}>

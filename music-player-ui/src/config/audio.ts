@@ -1,15 +1,17 @@
 import { Taste, DSPSettings } from '../types';
+import { Music, MicVocal, Mic, Zap, Headphones, Waves, Disc3 } from 'lucide-react';
+import React from 'react';
 
-export interface AudioProfile { id:string; label:string; icon:string; description:string; settings:DSPSettings; }
+export interface AudioProfile { id:string; label:string; icon:React.ElementType; description:string; settings:DSPSettings; }
 
 export const PROFILES: AudioProfile[] = [
-  { id:'CLASSICAL', label:'Classical / Orchestral', icon:'🎻', description:'High dynamic range · Natural wide field', settings:{ drive:0.2, widen:1.25, spatial:0.08, reverb:0.10, compress:false, remaster:false } },
-  { id:'BOLLYWOOD', label:'90s Bollywood Classics', icon:'🎙️', description:'Warm vintage analog · Vocals front & center', settings:{ drive:0.4, widen:1.12, spatial:0.05, reverb:0.05, compress:true, remaster:false } },
-  { id:'VOCAL', label:'Vocal / Acoustic', icon:'🎤', description:'Center-heavy · Lead vocals protected', settings:{ drive:0.4, widen:1.10, spatial:0.05, reverb:0.04, compress:true, remaster:false } },
-  { id:'ELECTRONIC', label:'Electronic / EDM', icon:'⚡', description:'Brickwall master · Exciter restores air', settings:{ drive:1.4, widen:1.25, spatial:0.08, reverb:0.04, compress:true, remaster:false } },
-  { id:'HIPHOP', label:'Hip-Hop / R&B', icon:'🎧', description:'Punchy · Tight dynamics', settings:{ drive:1.0, widen:1.15, spatial:0.06, reverb:0.03, compress:true, remaster:false } },
-  { id:'AMBIENT', label:'Ambient / Chill', icon:'🌊', description:'Low energy · Generous reverb space', settings:{ drive:0.1, widen:1.0, spatial:0.20, reverb:0.18, compress:false, remaster:false } },
-  { id:'POP', label:'Pop / Standard', icon:'🎵', description:'Balanced mix · Universal profile', settings:{ drive:0.7, widen:1.20, spatial:0.07, reverb:0.06, compress:true, remaster:false } },
+  { id:'CLASSICAL', label:'Classical / Orchestral', icon:Music, description:'High dynamic range · Natural wide field', settings:{ drive:0.2, widen:1.25, spatial:0.08, reverb:0.10, compress:false, remaster:false } },
+  { id:'BOLLYWOOD', label:'90s Bollywood Classics', icon:MicVocal, description:'Warm vintage analog · Vocals front & center', settings:{ drive:0.4, widen:1.12, spatial:0.05, reverb:0.05, compress:true, remaster:false } },
+  { id:'VOCAL', label:'Vocal / Acoustic', icon:Mic, description:'Center-heavy · Lead vocals protected', settings:{ drive:0.4, widen:1.10, spatial:0.05, reverb:0.04, compress:true, remaster:false } },
+  { id:'ELECTRONIC', label:'Electronic / EDM', icon:Zap, description:'Brickwall master · Exciter restores air', settings:{ drive:1.4, widen:1.25, spatial:0.08, reverb:0.04, compress:true, remaster:false } },
+  { id:'HIPHOP', label:'Hip-Hop / R&B', icon:Headphones, description:'Punchy · Tight dynamics', settings:{ drive:1.0, widen:1.15, spatial:0.06, reverb:0.03, compress:true, remaster:false } },
+  { id:'AMBIENT', label:'Ambient / Chill', icon:Waves, description:'Low energy · Generous reverb space', settings:{ drive:0.1, widen:1.0, spatial:0.20, reverb:0.18, compress:false, remaster:false } },
+  { id:'POP', label:'Pop / Standard', icon:Disc3, description:'Balanced mix · Universal profile', settings:{ drive:0.7, widen:1.20, spatial:0.07, reverb:0.06, compress:true, remaster:false } },
 ];
 
 export const FIR_GAINS: Record<string, [number,number,number]> = {
