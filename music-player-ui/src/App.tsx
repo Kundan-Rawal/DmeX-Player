@@ -134,6 +134,7 @@ function App() {
   const [bulkScanTotal, setBulkScanTotal]   = useState(0);
   const [isBulkScanOpen, setIsBulkScanOpen] = useState(false);
   const [customPlaylists, setCustomPlaylists] = useState<CustomPlaylist[]>([]);
+  const [globalArtistImages, setGlobalArtistImages] = useState<Record<string, string>>({});
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedTracks, setSelectedTracks] = useState<Set<string>>(new Set());
   const [playlistModalTracks, setPlaylistModalTracks] = useState<string[]>([]);
@@ -209,6 +210,25 @@ function App() {
   useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
 
   useEffect(() => {
+    if (isPlaying && currentTrack) {
+      const start = Date.now();
+      const path = currentTrack.path;
+      return () => {
+        const elapsed = (Date.now() - start) / 1000;
+        if (elapsed > 1.0) {
+          const listened = Math.floor(elapsed);
+          setPlaylist(prev => {
+            const nextList = prev.map(t => t.path === path ? { ...t, totalSecondsListened: (t.totalSecondsListened || 0) + listened } : t);
+            vaultSet("user_playlist", nextList);
+            return nextList;
+          });
+          invoke('update_play_stats', { path, seconds: listened }).catch(console.error);
+        }
+      };
+    }
+  }, [isPlaying, currentTrack?.path]);
+
+  useEffect(() => {
     const handlePopState = () => {
       if (showFolderModal) { setShowFolderModal(false); return; }
       if (isBulkScanOpen) { setIsBulkScanOpen(false); return; }
@@ -244,7 +264,7 @@ function App() {
         return s.includes('bollywood') || s.includes('hindi') || s.includes('indian');
       });
     } else if (currentView === 'TOPTRACKS') {
-      base = [...playlist].filter(t=>(t.playCount||0)>0).sort((a,b)=>(b.playCount||0)-(a.playCount||0)).slice(0,50);
+      base = [...playlist].filter(t=>(t.totalSecondsListened||0)>0).sort((a,b)=>(b.totalSecondsListened||0)-(a.totalSecondsListened||0)).slice(0,50);
     } else if (activePlaylistId) {
       const pl = customPlaylists.find(p=>p.id===activePlaylistId);
       if (pl) base = pl.trackPaths.map(path=>playlist.find(t=>t.path===path)).filter((t):t is Track=>t!==undefined);
@@ -326,7 +346,7 @@ function App() {
   useEffect(() => {
     // 1. When we dive into an Album, Playlist, Artist, or Favourites, forcefully inject a fake history state.
     // This physically stops Android from exiting the app when you swipe back.
-    if (currentView.startsWith('ALBUM_') || currentView.startsWith('PLAYLIST_') || currentView.startsWith('ARTIST_') || currentView === 'FAVOURITES') {
+    if (currentView.startsWith('ALBUM_') || currentView.startsWith('PLAYLIST_') || currentView.startsWith('ARTIST_') || currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') {
       window.history.pushState({ fakePage: true }, '');
     }
 
@@ -338,8 +358,8 @@ function App() {
         setCurrentView('PLAYLIST_GALLERY');
       } else if (currentView.startsWith('ARTIST_')) {
         setCurrentView('ARTISTS');
-      } else if (currentView === 'FAVOURITES') {
-        setCurrentView('TRACKS');
+      } else if (currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') {
+        setCurrentView('ALL');
       }
     };
 
@@ -393,15 +413,13 @@ function App() {
           lastReactUpdate.current = now;
         }
 
-        if (m[11] === 1.0 || (m[1] > 0 && m[0] >= m[1] - 1.0)) {
+        if (m[11] === 1.0 || (m[1] > 0 && m[1] - m[0] <= 0.2)) {
           if (!isTransitioningRef.current) {
             isTransitioningRef.current = true;
             const currentPath = stateRefs.current.currentTrack?.path;
             if (currentPath && lastCountedTrackRef.current !== currentPath) {
               lastCountedTrackRef.current = currentPath;
-              const listened = Math.floor(m[1]);
-              setPlaylist(prev => prev.map(t => t.path === currentPath ? { ...t, playCount: (t.playCount || 0) + 1, totalSecondsListened: (t.totalSecondsListened || 0) + listened } : t));
-              invoke('update_play_stats', { path: currentPath, seconds: listened }).catch(console.error);
+              setPlaylist(prev => prev.map(t => t.path === currentPath ? { ...t, playCount: (t.playCount || 0) + 1 } : t));
             }
             handleNext();
             setTimeout(() => { isTransitioningRef.current = false; }, 1500);
@@ -536,6 +554,12 @@ function App() {
     setPlaylist(prev=>prev.map(t=>t.path===currentTrack.path?{...t,isFavorite:isAdding}:t));
     try { await invoke('toggle_favorite',{path:currentTrack.path,isFavorite:isAdding}); } catch(_){}
   };
+
+  useEffect(() => {
+    invoke<Record<string, string>>('get_all_artist_images')
+      .then(res => setGlobalArtistImages(res))
+      .catch(console.error);
+  }, [currentView]);
 
   const scanAndAdd = async (folderPath:string) => {
     setIsLoading(true); setScanProgress('Scanning…');
@@ -759,14 +783,6 @@ function App() {
 
   const playTrack = async (track:Track) => {
     try { await writeToEngine('STOP'); } catch (_) {}
-    const oldTrack=stateRefs.current.currentTrack;const listened=currentTimeRef.current;
-    if(oldTrack&&listened>0&&oldTrack.path!==track.path){
-      setPlaylist(prev=>{
-        const nextList=prev.map(t=>t.path===oldTrack.path?{...t,playCount:listened>=5?(t.playCount||0)+1:(t.playCount||0),totalSecondsListened:(t.totalSecondsListened||0)+Math.floor(listened)}:t);
-        vaultSet("user_playlist", nextList);
-        return nextList;
-      });
-    }
     currentTimeRef.current=0;lastCountedTrackRef.current=null;
     const id=++loadIdRef.current;
     setCurrentTrack(track);setIsPlaying(false);setCurrentTime(0);setTrackTitle(track.name);setTrackArtist(track.artist);
@@ -1042,9 +1058,14 @@ function App() {
 
   // MASSIVE HEADER RESOLVER
   const headerInfo = useMemo(() => {
+    const getSafeName = (name: string) => name.replace(/[^a-zA-Z0-9]/g, '_');
     if (currentView === 'FAVOURITES') return { type: 'FAVOURITES', title: 'Favourite Tracks', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
     if (currentView === 'TOPTRACKS') return { type: 'MOST PLAYED', title: 'Top Ranked Tracks', subtitle: `${displayedTracks.length} tracks by listen time`, isCircle: false, image: null, isMassive: true };
-    if (activeArtistName) return { type: 'ARTIST', title: activeArtistName, subtitle: `${displayedTracks.length} tracks`, isCircle: true, image: null, isMassive: true };
+    if (activeArtistName) {
+      const rawPath = globalArtistImages[getSafeName(activeArtistName)];
+      const artistImage = rawPath ? convertFileSrc(rawPath) : null;
+      return { type: 'ARTIST', title: activeArtistName, subtitle: `${displayedTracks.length} tracks`, isCircle: true, image: artistImage, isMassive: true };
+    }
     if (activePlaylistId) {
       const pl = customPlaylists.find(p=>p.id === activePlaylistId);
       return { type: 'PLAYLIST', title: pl?.name || 'Unknown', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
@@ -1052,7 +1073,7 @@ function App() {
     // For albums we use the old logic or we can use headerInfo but not massive
     if (activeAlbumName) return { type: 'ALBUM', title: activeAlbumName, subtitle: `${displayedTracks.length} tracks • ${displayedTracks[0]?.artist || 'Unknown'}`, isCircle: false, image: displayedTracks.find(t => t.thumb)?.thumb || (currentTrack?.album === activeAlbumName ? albumArt : null), isMassive: false };
     return null;
-  }, [currentView, activeArtistName, activeAlbumName, activePlaylistId, displayedTracks, customPlaylists, albumArt, currentTrack]);
+  }, [currentView, activeArtistName, activeAlbumName, activePlaylistId, displayedTracks, customPlaylists, albumArt, currentTrack, globalArtistImages]);
 
   return (
     <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
@@ -1200,6 +1221,28 @@ function App() {
                     }}>
                       {(() => {
                         if (headerInfo.image) return <img src={headerInfo.image} alt="cover" style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }} />;
+                        if (['FAVOURITES', 'MOST PLAYED', 'PLAYLIST'].includes(headerInfo.type)) {
+                          const thumbs = Array.from(new Set(displayedTracks.map(t => t.thumb).filter(Boolean)));
+                          if (thumbs.length > 0) {
+                            const grid = [thumbs[0], thumbs[1] || thumbs[0], thumbs[2] || thumbs[0], thumbs[3] || thumbs[1] || thumbs[0]];
+                            return (
+                              <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, display: 'flex', flexWrap: 'wrap', gap: '4px', padding: '4px', boxSizing: 'border-box' }}>
+                                {grid.map((src, i) => (
+                                  <div key={i} style={{ width: 'calc(50% - 2px)', height: 'calc(50% - 2px)', backgroundImage: `url("${src}")`, backgroundSize: 'cover', backgroundPosition: 'center', borderRadius: headerInfo.isMassive ? '12px' : '6px' }} />
+                                ))}
+                                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', alignItems: 'center', justifyContent: 'center', filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.6))' }}>
+                                  {headerInfo.type === 'FAVOURITES' ? (
+                                    <svg width={headerInfo.isMassive ? "64" : "32"} height={headerInfo.isMassive ? "64" : "32"} viewBox="0 0 24 24" fill="var(--theme-color)"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                                  ) : headerInfo.type === 'MOST PLAYED' ? (
+                                    <svg width={headerInfo.isMassive ? "64" : "32"} height={headerInfo.isMassive ? "64" : "32"} viewBox="0 0 24 24" fill="var(--theme-color)"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                                  ) : (
+                                    <svg width={headerInfo.isMassive ? "48" : "24"} height={headerInfo.isMassive ? "48" : "24"} viewBox="0 0 24 24" fill="var(--theme-color)"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        }
                         if (headerInfo.type === 'FAVOURITES') return <svg width="64" height="64" viewBox="0 0 24 24" fill="var(--theme-color)"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>;
                         return <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>;
                       })()}
