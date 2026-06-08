@@ -1174,18 +1174,10 @@ function App() {
               /* 2. THE NEW BENTO BOX ALBUM GRID */
               <AlbumGalleryView playlist={playlist} setCurrentView={setCurrentView}/>
               
-            ) : displayedTracks.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">🎵</div>
-                <p className="empty-title">{searchQuery?'No results found':'No music yet'}</p>
-                <p className="empty-hint">{searchQuery?'Try a different search term':IS_MOBILE?'Tap the + button to add your music folders':'Click the + button in the top right'}</p>
-                {!searchQuery&&IS_MOBILE&&<button className="empty-add-btn" onClick={handleAddFolder}>+ Add Music Folder</button>}
-              </div>
-
             ) : (
               <>
                 {/* 1. THE UNIFIED MASSIVE HEADER */}
-                {headerInfo && displayedTracks.length > 0 && (
+                {headerInfo && (
                   <div className={`album-detail-header fade-in ${headerInfo.isMassive ? 'massive-header' : ''}`} style={{ 
                     flexShrink: 0, 
                     padding: IS_ANDROID ? '24px 16px 16px' : '24px 36px 32px',
@@ -1229,9 +1221,11 @@ function App() {
                       }}>{headerInfo.subtitle}</div>
                       
                       <div className="album-detail-actions" style={{ justifyContent: IS_ANDROID ? 'center' : 'flex-start', width: '100%', display: 'flex', gap: '12px' }}>
-                        <button className="play-all-btn" style={{ flex: IS_ANDROID ? 1 : undefined, justifyContent: 'center', background: 'var(--theme-color)', color: 'var(--theme-text)', boxShadow: '0 4px 20px rgba(255,50,50,0.4)', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => playTrack(displayedTracks[0])}>
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play All
-                        </button>
+                        {displayedTracks.length > 0 && (
+                          <button className="play-all-btn" style={{ flex: IS_ANDROID ? 1 : undefined, justifyContent: 'center', background: 'var(--theme-color)', color: 'var(--theme-text)', boxShadow: '0 4px 20px rgba(255,50,50,0.4)', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => playTrack(displayedTracks[0])}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play All
+                          </button>
+                        )}
                         <button className="back-albums-btn" style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '12px 24px', borderRadius: '30px', fontWeight: 600, fontSize: '15px', cursor: 'pointer' }} onClick={() => window.history.back()}>
                           ← Back
                         </button>                      
@@ -1240,6 +1234,16 @@ function App() {
                   </div>
                 )}
 
+                {/* 1.5. EMPTY STATE IF NO TRACKS */}
+                {displayedTracks.length === 0 ? (
+                  <div className="empty-state" style={{ marginTop: '32px' }}>
+                    <div className="empty-icon">🎵</div>
+                    <p className="empty-title">{searchQuery?'No results found':headerInfo?'No tracks here yet':'No music yet'}</p>
+                    <p className="empty-hint">{searchQuery?'Try a different search term':IS_MOBILE?'Tap the + button to add your music folders':'Click the + button in the top right'}</p>
+                    {!searchQuery&&IS_MOBILE&&<button className="empty-add-btn" onClick={handleAddFolder}>+ Add Music Folder</button>}
+                  </div>
+                ) : (
+                  <>
                 {/* 2. THE SELECTION & SORT BAR */}
                 {!searchQuery && displayedTracks.length > 0 && (
                   <div style={{flexShrink: 0, display:'flex',justifyContent: isSelectionMode ? 'space-between' : 'flex-end',alignItems:'center',marginBottom: IS_ANDROID ? '6px' : '16px', padding: IS_ANDROID ? '0 16px' : '0 16px 0 0', transition: 'all 0.2s'}}>
@@ -1349,6 +1353,8 @@ function App() {
                       onLongPress={handleLongPress} 
                     />
                   </div>
+                )}
+                  </>
                 )}
               </>
             )}
