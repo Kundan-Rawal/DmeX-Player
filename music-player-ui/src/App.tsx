@@ -1164,7 +1164,7 @@ function App() {
                 playlist={playlist} favoritesSet={favoritesSet} customPlaylists={customPlaylists} albumArt={albumArt}
                 setCurrentView={setCurrentView} createPlaylist={createPlaylist} deletePlaylist={deletePlaylist}
               />
-            ) : currentView === 'ARTISTS' ? (
+            ) : currentView === 'ARTIST' ? (
               <ArtistGalleryView playlist={playlist} setCurrentView={setCurrentView} />
             ) : currentView === 'ALBUMS' ? (
               /* 2. THE NEW BENTO BOX ALBUM GRID */

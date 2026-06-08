@@ -1,8 +1,8 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Track } from '../types';
 import { buildArtistDictionary } from '../utils/artistEngine';
 import { X, Search, Trash2, Pause, RefreshCw } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 
 interface ArtistGalleryProps {
   playlist: Track[];
@@ -20,6 +20,7 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [totalArtistsToSync, setTotalArtistsToSync] = useState(0);
+  const [artistImages, setArtistImages] = useState<Record<string, string>>({});
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(40);
@@ -55,23 +56,77 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
     }
   };
 
-  // Sync Logic Simulation (Since backend is Rust)
+  const getSafeName = (name: string) => name.replace(/[^a-zA-Z0-9]/g, '_');
+
+  useEffect(() => {
+    invoke<Record<string, string>>('get_all_artist_images')
+      .then(res => setArtistImages(res))
+      .catch(console.error);
+  }, []);
+
+  const isSyncingRef = useRef(false);
+
+  useEffect(() => {
+    isSyncingRef.current = isSyncing;
+    if (!isSyncing) return;
+
+    let active = true;
+
+    const runSync = async () => {
+      setTotalArtistsToSync(allArtists.length);
+      for (let i = syncProgress; i < allArtists.length; i++) {
+        if (!isSyncingRef.current || !active) break;
+
+        try {
+          // Tell the backend to download this artist's art if missing
+          const path = await invoke<string | null>('download_artist_art', { artistName: allArtists[i].name });
+          if (path && active) {
+            setArtistImages(prev => ({ ...prev, [getSafeName(allArtists[i].name)]: path }));
+          }
+        } catch (e) {
+          console.error(`Failed to sync art for ${allArtists[i].name}:`, e);
+        }
+
+        // Small delay to allow React to paint and to avoid hammering the Deezer API
+        await new Promise(r => setTimeout(r, 200));
+
+        if (isSyncingRef.current && active) {
+          setSyncProgress(i + 1);
+        }
+      }
+
+      if (isSyncingRef.current && active && syncProgress >= allArtists.length - 1) {
+        setIsSyncing(false);
+      }
+    };
+
+    runSync();
+
+    return () => {
+      active = false;
+    };
+  }, [isSyncing, allArtists]);
+
   const toggleSync = () => {
     if (isSyncing) {
       setIsSyncing(false);
     } else {
+      if (syncProgress >= allArtists.length) {
+        setSyncProgress(0); // Restart if we finished
+      }
       setIsSyncing(true);
-      setTotalArtistsToSync(allArtists.length);
-      // Let backend know we are syncing. In reality, you probably listen to tauri events.
-      // We will mock the progress bar for the UI just in case events are missing right now.
-      invoke('get_all_artist_images', { artists: allArtists.map(a => a.name) }).catch(console.error);
     }
   };
 
-  const wipeArt = () => {
+  const wipeArt = async () => {
     setIsSyncing(false);
     setSyncProgress(0);
-    // Add logic to delete local art directory via backend
+    try {
+      await invoke('nuke_artist_cache');
+      setArtistImages({}); // Clear UI cache
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // The Top Sync Progress Bar
@@ -217,6 +272,9 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
       }}>
         {displayArtists.slice(0, visibleCount).map((artist) => {
           // Construct the card
+          const rawPath = artistImages[getSafeName(artist.name)] || artist.localImagePath;
+          const imagePath = rawPath ? convertFileSrc(rawPath) : null;
+
           return (
             <div 
               key={artist.id} 
@@ -236,8 +294,8 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
                 overflow: 'hidden',
                 position: 'relative'
               }}>
-                {artist.localImagePath ? (
-                  <img src={artist.localImagePath} alt={artist.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {imagePath ? (
+                  <img src={imagePath} alt={artist.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <svg width="40%" height="40%" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5">
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
