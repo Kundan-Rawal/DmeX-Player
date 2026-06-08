@@ -1,52 +1,152 @@
 /* =====================================================================
+
+
    MobileExpandedPlayer.css
+
+
    PIXEL-PERFECT RESTORATION (STATUS BAR, GAPS, & TRANSPARENT PLAY BTN)
+
+
    ===================================================================== */
 
+
+
+
+
 /* --- ROOT CONTAINER --- */
+
+
 .mep-root {
+
+
   position: absolute;
+
+
   inset: 0;
+
+
   z-index: 1000;
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   overflow: hidden;
+
+
   background-color: #000; 
+
+
   color: #fff;
+
+
 }
+
+
+
+
 
 /* --- TOP BAR (PUSHED DOWN FROM STATUS BAR) --- */
+
+
 .mep-topbar {
+
+
   display: flex;
+
+
   align-items: center;
+
+
   justify-content: space-between;
+
+
   padding: max(50px, env(safe-area-inset-top) + 20px) 24px 10px 24px;
+
+
   z-index: 50;
+
+
   flex-shrink: 0;
+
+
 }
+
+
+
+
 
 .mep-topbar-btn {
+
+
   background: transparent;
+
+
   border: none;
+
+
   color: var(--text-primary);
+
+
   padding: 8px 0;
+
+
   cursor: pointer;
+
+
   display: flex;
+
+
   align-items: center;
+
+
   justify-content: center;
+
+
   transition: transform 0.2s;
+
+
 }
+
+
+
+
 
 .mep-topbar-btn:active {
+
+
   transform: scale(0.9);
+
+
 }
 
+
+
+
+
 .mep-topbar-center {
+
+
   flex: 1;
+
+
   display: flex;
+
+
   justify-content: center;
+
+
   align-items: center;
+
+
 }
+
+
+
+
 
 .mep-badge, .mep-badge-analyzing {
   background: var(--bg-surface);
@@ -69,7 +169,7 @@
   flex-direction: column;
   position: relative;
   z-index: 10;
-  overflow: hidden;
+  /* Removed overflow: hidden; so ripples can expand freely */
 }
 
 /* --- DYNAMIC UPPER SECTION (ART + TITLE + PILLS) --- */
@@ -91,6 +191,8 @@
   justify-content: center;
   margin-top: 15px; /* Gives space for the bass bounce expansion */
   margin-bottom: 24px; /* Exact gap between art and title */
+  position: relative;
+  z-index: 100;
 }
 
 .mep-art {
@@ -102,7 +204,7 @@
   background-size: cover;
   background-position: center;
   position: relative;
-  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--border);
+  box-shadow: none; /* User explicitly requested no shadow */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -129,372 +231,1123 @@
 }
 
 /* 2. Track Header */
+
+
 .mep-track-header {
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   align-items: center;
+
+
   text-align: center;
+
+
   margin-bottom: 16px; /* Gap between title and pills */
+
+
   overflow: hidden;
+
+
   width: 100%;
+
+
+  position: relative;
+  z-index: 2;
 }
+
+
+
+
 
 .mep-title-wrap {
+
+
   display: flex;
+
+
   justify-content: center;
+
+
   width: 100%;
+
+
 }
+
+
+
+
 
 .mep-title {
+
+
   font-size: 22px;
+
+
   font-weight: 700;
+
+
   margin: 0 auto;
+
+
   color: var(--text-primary);
+
+
   white-space: nowrap;
+
+
 }
+
+
+
+
 
 .mep-artist-wrap {
+
+
   display: flex;
+
+
   justify-content: center;
+
+
   width: 100%;
+
+
   margin-top: 2px;
+
+
 }
+
+
+
+
 
 .mep-artist {
+
+
   font-size: 13px;
+
+
   color: var(--text-secondary);
+
+
   white-space: nowrap;
+
+
 }
+
+
+
+
 
 /* 3. HD Immersive Pills */
+
+
 .mep-taste-row {
+
+
   display: flex;
+
+
   justify-content: center;
+
+
   gap: 6px;
+
+
   margin-bottom: 0;
+
+
 }
+
+
+
+
 
 .mep-taste-pill {
+
+
   background: transparent;
+
+
   border: none;
+
+
   border-radius: 20px;
+
+
   padding: 6px 14px;
+
+
   color: var(--text-secondary);
+
+
   font-size: 12px;
+
+
   font-weight: 600;
+
+
   white-space: nowrap;
+
+
   display: flex;
+
+
   align-items: center;
+
+
   gap: 4px;
+
+
   transition: color 0.2s;
+
+
   display: flex;
+
+
   flex-direction: row;
+
+
   justify-content: center;
+
+
   align-items: center;
+
+
 }
+
+
+
+
 
 .mep-taste-pill--active {
+
+
   color: var(--theme-color);
+
+
   display: flex;
+
+
   flex-direction: row;
+
+
   justify-content: center;
+
+
   align-items: center;
+
+
 }
+
+
+
+
 
 /* --- LYRICS / DSP PANELS --- */
+
+
 .mep-panel {
+
+
   flex: 1 1 auto;
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   overflow-y: auto;
+
+
   min-height: 0;
+
+
   padding: 0 24px;
+
+
   -webkit-overflow-scrolling: touch; /* Forces hardware acceleration on scroll */
+
+
   overflow-x: hidden !important;
+
+
 }
+
+
 .mep-panel {
+
+
   max-height: 470px;
+
+
+  mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
+
+
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
+
+
 }
+
+
+
+
 
 .mep-lyrics-scroll {
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   padding: 20vh 0 35vh 0;
+
+
   text-align: center;
-  mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+
+
 }
+
+
+
+
 
 .mep-lyric-line {
+
+
   font-size: 16px; /* Locked Base Size */
+
+
   font-weight: 500;
+
+
   color: var(--text-secondary);
+
+
   line-height: 1.4;
+
+
   margin: 0 0 14px 0; /* Locked Margin - NEVER ANIMATE THIS */
+
+
   opacity: 0.4;
+
+
   transform: scale(0.9);
+
+
   /* Uses GPU transforms instead of CPU layout math */
+
+
   transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s ease, color 0.3s ease;
+
+
   will-change: transform, opacity; 
+
+
   transform-origin: center;
+
+
 }
+
+
+
+
 
 .mep-lyric-active {
+
+
   opacity: 1;
+
+
   color: var(--text-primary);
+
+
   transform: scale(1.2); /* Grows visually without shifting the DOM */
+
+
   font-weight: 700;
+
+
 }
+
+
+
+
 
 .mep-lyrics-empty {
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   align-items: center;
+
+
   justify-content: center;
+
+
   height: 100%;
+
+
   gap: 16px;
+
+
   text-align: center;
+
+
 }
+
+
+
+
 
 .mep-fetch-btn {
+
+
   background: var(--theme-color);
+
+
   color: #fff;
+
+
   border: none;
+
+
   padding: 10px 24px;
+
+
   border-radius: 24px;
+
+
   font-weight: 600;
+
+
   cursor: pointer;
+
+
 }
+
+
+
+
 
 .mep-dsp-scroll {
+
+
   flex: 1;
+
+
   padding: 10px 0 30px 0;
+
+
 }
+
+
+
+
 
 /* --- BOTTOM CONTROLS ZONE (THE FLOOR ANCHOR) --- */
+
+
 .mep-controls-zone {
+
+
   flex-shrink: 0; 
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   padding: 0 24px max(32px, env(safe-area-inset-bottom) + 16px) 24px;
+
+
+  margin-top:0px;
+
+
   z-index: 20;
+
+
 }
+
+
+
+
 
 /* Small Icons (Fav, Lyrics, DSP) */
+
+
 .mep-actions {
+
+
   display: flex;
+
+
   justify-content: space-between;
+
+
   align-items: center;
+
+
   padding: 0 16px;
+
+
   margin-bottom: 12px;
+
+
 }
+
+
+
+
 
 .mep-icon-btn {
+
+
   background: transparent;
+
+
   border: none;
+
+
   color: var(--text-primary);
+
+
   opacity: 0.6;
+
+
   padding: 8px;
+
+
   transition: opacity 0.2s;
+
+
   display: flex;
+
+
   align-items: center;
+
+
   justify-content: center;
+
+
 }
+
+
 .mep-icon-btn:active { opacity: 1; }
 
+
+
+
+
 /* Seekbar */
+
+
 .mep-seek {
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
   margin-bottom: 16px;
+
+
   width: 100%;
+
+
 }
+
+
+
+
 
 .mep-seek-bar {
+
+
   -webkit-appearance: none;
+
+
   width: 100%;
+
+
   height: 4px;
+
+
   background: var(--ep-progress-bg, rgba(255, 255, 255, 0.15));
+
+
   border-radius: 2px;
+
+
   outline: none;
+
+
 }
+
+
+
+
 
 .mep-seek-bar::-webkit-slider-thumb {
+
+
   -webkit-appearance: none;
+
+
   width: 12px;
+
+
   height: 12px;
+
+
   border-radius: 50%;
+
+
   background: var(--ep-progress-thumb, #fff);
+
+
   cursor: pointer;
+
+
 }
+
+
+
+
 
 .mep-seek-labels {
+
+
   display: flex;
+
+
   justify-content: space-between;
+
+
   font-size: 12px;
+
+
   font-weight: 600;
+
+
   color: var(--ep-time-color, rgba(255,255,255,0.4));
+
+
   margin-top: 8px;
+
+
 }
+
+
+
+
 
 /* Main Playback Controls */
+
+
 .mep-playback {
+
+
   display: flex;
+
+
   justify-content: space-between;
+
+
   align-items: center;
+
+
   padding: 0 8px;
+
+
 }
+
+
+
+
 
 .mep-ctrl-btn {
+
+
   background: transparent !important;
+
+
   border: none !important;
+
+
   box-shadow: none !important;
+
+
   color: var(--text-primary) !important;
+
+
   width: 44px;
+
+
   height: 44px;
+
+
   display: flex;
+
+
   align-items: center;
+
+
   justify-content: center;
+
+
 }
+
+
+
+
 
 .mep-play-btn {
+
+
   background: transparent !important;
+
+
   border: none !important;
+
+
   box-shadow: none !important;
+
+
   color: var(--text-primary) !important;
+
+
   width: 56px;
+
+
   height: 56px;
+
+
   display: flex;
+
+
   align-items: center;
+
+
   justify-content: center;
+
+
   outline: none !important;
+
+
   -webkit-tap-highlight-color: transparent !important;
+
+
 }
+
+
+
+
 
 .mep-play-btn svg {
+
+
   width: 36px;
+
+
   height: 36px;
+
+
 }
+
+
+
+
 
 /* --- GLASS OPTIONS MENU (QUARANTINED TO MOBILE) --- */
+
+
 .mep-root .glass-options-menu {
+
+
   position: absolute;
+
+
   background: rgba(18, 18, 18, 0.95);
+
+
   border: 1px solid rgba(255, 255, 255, 0.08);
+
+
   border-radius: 16px;
+
+
   padding: 20px;
+
+
   width: 250px;
+
+
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+
+
   color: #fff;
+
+
   z-index: 100;
+
+
   max-height: 80vh;
+
+
   overflow-y: auto;
+
+
 }
+
+
+
+
 
 .mep-root .glass-menu-header {
+
+
   font-weight: 700;
+
+
   font-size: 0.85rem;
+
+
   text-transform: uppercase;
+
+
   letter-spacing: 1px;
+
+
   margin-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+
+
+  
+
+
   padding-bottom: 10px;
+
+
   opacity: 0.7;
+
+
 }
+
+
+
+
 
 .mep-root .glass-menu-section {
+
+
   display: flex;
+
+
   flex-direction: column;
+
+
 }
+
+
+
+
 
 .mep-root .glass-label-row {
+
+
   display: flex;
+
+
   justify-content: space-between;
+
+
   font-size: 0.9rem;
+
+
   font-weight: 500;
+
+
 }
+
+
+
+
 
 .mep-root .glass-slider {
+
+
   width: 100%;
+
+
   margin-top: 10px;
+
+
   accent-color: var(--theme-color);
+
+
 }
+
+
+
+
 
 .mep-root .glass-boost-grid {
+
+
   display: grid;
+
+
   grid-template-columns: 1fr 1fr;
+
+
   gap: 10px;
+
+
 }
+
+
+
+
 
 .mep-root .glass-boost-btn {
+
+
   border-radius: 10px;
+
+
   padding: 10px;
+
+
   border: 1px solid rgba(255, 255, 255, 0.12);
+
+
   background: rgba(255, 255, 255, 0.06);
+
+
   font-size: 0.75rem;
+
+
   font-weight: 600;
+
+
   color: rgba(255, 255, 255, 0.45);
+
+
   transition: all 0.2s;
+
+
 }
+
+
+
+
 
 .mep-root .glass-boost-btn.active {
+
+
   font-weight: 700;
+
+
 }
 
+
+
+
+
 /* =====================================================================
+
+
    PERFORMANCE & CONTRAST HACK (QUARANTINED TO MOBILE)
+
+
    ===================================================================== */
 
+
+
+
+
 /* 1. Strip expensive GPU blurs completely ONLY on mobile */
+
+
 .mep-root .glass-options-menu, 
+
+
 .mep-root .lyrics-art-badge,
+
+
 .mep-root .dsp-card {
+
+
   backdrop-filter: none !important;
+
+
   -webkit-backdrop-filter: none !important;
+
+
 }
+
+
+
+
 
 /* 2. LIGHT MODE: Menu becomes High-Contrast DARK */
+
+
 [data-theme="light"] .mep-root .glass-options-menu {
+
+
   --text-primary: #ffffff;
+
+
   --text-secondary: rgba(255, 255, 255, 0.7);
+
+
   --text-muted: rgba(255, 255, 255, 0.4);
+
+
   --border: rgba(255, 255, 255, 0.12);
+
+
   background: #181818 !important; 
+
+
   color: var(--text-primary) !important;
+
+
   border: 1px solid var(--border) !important;
+
+
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4) !important;
+
+
 }
+
+
+
+
 
 /* 3. DARK MODE: Menu becomes High-Contrast LIGHT */
+
+
 [data-theme="dark"] .mep-root .glass-options-menu {
+
+
   --text-primary: #111111;
+
+
   --text-secondary: rgba(0, 0, 0, 0.7);
+
+
   --text-muted: rgba(0, 0, 0, 0.5);
+
+
   --border: rgba(0, 0, 0, 0.15);
+
+
   background: #f4f4f6 !important; 
+
+
   color: var(--text-primary) !important;
+
+
   border: 1px solid var(--border) !important;
+
+
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6) !important;
+
+
 }
+
+
+
+
 
 /* 4. Adapt ONLY UNSELECTED buttons and sliders */
+
+
 .mep-root .glass-options-menu .glass-boost-btn:not(.active) {
+
+
   background: color-mix(in srgb, var(--text-primary) 6%, transparent) !important;
+
+
   border: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent) !important;
+
+
   color: var(--text-secondary) !important;
+
+
 }
+
+
+
+
 
 .mep-root .glass-options-menu .glass-slider {
+
+
   background: color-mix(in srgb, var(--text-primary) 20%, transparent) !important;
+
+
 }
 
+
+
+
+
 /* 5. TSX INTERCEPTION */
+
+
 [data-theme="dark"] .mep-root .glass-boost-btn.active[style*="255,255,255"],
+
+
 [data-theme="dark"] .mep-root .glass-boost-btn.active[style*="#fff"] {
+
+
   background: rgba(0, 0, 0, 0.08) !important;
+
+
   border-color: rgba(0, 0, 0, 0.25) !important;
+
+
   color: #111111 !important;
+
+
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -502,88 +1355,170 @@
 
 
 /* =====================================================================
+
+
      MEP FIX: PUNCHY MULTI-COLOR BLOBS (RESTORED PALETTE)
+
+
      ===================================================================== */
 
+
+
+
+
   /* 1. Target the Ambient Background elements inside the Mobile UI */
+
+
   .mep-root .ambient-background {
+
+
     /* Kills the 'divide/screen' logic that washes colors out against the background */
+
+
     mix-blend-mode: normal !important;
+
+
   }
 
+
+
+
+
   /* 2. Force maximum opacity on the diverse blobs to stop the "white-wash" */
+
+
   .mep-root .blob-1,
+
+
   .mep-root .blob-2,
+
+
   .mep-root .blob-3,
+
+
   .mep-root [class*="corner"] {
+
+
     /* Kills the 0.45/0.55 global opacity. Pushes it to 95% so the distinct palette colors actually show up vibrant. */
+
+
     opacity: 0.95 !important; 
+
+
     
+
+
     /* We DO NOT override the background here. 
+
+
        This allows var(--blob-1), var(--blob-2), and var(--blob-3) from your album extraction to shine through naturally. */
+
+
     
+
+
     /* Kills performance-expensive shadow layers that can desaturate */
+
+
     box-shadow: none !important;
+
+
     border: none !important;
+
+
   }
+
+
+
+
+
+
 
 
   @keyframes spinDiamondY {
+
+
     0% { transform: perspective(200px) rotateY(0deg); }
+
+
     100% { transform: perspective(200px) rotateY(360deg); }
+
+
   }
+
+
+
+
 
   /* Only apply the animation if the parent pill has the active class */
+
+
   .mep-root .mep-taste-pill--active .hd-diamond {
+
+
     animation: spinDiamondY 2.5s linear infinite;
+
+
     transform-origin: center;
+
+
     display: inline-block;
+
+
   }
 
+/* NEON BASS RIPPLE */
 
-/* 8B FAST VISUALIZER (ANDROID) */
-.mep-art-8b {
-  border-radius: 0 !important;
-  box-shadow: 0 0 40px rgba(var(--theme-color-rgb, 200,34,42), 0.6), 0 0 0 2px var(--theme-color) !important;
-}
-
-.mep-art-8b-line {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 0 10px 2px var(--theme-color);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.mep-8b-ripple-container {
+.mep-neon-ripple {
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 100%; max-width: 250px;
+  width: 100%;
+  max-width: 250px;
   aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 10px 2px var(--theme-color), inset 0 0 10px 2px var(--theme-color);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  will-change: transform, opacity;
+}
+
+@keyframes mep-neon-expand {
+  0% { transform: translate(-50%, -50%) scale(0.2); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(4.5); opacity: 0; }
+}
+
+.mep-dust-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
   pointer-events: none;
   z-index: 0;
 }
 
-.mep-8b-ripple {
+.mep-dust-mote {
   position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 100%; height: 100%;
-  border: 3px solid var(--theme-color);
-  border-radius: 0;
-  box-shadow: 0 0 15px var(--theme-color), inset 0 0 15px var(--theme-color);
+  background-color: #ffffff;
+  border-radius: 50%;
   opacity: 0;
-  pointer-events: none;
-  animation: mep-ripple-expand 1.2s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+  box-shadow: none; /* Removed for performance */
+  will-change: transform, opacity;
 }
 
-@keyframes mep-ripple-expand {
-  0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-  100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+@keyframes mep-dust-float {
+  0% { transform: translateY(100vh); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-20vh); opacity: 0; }
+}
+
+[data-theme='light'] .mep-dust-mote {
+  background-color: var(--theme-color);
+}
+
+[data-theme='light'] .mep-neon-ripple {
+  border-color: var(--theme-color);
 }
 

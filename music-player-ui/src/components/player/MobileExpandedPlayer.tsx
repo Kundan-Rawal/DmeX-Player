@@ -61,82 +61,105 @@ interface MobileExpandedPlayerProps {
   setCurrentTime: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const Android8BRipples: React.FC<{ audioLevelRef: React.MutableRefObject<number>, isPlaying: boolean }> = ({ audioLevelRef, isPlaying }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const lastLvl = useRef(0);
+const Android8BRipples: React.FC<{ spatialData: React.MutableRefObject<any>, isPlaying: boolean }> = ({ spatialData, isPlaying }) => {
+  const r1 = useRef<HTMLDivElement>(null);
+  const r2 = useRef<HTMLDivElement>(null);
+  const r3 = useRef<HTMLDivElement>(null);
+
+  const rippleState = useRef([
+    { active: false, triggerTime: 0 },
+    { active: false, triggerTime: 0 },
+    { active: false, triggerTime: 0 }
+  ]);
+  const lastRippleTime = useRef(0);
+  const lastBassLevel = useRef(0);
+  const rippleThreshold = useRef(0.35);
 
   useEffect(() => {
     let raf: number;
-    let throttle = 0;
-    const tick = () => {
-      if (!isPlaying) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-      const lvl = audioLevelRef.current;
-      throttle++;
-      if (throttle > 2 && lvl > 0.55 && (lvl - lastLvl.current) > 0.1) {
-        const rip = document.createElement('div');
-        rip.className = 'mep-8b-ripple';
-        containerRef.current?.appendChild(rip);
-        setTimeout(() => rip.remove(), 1200);
-        throttle = 0;
-      }
-      lastLvl.current = lvl;
+    const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
+      if (!isPlaying) return;
+
+      const d = spatialData.current;
+      if (!d) return;
+      const lvl = d.bLvl;
+      
+      // Decay threshold slowly down to 0.1
+      rippleThreshold.current = Math.max(0.1, rippleThreshold.current - 0.001);
+      
+      // Cleanup expired ripples inside the loop (no setTimeouts!)
+      rippleState.current.forEach(r => {
+        if (r.active && now - r.triggerTime > 1800) {
+          r.active = false;
+        }
+      });
+      
+      // Dynamic spike detection: 
+      // 1. Must be above the dynamically decaying threshold
+      // 2. Must be on the rising edge of the wave
+      const isRising = lvl > lastBassLevel.current;
+      const isSpike = lvl > rippleThreshold.current && isRising;
+      
+      if (isSpike && now - lastRippleTime.current > 330) { 
+        const rIdx = rippleState.current.findIndex(r => !r.active);
+        if (rIdx !== -1) {
+          const r = rippleState.current[rIdx];
+          const ref = [r1, r2, r3][rIdx];
+          r.active = true;
+          r.triggerTime = now;
+          lastRippleTime.current = now;
+          
+          // Artificially bump the threshold to prevent immediate double-triggers,
+          // but strictly cap it at 0.35 so loud songs always trigger.
+          rippleThreshold.current = Math.min(0.35, rippleThreshold.current + 0.15);
+          
+          if (ref.current) {
+            ref.current.style.animation = 'none';
+            // Avoid synchronous reflow stutter by waiting for next paint frame
+            requestAnimationFrame(() => {
+              if (ref.current) ref.current.style.animation = 'mep-neon-expand 1.8s linear forwards';
+            });
+          }
+        }
+      }
+      lastBassLevel.current = lvl;
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying]);
+  }, [isPlaying, spatialData]);
 
-  return <div ref={containerRef} className="mep-8b-ripple-container" />;
+  return (
+    <>
+      <div ref={r1} className="mep-neon-ripple" />
+      <div ref={r2} className="mep-neon-ripple" />
+      <div ref={r3} className="mep-neon-ripple" />
+    </>
+  );
 };
 
-const Android8BDustCanvas: React.FC = () => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const Android8BDustCSS: React.FC = () => {
+  const motes = useMemo(() => Array.from({ length: 70 }).map(() => ({
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    size: Math.random() * 3.5 + 2.5,
+    opacity: Math.random() * 0.5 + 0.1,
+    delay: -Math.random() * 15,
+    duration: Math.random() * 10 + 10
+  })), []);
   
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    let w = canvas.width = window.innerWidth;
-    let h = canvas.height = window.innerHeight;
-    
-    const particles = Array.from({ length: 40 }).map(() => ({
-      x: Math.random() * w,
-      y: h + Math.random() * 200,
-      vx: (Math.random() - 0.5) * 0.5,
-      vy: -Math.random() * 2 - 0.5,
-      size: Math.random() * 2 + 1,
-      opacity: Math.random() * 0.5 + 0.1
-    }));
-    
-    let raf: number;
-    const render = () => {
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      particles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        if (p.y < -10) {
-          p.y = h + Math.random() * 50;
-          p.x = Math.random() * w;
-        }
-        ctx.globalAlpha = p.opacity;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      raf = requestAnimationFrame(render);
-    };
-    raf = requestAnimationFrame(render);
-    
-    return () => cancelAnimationFrame(raf);
-  }, []);
-  
-  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }} />;
+  return (
+    <div className="mep-dust-layer">
+      {motes.map((p, i) => (
+        <div key={i} className="mep-dust-mote" style={{
+          left: `${p.x}vw`, top: `${p.y}vh`,
+          width: `${p.size}px`, height: `${p.size}px`,
+          opacity: p.opacity,
+          animation: `mep-dust-float ${p.duration}s linear ${p.delay}s infinite`
+        }} />
+      ))}
+    </div>
+  );
 };
 
 export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => {
@@ -300,7 +323,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
       />
 
-      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas />}
+      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCSS />}
 
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">
@@ -413,11 +436,10 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             
             {/* 1. Album Art */}
             <div className="mep-art-wrap">
-              {IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples audioLevelRef={p.audioLevelRef} isPlaying={p.isPlaying} />}
-              <div className={`mep-art ${IS_ANDROID && p.visMode === 'RADAR' ? 'mep-art-8b' : ''}`} style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
+              {IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples spatialData={p.spatialData} isPlaying={p.isPlaying} />}
+              <div className="mep-art" style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
                 {!p.albumArt && <span className="mep-art-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={48} /></span>}
                 {p.lyrics.length > 0 && <div className="lyrics-art-badge">Synced lyrics</div>}
-                {IS_ANDROID && p.visMode === 'RADAR' && <div className="mep-art-8b-line" />}
               </div>
             </div>
 

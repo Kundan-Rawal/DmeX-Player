@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo,useCallback } from "react";
+import React, { useEffect, useRef, useState, useMemo,useCallback, useLayoutEffect } from "react";
 import { Track, NavView, Taste, CustomPlaylist, IS_ANDROID, IS_MOBILE, LyricLine } from './types/index';
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -26,6 +26,7 @@ import { AmbientBackground } from './components/player/AmbientBackground';
 import { fetchLyricsOnline } from './services/lyricsFetcher';
 
 import { DSPStudio, ExpandedControls } from './components/player/ExpandedPlayerUI';
+import { MobileExpandedPlayer } from './components/player/MobileExpandedPlayer';
 import { BulkScanner } from './components/library/BulkScanner';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
@@ -74,6 +75,8 @@ function App() {
   const [currentTrack, setCurrentTrack]     = useState<Track | null>(null);
   const [favorites, setFavorites]           = useState<string[]>([]);
   const [currentView, setCurrentView]       = useState<NavView>('ALL');
+  const scrollPositionsRef                  = useRef<Record<string, number>>({});
+  const trackContainerRef                   = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery]       = useState('');
   const [sortMode, setSortMode]             = useState<'TITLE'|'ARTIST'|'ALBUM'|'YEAR'>('TITLE');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
@@ -342,6 +345,11 @@ function App() {
     }
     boot();
   }, []); // Run exactly once on mount
+  useLayoutEffect(() => {
+    if (trackContainerRef.current) {
+      trackContainerRef.current.scrollTop = scrollPositionsRef.current[currentView] || 0;
+    }
+  }, [currentView]);
 
   useEffect(() => {
     const pushTime = Date.now();
@@ -361,7 +369,7 @@ function App() {
       } else if (currentView.startsWith('PLAYLIST_')) {
         setCurrentView('PLAYLIST_GALLERY');
       } else if (currentView.startsWith('ARTIST_')) {
-        setCurrentView('ARTISTS');
+        setCurrentView('ARTIST');
       } else if (currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') {
         setCurrentView('PLAYLIST_GALLERY');
       }
@@ -1185,7 +1193,12 @@ function App() {
         {/* TIER 3: THE ROUNDED TRACK CONTAINER */}
         <main className="content-area">
           {/* THE UNIFIED SCROLL FIX: The container is fully unlocked. Header and tracks scroll together natively. */}
-          <div className="samsung-track-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+          <div 
+            ref={trackContainerRef}
+            onScroll={(e) => scrollPositionsRef.current[currentView] = e.currentTarget.scrollTop}
+            className="samsung-track-container" 
+            style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}
+          >
             
             {/* 1. HIGHEST PRIORITY: PLAYLIST GALLERY */}
             {currentView === 'PLAYLIST_GALLERY' ? (
@@ -1442,7 +1455,59 @@ function App() {
             transition: 'opacity 0.3s ease',
             zIndex: 2
           }}>
-            <AmbientBackground 
+            {IS_ANDROID ? (
+              <MobileExpandedPlayer 
+                trackTitle={trackTitle} trackArtist={trackArtist} albumArt={albumArt}
+                isPlaying={isPlaying} currentTime={currentTime} duration={duration}
+                isShuffle={isShuffle} repeatMode={repeatMode} repeatDeg={repeatDeg} repeatBusy={repeatBusy}
+                isAnalyzing={isAnalyzing} isManualOverride={isManualOverride} detectedProfile={detectedProfile}
+                smartTaste={smartTaste} isCurrentFavorite={isCurrentFavorite}
+                lyrics={lyrics} activeLyricIndex={activeLyricIndex} scanProgress={scanProgress}
+                isRemastered={isRemastered} setIsRemastered={setIsRemastered}
+                isCompressed={isCompressed} setIsCompressed={setIsCompressed}
+                selectedAcousticEnv={selectedAcousticEnv} setSelectedAcousticEnv={setSelectedAcousticEnv}
+                isEnvDropdownOpen={isEnvDropdownOpen} setIsEnvDropdownOpen={setIsEnvDropdownOpen}
+                upscaleDrive={upscaleDrive} setUpscaleDrive={setUpscaleDrive}
+                widenWidth={widenWidth} setWidenWidth={setWidenWidth}
+                spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
+                reverbWet={reverbWet} setReverbWet={setReverbWet}
+                setBassLevel={setBassLevel} setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
+                isProfileActive={isProfileActive} setIsProfileActive={setIsProfileActive}
+                isProfileActiveRef={isProfileActiveRef}
+                applySmartSettings={applySmartSettings}
+                smartTasteRef={smartTasteRef}
+                bassLevel={bassLevel} bassLevelRef={bassLevelRef}
+                speakerMode={speakerMode} setSpeakerMode={setSpeakerMode}
+                isFIRMode={isFIRMode} setIsFIRMode={setIsFIRMode}
+                visMode={visMode} setVisMode={setVisMode}
+                isPhoneSpeaker={isPhoneSpeaker} setIsPhoneSpeaker={setIsPhoneSpeaker}
+                isPhoneSpeakerRef={isPhoneSpeakerRef}
+                isExpandedRef={isExpandedRef}
+                audioLevelRef={audioLevelRef}
+                spatialData={spatialData}
+                themeColor={themeColor} isDarkMode={isDarkMode} audioLevel={audioLevel}
+                onClose={() => { setIsExpanded(false); }}
+                onPlayPause={handlePlayPause}
+                onNext={handleNext} onPrev={handlePrev}
+                onToggleShuffle={handleToggleShuffle}
+                onToggleRepeat={handleToggleRepeat}
+                onToggleFavorite={toggleFavorite}
+                onSeekDrag={handleSeekDrag}
+                onSeekCommit={handleSeekCommit}
+                onTasteChange={handleTasteChange}
+                onFetchLyrics={async () => {
+                  if (currentTrack) {
+                    const lrc = await fetchLyricsOnline(currentTrack, setScanProgress);
+                    if (lrc) finalizeLyrics(currentTrack, lrc);
+                  }
+                }}
+                writeToEngine={writeToEngine}
+                isSeekingRef={isSeekingRef}
+                setCurrentTime={setCurrentTime}
+              />
+            ) : (
+              <>
+                <AmbientBackground 
               isExpandedRef={isExpandedRef} 
               audioLevelRef={audioLevelRef} 
               spatialData={spatialData} 
@@ -1637,6 +1702,8 @@ function App() {
                 )}
               </div>
             </div>
+            </>
+            )}
           </div>
         </footer>
       </div>
