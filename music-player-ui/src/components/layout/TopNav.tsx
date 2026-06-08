@@ -26,7 +26,7 @@ export const TopNav = ({
   const [isKebabOpen, setIsKebabOpen] = useState(false);
 
   const TABS = [
-    { id: 'FAVORITES', label: 'Favourites' },
+    { id: 'FAVOURITES', label: 'Favourites' },
     { id: 'PLAYLIST_GALLERY', label: 'Playlists' },
     { id: 'ALL', label: 'Tracks' },
     { id: 'ALBUMS', label: 'Albums' }, // FIXED
