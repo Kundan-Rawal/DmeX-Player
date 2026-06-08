@@ -324,9 +324,9 @@ function App() {
   }, []); // Run exactly once on mount
 
   useEffect(() => {
-    // 1. When we dive into an Album or Playlist, forcefully inject a fake history state.
+    // 1. When we dive into an Album, Playlist, Artist, or Favourites, forcefully inject a fake history state.
     // This physically stops Android from exiting the app when you swipe back.
-    if (currentView.startsWith('ALBUM_') || currentView.startsWith('PLAYLIST_')) {
+    if (currentView.startsWith('ALBUM_') || currentView.startsWith('PLAYLIST_') || currentView.startsWith('ARTIST_') || currentView === 'FAVOURITES') {
       window.history.pushState({ fakePage: true }, '');
     }
 
@@ -336,6 +336,10 @@ function App() {
         setCurrentView('ALBUMS');
       } else if (currentView.startsWith('PLAYLIST_')) {
         setCurrentView('PLAYLIST_GALLERY');
+      } else if (currentView.startsWith('ARTIST_')) {
+        setCurrentView('ARTISTS');
+      } else if (currentView === 'FAVOURITES') {
+        setCurrentView('TRACKS');
       }
     };
 
