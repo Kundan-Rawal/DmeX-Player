@@ -201,7 +201,7 @@ engine_ready:
     ma_node_graph *pg = ma_engine_get_node_graph(&g_engine);
     ma_uint32 sr = ma_engine_get_sample_rate(&g_engine);
 
-    ma_loshelf_node_config bc = ma_loshelf_node_config_init(g_channels, sr, 8.0f, 1.0f, 175.0f);
+    ma_loshelf_node_config bc = ma_loshelf_node_config_init(g_channels, sr, 8.0f, 1.0f, 80.0f);
     ma_loshelf_node_init(pg, &bc, NULL, &g_bassNode);
     ma_peak_node_config mc2 = ma_peak_node_config_init(g_channels, sr, -5.0f, 1.0f, 400.0f);
     ma_peak_node_init(pg, &mc2, NULL, &g_midNode);

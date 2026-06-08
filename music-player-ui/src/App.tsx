@@ -1305,7 +1305,7 @@ function App() {
                 ) : (
                   <>
                 {/* 2. THE SELECTION & SORT BAR */}
-                {!searchQuery && displayedTracks.length > 0 && (
+                {displayedTracks.length > 0 && (
                   <div style={{flexShrink: 0, display:'flex',justifyContent: isSelectionMode ? 'space-between' : 'flex-end',alignItems:'center',marginBottom: IS_ANDROID ? '6px' : '16px', padding: IS_ANDROID ? '0 16px' : '0 16px 0 0', transition: 'all 0.2s'}}>
                     {isSelectionMode ? (
                       <div style={{display:'flex',gap:'10px',alignItems:'center', width: '100%', justifyContent: 'space-between'}}>
@@ -1322,7 +1322,18 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        {!IS_ANDROID && <button className="dsp-btn" style={{marginRight: 'auto'}} onClick={()=>setIsSelectionMode(true)}>☑ Select Multiple</button>}
+                          {searchQuery ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: 'auto', background: 'var(--bg-raised)', padding: '6px 12px', borderRadius: '16px', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                                Results for <strong style={{ color: 'var(--theme-color)' }}>"{searchQuery}"</strong>
+                              </span>
+                              <button onClick={() => setSearchQuery('')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px', color: 'var(--text-muted)' }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                              </button>
+                            </div>
+                          ) : (
+                            !IS_ANDROID && <button className="dsp-btn" style={{marginRight: 'auto'}} onClick={()=>setIsSelectionMode(true)}>☑ Select Multiple</button>
+                          )}
                         {(!activePlaylistId && !activeAlbumName && currentView !== 'TOPTRACKS') && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
                             {!IS_ANDROID && <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sort By:</span>}

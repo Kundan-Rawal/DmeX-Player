@@ -196,7 +196,7 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
     const float SMOOTH_COEF = 0.002f;
     // CRITICAL FIX: Dropped crossover from 0.032f (245Hz) down to 0.012f (~90Hz)
     // This stops the bass boost from touching the guitars and lower vocals.
-    const float F_BASS = 0.025f;   // ~175Hz: Grabs sub-bass and punchy kick drum fundamentals
+    const float F_BASS = 0.008f;   // ~112Hz: Keeps bass completely below the kick drum fundamental
     const float F_TREBLE = 0.25f;
 
     for (ma_uint32 i = 0; i < fc; ++i)

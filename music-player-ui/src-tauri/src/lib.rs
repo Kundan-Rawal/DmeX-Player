@@ -152,6 +152,7 @@ pub extern "C" fn rust_free_audio_buffer(ptr: *mut RustAudioBuffer) {
 // ------------------------------------------------------------------
 extern "C" {
     fn init_audio_engine();
+    fn uninit_audio_engine();
     fn execute_audio_command(cmd: *const c_char);
     fn get_audio_metrics(out_data: *mut f32, out_level: *mut f32);
     fn analyze_audio(sc: *mut f32, cf: *mut f32, zcr: *mut f32, rms: *mut f32) -> bool;
@@ -727,6 +728,12 @@ pub fn run() {
             audio_command, extract_and_load_ir, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app_handle, event| match event {
+            tauri::RunEvent::Exit => {
+                unsafe { uninit_audio_engine(); }
+            }
+            _ => {}
+        });
 }
