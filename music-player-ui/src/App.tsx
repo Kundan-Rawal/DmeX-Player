@@ -236,7 +236,7 @@ function App() {
     let base = playlist;
 
     // 1. VIEW ROUTING
-    if (currentView === 'FAVORITES') {
+    if (currentView === 'FAVOURITES') {
       base = playlist.filter(t => favorites.includes(t.path));
     } else if (currentView === 'BOLLYWOOD') {
       base = playlist.filter(t => {
@@ -1042,7 +1042,7 @@ function App() {
 
   // MASSIVE HEADER RESOLVER
   const headerInfo = useMemo(() => {
-    if (currentView === 'FAVORITES') return { type: 'FAVOURITES', title: 'Favourite Tracks', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
+    if (currentView === 'FAVOURITES') return { type: 'FAVOURITES', title: 'Favourite Tracks', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
     if (currentView === 'TOPTRACKS') return { type: 'MOST PLAYED', title: 'Top Ranked Tracks', subtitle: `${displayedTracks.length} tracks by listen time`, isCircle: false, image: null, isMassive: true };
     if (activeArtistName) return { type: 'ARTIST', title: activeArtistName, subtitle: `${displayedTracks.length} tracks`, isCircle: true, image: null, isMassive: true };
     if (activePlaylistId) {
