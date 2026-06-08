@@ -209,11 +209,12 @@ export const AmbientBackground = ({
 
   return (
     <div className="ambient-background">
-      {visMode==='ORBIT'?(
+      {(visMode === 'ORBIT' || (IS_ANDROID && visMode === 'RADAR')) ? (
         <>
-          <div className="blob blob-1" style={{transform:`scale(${1 + (IS_ANDROID ? 0 : audioLevel * 2.0)})`, transition: IS_ANDROID ? 'none' : 'transform 0.12s ease-out'}}/>
-          <div className="blob blob-2" style={{transform:`scale(${1 + (IS_ANDROID ? 0 : audioLevel * 1.3)})`, transition: IS_ANDROID ? 'none' : 'transform 0.18s ease-out'}}/>
-          <div className="blob blob-3" style={{transform:`scale(${1 + (IS_ANDROID ? 0 : audioLevel * 0.9)})`, transition: IS_ANDROID ? 'none' : 'transform 0.22s ease-out'}}/>
+          <div className="blob blob-1" style={{transform:`scale(${1 + (IS_ANDROID ? audioLevel * 0.5 : audioLevel * 2.0)})`, transition: IS_ANDROID ? 'none' : 'transform 0.12s ease-out'}}/>
+          <div className="blob blob-2" style={{transform:`scale(${1 + (IS_ANDROID ? audioLevel * 0.4 : audioLevel * 1.3)})`, transition: IS_ANDROID ? 'none' : 'transform 0.18s ease-out'}}/>
+          <div className="blob blob-3" style={{transform:`scale(${1 + (IS_ANDROID ? audioLevel * 0.3 : audioLevel * 0.9)})`, transition: IS_ANDROID ? 'none' : 'transform 0.22s ease-out'}}/>
+          <div className="blob blob-4" style={{transform:`scale(${1 + (IS_ANDROID ? audioLevel * 0.2 : audioLevel * 0.6)})`, transition: IS_ANDROID ? 'none' : 'transform 0.25s ease-out'}}/>
         </>
       ):(
         <div style={{position:'absolute',inset:0,'--ring-core':isDarkMode?'rgba(255,255,255,0.9)':'var(--theme-color)'} as React.CSSProperties}>

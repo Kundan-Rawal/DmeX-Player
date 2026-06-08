@@ -4,7 +4,7 @@ import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import Marquee from 'react-fast-marquee';
 import { DSPStudio, ReverbEnv } from './ExpandedPlayerUI';
 import { AmbientBackground } from './AmbientBackground';
-import { Taste, LyricLine } from '../../types/index';
+import { Taste, LyricLine, IS_ANDROID } from '../../types/index';
 import { AudioProfile } from '../../config/audio';
 import { formatTime } from '../../utils/formatters';
 import { HDCrystalIcon } from './HDCrystalIcon';
@@ -60,6 +60,84 @@ interface MobileExpandedPlayerProps {
   isSeekingRef: React.MutableRefObject<boolean>;
   setCurrentTime: React.Dispatch<React.SetStateAction<number>>;
 }
+
+const Android8BRipples: React.FC<{ audioLevelRef: React.MutableRefObject<number>, isPlaying: boolean }> = ({ audioLevelRef, isPlaying }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastLvl = useRef(0);
+
+  useEffect(() => {
+    let raf: number;
+    let throttle = 0;
+    const tick = () => {
+      if (!isPlaying) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const lvl = audioLevelRef.current;
+      throttle++;
+      if (throttle > 2 && lvl > 0.55 && (lvl - lastLvl.current) > 0.1) {
+        const rip = document.createElement('div');
+        rip.className = 'mep-8b-ripple';
+        containerRef.current?.appendChild(rip);
+        setTimeout(() => rip.remove(), 1200);
+        throttle = 0;
+      }
+      lastLvl.current = lvl;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying]);
+
+  return <div ref={containerRef} className="mep-8b-ripple-container" />;
+};
+
+const Android8BDustCanvas: React.FC = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    let w = canvas.width = window.innerWidth;
+    let h = canvas.height = window.innerHeight;
+    
+    const particles = Array.from({ length: 40 }).map(() => ({
+      x: Math.random() * w,
+      y: h + Math.random() * 200,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: -Math.random() * 2 - 0.5,
+      size: Math.random() * 2 + 1,
+      opacity: Math.random() * 0.5 + 0.1
+    }));
+    
+    let raf: number;
+    const render = () => {
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.y < -10) {
+          p.y = h + Math.random() * 50;
+          p.x = Math.random() * w;
+        }
+        ctx.globalAlpha = p.opacity;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      raf = requestAnimationFrame(render);
+    };
+    raf = requestAnimationFrame(render);
+    
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  
+  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }} />;
+};
 
 export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => {
 
@@ -222,6 +300,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
       />
 
+      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas />}
+
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">
         <button className="mep-topbar-btn" onClick={p.onClose} aria-label="Close">
@@ -333,9 +413,11 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             
             {/* 1. Album Art */}
             <div className="mep-art-wrap">
-              <div className="mep-art" style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
+              {IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples audioLevelRef={p.audioLevelRef} isPlaying={p.isPlaying} />}
+              <div className={`mep-art ${IS_ANDROID && p.visMode === 'RADAR' ? 'mep-art-8b' : ''}`} style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
                 {!p.albumArt && <span className="mep-art-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={48} /></span>}
                 {p.lyrics.length > 0 && <div className="lyrics-art-badge">Synced lyrics</div>}
+                {IS_ANDROID && p.visMode === 'RADAR' && <div className="mep-art-8b-line" />}
               </div>
             </div>
 
