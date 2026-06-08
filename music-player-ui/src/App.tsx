@@ -11,7 +11,9 @@ import "./App.css";
 // import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLibraryScanner } from './hooks/useLibraryScanner';
 import { AlbumGalleryView } from './views/AlbumGalleryView';
+import { ArtistGalleryView } from './views/ArtistGalleryView';
 import { vaultGet, vaultSet, initVault } from './services/vault';
+import { splitArtists } from './utils/artistEngine';
 import { formatTime, parseLRC } from './utils/formatters';
 import { PlaylistGalleryView } from './views/PlaylistGalleryView';
 import { PROFILES, FIR_GAINS, classifyAudio, applyTaste, AudioProfile } from './config/audio';
@@ -224,6 +226,7 @@ function App() {
 
   const activePlaylistId = currentView.startsWith('PLAYLIST_') ? currentView.replace('PLAYLIST_', '') : null;
   const activeAlbumName = currentView.startsWith('ALBUM_') ? currentView.replace('ALBUM_', '') : null;
+  const activeArtistName = currentView.startsWith('ARTIST_') ? currentView.replace('ARTIST_', '') : null;
   // CHANGE: useMemo depends on debouncedSearchQuery instead of searchQuery.
   // This prevents the 1800-item filter from re-running on every keystroke.
   // Also: favorites.includes() was removed — filtering by favorites now uses
@@ -247,8 +250,9 @@ function App() {
       if (pl) base = pl.trackPaths.map(path=>playlist.find(t=>t.path===path)).filter((t):t is Track=>t!==undefined);
     } else if (activeAlbumName) {
       base = playlist.filter(t => (t.album || 'Unknown Album') === activeAlbumName);
+    } else if (activeArtistName) {
+      base = playlist.filter(t => splitArtists(t.artist || 'Unknown Artist').includes(activeArtistName));
     }
-    // DELETED YOUR REDUNDANT activePlaylistId DUPLICATE HERE
 
     // 2. THE SEARCH ENGINE
     if (debouncedSearchQuery && debouncedSearchQuery.trim() !== '') {
@@ -270,7 +274,7 @@ function App() {
       }
       return 0;
     });
-  }, [playlist, currentView, favorites, customPlaylists, debouncedSearchQuery, sortMode, activePlaylistId, activeAlbumName]);
+  }, [playlist, currentView, favorites, customPlaylists, debouncedSearchQuery, sortMode, activePlaylistId, activeAlbumName, activeArtistName]);
 
 
   // CHANGE: favorites → Set<string>, memoized.
@@ -1028,8 +1032,23 @@ function App() {
   }, []);
 
   const safeNavView = currentView.startsWith('ALBUM_') ? 'ALBUMS' : 
+                      currentView.startsWith('ARTIST_') ? 'ARTISTS' :
                       currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : 
                       currentView;
+
+  // MASSIVE HEADER RESOLVER
+  const headerInfo = useMemo(() => {
+    if (currentView === 'FAVORITES') return { type: 'FAVOURITES', title: 'Favourite Tracks', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
+    if (currentView === 'TOPTRACKS') return { type: 'MOST PLAYED', title: 'Top Ranked Tracks', subtitle: `${displayedTracks.length} tracks by listen time`, isCircle: false, image: null, isMassive: true };
+    if (activeArtistName) return { type: 'ARTIST', title: activeArtistName, subtitle: `${displayedTracks.length} tracks`, isCircle: true, image: null, isMassive: true };
+    if (activePlaylistId) {
+      const pl = customPlaylists.find(p=>p.id === activePlaylistId);
+      return { type: 'PLAYLIST', title: pl?.name || 'Unknown', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
+    }
+    // For albums we use the old logic or we can use headerInfo but not massive
+    if (activeAlbumName) return { type: 'ALBUM', title: activeAlbumName, subtitle: `${displayedTracks.length} tracks • ${displayedTracks[0]?.artist || 'Unknown'}`, isCircle: false, image: displayedTracks.find(t => t.thumb)?.thumb || (currentTrack?.album === activeAlbumName ? albumArt : null), isMassive: false };
+    return null;
+  }, [currentView, activeArtistName, activeAlbumName, activePlaylistId, displayedTracks, customPlaylists, albumArt, currentTrack]);
 
   return (
     <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
@@ -1113,6 +1132,7 @@ function App() {
           isLoading={isLoading}
           mobileSearchOpen={mobileSearchOpen} setMobileSearchOpen={setMobileSearchOpen}
           toggleTheme={toggleTheme}
+          onOpenSettings={() => {}}
         />
         <BulkScanner 
           playlist={playlist} bulkScanActive={bulkScanActive} bulkScanPaused={bulkScanPaused}
@@ -1144,6 +1164,8 @@ function App() {
                 playlist={playlist} favoritesSet={favoritesSet} customPlaylists={customPlaylists} albumArt={albumArt}
                 setCurrentView={setCurrentView} createPlaylist={createPlaylist} deletePlaylist={deletePlaylist}
               />
+            ) : currentView === 'ARTISTS' ? (
+              <ArtistGalleryView playlist={playlist} setCurrentView={setCurrentView} />
             ) : currentView === 'ALBUMS' ? (
               /* 2. THE NEW BENTO BOX ALBUM GRID */
               <AlbumGalleryView playlist={playlist} setCurrentView={setCurrentView}/>
@@ -1158,9 +1180,9 @@ function App() {
 
             ) : (
               <>
-                {/* 1. THE STACKED MOBILE HEADER */}
-                {activeAlbumName && displayedTracks.length > 0 && (
-                  <div className="album-detail-header fade-in" style={{ 
+                {/* 1. THE UNIFIED MASSIVE HEADER */}
+                {headerInfo && displayedTracks.length > 0 && (
+                  <div className={`album-detail-header fade-in ${headerInfo.isMassive ? 'massive-header' : ''}`} style={{ 
                     flexShrink: 0, 
                     padding: IS_ANDROID ? '24px 16px 16px' : '24px 36px 32px',
                     display: 'flex',
@@ -1172,35 +1194,44 @@ function App() {
                     
                     <div className="album-detail-art" style={{ 
                       backgroundColor: 'var(--bg-surface)', overflow: 'hidden', position: 'relative',
-                      width: IS_ANDROID ? '180px' : '180px', 
-                      height: IS_ANDROID ? '180px' : '180px',
-                      minWidth: IS_ANDROID ? '180px' : '180px',
+                      width: IS_ANDROID ? (headerInfo.isMassive ? '200px' : '180px') : (headerInfo.isMassive ? '240px' : '180px'), 
+                      height: IS_ANDROID ? (headerInfo.isMassive ? '200px' : '180px') : (headerInfo.isMassive ? '240px' : '180px'),
+                      minWidth: IS_ANDROID ? (headerInfo.isMassive ? '200px' : '180px') : (headerInfo.isMassive ? '240px' : '180px'),
                       marginBottom: IS_ANDROID ? '8px' : undefined,
-                      borderRadius: '16px',
-                      boxShadow: '0 16px 40px rgba(0,0,0,0.4)'
+                      borderRadius: headerInfo.isCircle ? '50%' : '16px',
+                      boxShadow: '0 16px 40px rgba(0,0,0,0.4)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>
                       {(() => {
-                        const cover = displayedTracks.find(t => t.thumb)?.thumb || (currentTrack?.album === activeAlbumName ? albumArt : null);
-                        if (cover) return <img src={cover} alt="album cover" style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }} />;
-                        return <div style={{display:'flex', alignItems:'center', justifyContent:'center', height:'100%', opacity:0.3}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></div>;
+                        if (headerInfo.image) return <img src={headerInfo.image} alt="cover" style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }} />;
+                        if (headerInfo.type === 'FAVOURITES') return <svg width="64" height="64" viewBox="0 0 24 24" fill="var(--theme-color)"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>;
+                        return <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>;
                       })()}
                     </div>
                     
-                    <div className="album-detail-info" style={{ display: 'flex', flexDirection: 'column', width: '100%', alignItems: IS_ANDROID ? 'center' : 'flex-start' }}>
-                      <div className="album-detail-badge" style={{ marginBottom: IS_ANDROID ? '6px' : '8px', fontSize: '12px' }}>ALBUM</div>
+                    <div className="album-detail-info" style={{ display: 'flex', flexDirection: 'column', width: '100%', alignItems: IS_ANDROID ? 'center' : 'flex-start', justifyContent: 'center' }}>
+                      <div className="album-detail-badge" style={{ marginBottom: IS_ANDROID ? '6px' : '8px', fontSize: '13px', color: 'var(--theme-color)', fontWeight: 800, letterSpacing: '2px', textTransform: 'uppercase' }}>
+                        {headerInfo.type}
+                      </div>
                       <div className="album-detail-title" style={{
-                        fontSize: IS_ANDROID ? '24px' : '36px',
-                        marginBottom: IS_ANDROID ? '6px' : '8px',
+                        fontSize: headerInfo.isMassive ? (IS_ANDROID ? '32px' : '48px') : (IS_ANDROID ? '24px' : '36px'),
+                        fontWeight: 900,
+                        lineHeight: 1.1,
+                        marginBottom: IS_ANDROID ? '8px' : '12px',
                         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', whiteSpace: 'normal'
-                      }}>{activeAlbumName}</div>
+                      }}>{headerInfo.title}</div>
                       <div className="album-detail-artist" style={{
-                        fontSize: '15px', marginBottom: IS_ANDROID ? '16px' : '20px',
-                      }}>{displayedTracks.length} tracks • {displayedTracks[0].artist}</div>
-                      <div className="album-detail-actions" style={{ justifyContent: IS_ANDROID ? 'center' : 'flex-start', width: '100%' }}>
-                        <button className="play-all-btn" style={{ flex: IS_ANDROID ? 1 : undefined, justifyContent: 'center' }} onClick={() => playTrack(displayedTracks[0])}>
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play Album
+                        fontSize: '16px', marginBottom: IS_ANDROID ? '16px' : '24px', opacity: 0.7, fontWeight: 500
+                      }}>{headerInfo.subtitle}</div>
+                      
+                      <div className="album-detail-actions" style={{ justifyContent: IS_ANDROID ? 'center' : 'flex-start', width: '100%', display: 'flex', gap: '12px' }}>
+                        <button className="play-all-btn" style={{ flex: IS_ANDROID ? 1 : undefined, justifyContent: 'center', background: 'var(--theme-color)', color: 'var(--theme-text)', boxShadow: '0 4px 20px rgba(255,50,50,0.4)', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => playTrack(displayedTracks[0])}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play All
                         </button>
-                        <button className="back-albums-btn" style={{ marginLeft: IS_ANDROID ? '12px' : '0' }} onClick={() => window.history.back()}>← Back</button>                      </div>
+                        <button className="back-albums-btn" style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text-primary)', padding: '12px 24px', borderRadius: '30px', fontWeight: 600, fontSize: '15px', cursor: 'pointer' }} onClick={() => window.history.back()}>
+                          ← Back
+                        </button>                      
+                      </div>
                     </div>
                   </div>
                 )}

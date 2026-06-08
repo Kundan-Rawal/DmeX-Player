@@ -8,7 +8,7 @@ export interface ArtistProfile {
 const SPAM_KEYWORDS = /(pagalworld|pendujatt|mr-jatt|djmaza|songs\.pk|wapking|djpunjab|raag|mp3mad|download|kbps|audio|lyric|click|link|official|exclusive|music|video)/gi;
 
 function decodeHtmlEntities(str: string): string {
-  return str.replace(/&#([0-9]{1,3});/gi, (match, numStr) => {
+  return str.replace(/&#([0-9]{1,3});/gi, (_, numStr) => {
     return String.fromCharCode(parseInt(numStr, 10));
   }).replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
@@ -69,7 +69,7 @@ export const buildArtistDictionary = (tracks: any[]): ArtistProfile[] => {
   const artistMap = new Map<string, ArtistProfile>();
 
   tracks.forEach(track => {
-    const individualArtists = splitArtists(track.artist || track.albumArtist || 'Unknown Artist'); 
+    const individualArtists = splitArtists(track.artist || 'Unknown Artist'); 
     
     individualArtists.forEach(artistName => {
       let artistId = artistName.toLowerCase().replace(/[^a-z0-9]/g, '');
