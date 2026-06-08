@@ -335,7 +335,7 @@ function App() {
         await initVault();
         const savedDark = await vaultGet<boolean>("isDarkMode");
         if (savedDark !== undefined && savedDark !== null) setIsDarkMode(savedDark);
-      } catch (err) {} // <--- THIS IS WHAT WAS MISSING
+      } catch (err) {} 
 
       setIsLoading(false);
       setScanProgress('');
@@ -344,6 +344,7 @@ function App() {
   }, []); // Run exactly once on mount
 
   useEffect(() => {
+    const pushTime = Date.now();
     // 1. When we dive into an Album, Playlist, Artist, or Favourites, forcefully inject a fake history state.
     // This physically stops Android from exiting the app when you swipe back.
     if (currentView.startsWith('ALBUM_') || currentView.startsWith('PLAYLIST_') || currentView.startsWith('ARTIST_') || currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') {
@@ -352,6 +353,9 @@ function App() {
 
     // 2. When the OS consumes that fake state (Hardware swipe-back)
     const handleAndroidBackSwipe = () => {
+      // Prevent spontaneous popstate fired immediately after pushState (common Android WebView bug)
+      if (Date.now() - pushTime < 500) return;
+
       if (currentView.startsWith('ALBUM_')) {
         setCurrentView('ALBUMS');
       } else if (currentView.startsWith('PLAYLIST_')) {
@@ -359,7 +363,7 @@ function App() {
       } else if (currentView.startsWith('ARTIST_')) {
         setCurrentView('ARTISTS');
       } else if (currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') {
-        setCurrentView('ALL');
+        setCurrentView('PLAYLIST_GALLERY');
       }
     };
 
@@ -1052,8 +1056,8 @@ function App() {
   }, []);
 
   const safeNavView = currentView.startsWith('ALBUM_') ? 'ALBUMS' : 
-                      currentView.startsWith('ARTIST_') ? 'ARTISTS' :
-                      currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : 
+                      currentView.startsWith('ARTIST_') ? 'ARTIST' :
+                      (currentView.startsWith('PLAYLIST_') || currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') ? 'PLAYLIST_GALLERY' : 
                       currentView;
 
   // MASSIVE HEADER RESOLVER
@@ -1339,10 +1343,10 @@ function App() {
                     onRemove={track=>removeFromPlaylist(activePlaylistId,[track.path])}
                     onReorder={(from,to)=>reorderPlaylist(activePlaylistId,from,to)}
                     isSelectionMode={isSelectionMode} selectedTracks={selectedTracks} onToggleSelect={toggleSelect}/>
-                ) : activeAlbumName ? (
+                ) : (activeAlbumName || activeArtistName || currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') ? (
                   
                   /* ============================================================== */
-                  /* THE FLAT LIST BOMB: Virtualization destroyed for Albums        */
+                  /* THE FLAT LIST BOMB: Virtualization destroyed for Detail Views  */
                   /* ============================================================== */
                   <div style={{ paddingBottom: '150px' }}>
                     {displayedTracks.map((track, index) => (
@@ -1357,9 +1361,16 @@ function App() {
                           transition: 'background 0.2s'
                         }}
                       >
-                        {/* Track Number / Playing Indicator */}
-                        <div style={{ width: '30px', textAlign: 'center', color: currentTrack?.path === track.path ? 'var(--theme-color)' : 'var(--text-muted)', fontSize: '14px', fontWeight: 600 }}>
-                          {currentTrack?.path === track.path ? '▶' : index + 1}
+                        {/* Track Number & Thumb */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{ width: '24px', textAlign: 'center', color: currentTrack?.path === track.path ? 'var(--theme-color)' : 'var(--text-muted)', fontSize: '14px', fontWeight: 600 }}>
+                            {currentTrack?.path === track.path ? '▶' : index + 1}
+                          </div>
+                          <div style={{ width: '40px', height: '40px', borderRadius: '6px', backgroundColor: 'var(--bg-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                            {currentTrack?.path === track.path && albumArt ? <div style={{ width: '100%', height: '100%', backgroundImage: `url(${albumArt})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                              : track.thumb ? <div style={{ width: '100%', height: '100%', backgroundImage: `url(${track.thumb})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                              : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.3"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>}
+                          </div>
                         </div>
                         
                         {/* Track Name & Artist */}

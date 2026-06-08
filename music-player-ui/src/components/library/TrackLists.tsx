@@ -222,7 +222,7 @@ export const DraggablePlaylistView = memo(({
   };
 
   return (
-    <div ref={containerRef} className="virtual-scroll-container" style={{ overflowY:'auto', maxHeight:'calc(100vh - 200px)' }}>
+    <div ref={containerRef} className="virtual-scroll-container" style={{ paddingBottom: '150px' }}>
       <ul className="track-list" style={{ height:'auto', position:'relative' }}>
         {tracks.map((track, index) => {
           const profileData = PROFILES.find(p => p.id === track.profile);

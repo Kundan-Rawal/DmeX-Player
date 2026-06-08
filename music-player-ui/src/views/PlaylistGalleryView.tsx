@@ -44,7 +44,7 @@ export const PlaylistGalleryView: React.FC<PlaylistGalleryProps> = ({
           <p className="smart-count">{playlist.length} tracks</p>
         </div>
 
-        <div className="smart-card" onClick={() => setCurrentView('FAVORITES')}>
+        <div className="smart-card" onClick={() => setCurrentView('FAVOURITES')}>
           <div className="smart-card-art" style={{ position: 'relative' }}>
             {(() => {
               const favs = playlist.filter(t => favoritesSet.has(t.path));
