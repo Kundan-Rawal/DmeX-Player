@@ -13,6 +13,7 @@ extern bool g_engineInitialized;
 
 // Global settings
 extern float g_bassGain;
+extern float g_trebleGain;
 extern std::mutex g_irMutex;
 extern std::mutex g_pathMutex;
 extern std::mutex g_audioMutex;

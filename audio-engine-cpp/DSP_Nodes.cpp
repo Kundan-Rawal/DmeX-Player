@@ -82,8 +82,11 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         if (g_isLaptopSpeaker) {
             effectiveWidth = 1.0f + ((p->width - 1.0f) * 0.4f);
         }
-        pOut[i * 2] = M + (S * effectiveWidth);
-        pOut[i * 2 + 1] = M - (S * effectiveWidth);
+        // Proper Mid/Side balancing: gently boost the Mid channel to anchor the center
+        // as the Side channel spreads out, preventing phase cancellation holes.
+        float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.25f);
+        pOut[i * 2] = (M * midGain) + (S * effectiveWidth);
+        pOut[i * 2 + 1] = (M * midGain) - (S * effectiveWidth);
     }
 }
 ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
@@ -181,7 +184,7 @@ ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0}
 static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     AudiophileEQNode *p = (AudiophileEQNode *)pNode;
-    if (!g_isFIRModeOn && !g_isRemasterOn)
+    if (!g_isFIRModeOn && !g_isRemasterOn && g_trebleGain < 0.001f)
     {
         memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
         *pFrameCountOut = *pFrameCountIn;
@@ -196,8 +199,8 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
     const float SMOOTH_COEF = 0.002f;
     // CRITICAL FIX: Dropped crossover from 0.032f (245Hz) down to 0.012f (~90Hz)
     // This stops the bass boost from touching the guitars and lower vocals.
-    const float F_BASS = 0.025f;   // ~175Hz: Grabs sub-bass and punchy kick drum fundamentals
-    const float F_TREBLE = 0.25f;
+    const float F_BASS = 0.012f;   // ~90Hz: Clean sub-bass, prevents muddiness and compressor pumping
+    const float F_TREBLE = 0.55f;  // ~5.6kHz: Moves Treble far above the 1kHz-4kHz vocal range so highs sit independently
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
@@ -230,7 +233,7 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         // If currentMid is 0.80, gMid = -0.20 (a 20% phase-aligned cut).
         float gBass = p->currentBass - 1.0f;
         float gMid = p->currentMid - 1.0f;
-        float gTreble = p->currentHigh - 1.0f;
+        float gTreble = (p->currentHigh - 1.0f) + g_trebleGain;
 
         // CRITICAL FIX: The dry signal (L and R) passes through 100% untouched.
         // We now safely layer the isolated Bass, Mids, and Treble back on top.

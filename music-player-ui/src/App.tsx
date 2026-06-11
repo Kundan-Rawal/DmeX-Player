@@ -149,6 +149,8 @@ function App() {
   const [repeatBusy, setRepeatBusy]   = useState(false);
   const [bassLevel, setBassLevel]     = useState(0.0);
   const bassLevelRef                  = useRef(0.0);
+  const [trebleLevel, setTrebleLevel] = useState(0.0);
+  const trebleLevelRef                = useRef(0.0);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [selectedAcousticEnv, setSelectedAcousticEnv] = useState('NONE');
   const [isManualOverride, setIsManualOverride] = useState(false);
@@ -805,6 +807,7 @@ function App() {
         writeToEngine(`VOLUME ${volumeRef.current}`),writeToEngine('REMASTER 0'),writeToEngine('COMPRESS 0'),
         writeToEngine('UPSCALE 0'),writeToEngine('WIDEN 1.0'),writeToEngine('3D 0'),writeToEngine('REVERB 0'),
         writeToEngine(`BASS ${bassLevelRef.current}`),
+        writeToEngine(`TREBLE ${trebleLevelRef.current}`),
         writeToEngine(`LIMITER ${speakerModeRef.current==='NONE'?0:speakerModeRef.current==='LOW'?0.3:speakerModeRef.current==='MED'?0.6:1.0}`),
         writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
         writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`)
@@ -1044,7 +1047,7 @@ function App() {
           spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
           reverbWet={reverbWet} setReverbWet={setReverbWet}
           setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
-          setBassLevel={setBassLevel} writeToEngine={writeToEngine}
+          setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
         />
       </div>
     </div>
@@ -1482,12 +1485,13 @@ function App() {
                 widenWidth={widenWidth} setWidenWidth={setWidenWidth}
                 spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
                 reverbWet={reverbWet} setReverbWet={setReverbWet}
-                setBassLevel={setBassLevel} setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
+                setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
                 isProfileActive={isProfileActive} setIsProfileActive={setIsProfileActive}
                 isProfileActiveRef={isProfileActiveRef}
                 applySmartSettings={applySmartSettings}
                 smartTasteRef={smartTasteRef}
                 bassLevel={bassLevel} bassLevelRef={bassLevelRef}
+                trebleLevel={trebleLevel} trebleLevelRef={trebleLevelRef}
                 speakerMode={speakerMode} setSpeakerMode={setSpeakerMode}
                 isFIRMode={isFIRMode} setIsFIRMode={setIsFIRMode}
                 visMode={visMode} setVisMode={setVisMode}
@@ -1572,6 +1576,8 @@ function App() {
                       <div className="glass-menu-section">
                         <div className="glass-label-row"><span>Subwoofer Bass</span><span style={{color:'var(--theme-color)',fontWeight:600}}>{Math.round(bassLevel*100)}%</span></div>
                         <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={bassLevel} onChange={e=>{const v=parseFloat(e.target.value);setBassLevel(v);bassLevelRef.current=v;writeToEngine(`BASS ${v}`);}}/>
+                        <div className="glass-label-row" style={{marginTop: 10}}><span>Crystal Treble</span><span style={{color:'var(--theme-color)',fontWeight:600}}>{Math.round(trebleLevel*100)}%</span></div>
+                        <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={trebleLevel} onChange={e=>{const v=parseFloat(e.target.value);setTrebleLevel(v);trebleLevelRef.current=v;writeToEngine(`TREBLE ${v}`);}}/>
                       </div>
                       <div className="glass-menu-section" style={{marginTop:14}}>
                         <div className="glass-label-row" style={{marginBottom:10}}><span>Speaker Boost</span><span style={{color:speakerMode==='NONE'?'var(--text-secondary)':speakerMode==='LOW'?'#4fc3f7':speakerMode==='MED'?'#ff9800':'#ff3b30',fontWeight:600,fontSize:'0.8rem',transition:'color 0.2s'}}>{speakerMode==='NONE'?'Off':speakerMode==='LOW'?'30%':speakerMode==='MED'?'60%':'100%'}</span></div>
@@ -1708,7 +1714,7 @@ function App() {
                     selectedAcousticEnv={selectedAcousticEnv} setSelectedAcousticEnv={setSelectedAcousticEnv} isEnvDropdownOpen={isEnvDropdownOpen} setIsEnvDropdownOpen={setIsEnvDropdownOpen}
                     upscaleDrive={upscaleDrive} setUpscaleDrive={setUpscaleDrive} widenWidth={widenWidth} setWidenWidth={setWidenWidth}
                     spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra} reverbWet={reverbWet} setReverbWet={setReverbWet}
-                    setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} writeToEngine={writeToEngine}
+                    setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
                   />
                 )}
               </div>

@@ -314,6 +314,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
     {
         g_bassGain = stof(args);
     }
+    else if (command == "TREBLE")
+    {
+        g_trebleGain = stof(args);
+    }
     else if (command == "LOAD_IR")
     {
         // 1. UNIVERSAL FIX: Stop the memory leaks and thread crashes on ALL platforms
@@ -356,12 +360,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
         if (ma_decoder_init_file(args.c_str(), &dcfg, &dec) != MA_SUCCESS)
             return;
 
-// 2. THE WINDOWS SHIELD: PC gets 2048 samples. Android gets throttled to 512.
-#ifdef __ANDROID__
-        const int read_samples = 1024;
-#else
         const int read_samples = MAX_IR_SAMPLES;
-#endif
 
         float *tempInterleaved = (float *)calloc(read_samples * 2, sizeof(float));
         ma_uint64 framesRead = 0;
@@ -440,12 +439,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
         if (ma_decoder_init_file(pathL.c_str(), &dcfg, &decL) != MA_SUCCESS)
             return;
 
-        // 2. THE WINDOWS SHIELD: PC gets 2048 samples. Android gets throttled to 512.
-#ifdef __ANDROID__
-        const int read_samples = 1024;
-#else
         const int read_samples = MAX_IR_SAMPLES;
-#endif
 
         float *tempL = (float *)calloc(read_samples, sizeof(float));
         ma_uint64 framesL = 0;

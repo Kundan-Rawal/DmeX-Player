@@ -32,12 +32,13 @@ interface MobileExpandedPlayerProps {
   widenWidth: number;          setWidenWidth: (v: number) => void;
   spatialExtra: number;        setSpatialExtra: (v: number) => void;
   reverbWet: number;           setReverbWet: (v: number) => void;
-  setBassLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
+  setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
   isProfileActive: boolean;    setIsProfileActive: (v: boolean) => void;
   isProfileActiveRef: React.MutableRefObject<boolean>;
   applySmartSettings: (profile: AudioProfile, taste: Taste) => Promise<void>;
   smartTasteRef: React.MutableRefObject<Taste>;
   bassLevel: number; bassLevelRef: React.MutableRefObject<number>;
+  trebleLevel: number; trebleLevelRef: React.MutableRefObject<number>;
   speakerMode: 'NONE'|'LOW'|'MED'|'HIGH'; setSpeakerMode: (v: 'NONE'|'LOW'|'MED'|'HIGH') => void;
   isFIRMode: boolean; setIsFIRMode: (v: boolean) => void;
   visMode: 'ORBIT'|'RADAR'; setVisMode: (v: 'ORBIT'|'RADAR') => void;
@@ -369,6 +370,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
               <div className="glass-menu-section">
                 <div className="glass-label-row"><span>Subwoofer Bass</span><span style={{ color: 'var(--theme-color)', fontWeight: 600 }}>{Math.round(p.bassLevel * 100)}%</span></div>
                 <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={p.bassLevel} onChange={e => { const v = parseFloat(e.target.value); p.setBassLevel(v); p.bassLevelRef.current = v; p.writeToEngine(`BASS ${v}`); }}/>
+                <div className="glass-label-row" style={{ marginTop: 10 }}><span>Crystal Treble</span><span style={{ color: 'var(--theme-color)', fontWeight: 600 }}>{Math.round(p.trebleLevel * 100)}%</span></div>
+                <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={p.trebleLevel} onChange={e => { const v = parseFloat(e.target.value); p.setTrebleLevel(v); p.trebleLevelRef.current = v; p.writeToEngine(`TREBLE ${v}`); }}/>
               </div>
 
               <div className="glass-menu-section" style={{ marginTop: 14 }}>
@@ -490,7 +493,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   spatialExtra={p.spatialExtra}               setSpatialExtra={p.setSpatialExtra}
                   reverbWet={p.reverbWet}                     setReverbWet={p.setReverbWet}
                   setIsManualOverride={p.setIsManualOverride} setSmartTaste={p.setSmartTaste}
-                  setBassLevel={p.setBassLevel}               writeToEngine={p.writeToEngine}
+                  setBassLevel={p.setBassLevel} setTrebleLevel={p.setTrebleLevel} writeToEngine={p.writeToEngine}
           
                   onEnvSelect={handleAcousticEnvSelect}
                 />
