@@ -5,6 +5,8 @@
 
 extern std::atomic<float> g_audioLevel;
 extern float g_bassGain;
+extern float g_trebleGain;
+extern float g_trebleGain;
 extern std::mutex g_irMutex;
 extern bool g_isConvolutionOn;
 extern bool g_isFIRModeOn;
@@ -526,15 +528,29 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
         p->historyL[p->historyIdx] = feedL;
         p->historyR[p->historyIdx] = feedR;
 
-        float sumL = 0.0f, sumR = 0.0f;
+        float sumL = 1e-18f, sumR = 1e-18f; // Anti-Denormal DC Offset
         int readIdx = p->historyIdx;
+
+#ifdef __ANDROID__
+        // 50% Decimation + Anti-Denormal for ARM Mobile Processors
+        for (int j = 0; j < p->irLength; j += 2)
+        {
+            sumL += p->historyL[readIdx] * p->irDataL[j];
+            sumR += p->historyR[readIdx] * (p->irDataR ? p->irDataR[j] : p->irDataL[j]);
+            readIdx -= 2;
+            if (readIdx < 0) readIdx += p->irLength;
+        }
+        sumL *= 2.0f; // Compensate for 50% decimation volume loss
+        sumR *= 2.0f;
+#else
+        // Full resolution for Desktop
         for (int j = 0; j < p->irLength; ++j)
         {
             sumL += p->historyL[readIdx] * p->irDataL[j];
             sumR += p->historyR[readIdx] * (p->irDataR ? p->irDataR[j] : p->irDataL[j]);
-            if (--readIdx < 0)
-                readIdx = p->irLength - 1;
+            if (--readIdx < 0) readIdx = p->irLength - 1;
         }
+#endif
 
         p->hpStateL += HP_COEF * (sumL - p->hpStateL);
         p->hpStateR += HP_COEF * (sumR - p->hpStateR);

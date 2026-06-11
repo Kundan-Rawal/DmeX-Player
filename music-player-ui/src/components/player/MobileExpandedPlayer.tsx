@@ -12,9 +12,9 @@ import { ImmersiveIcon } from './ImmersiveIcon';
 import { ChillIcon } from './ChillIcon';
 import { triggerHapticClick } from '../../utils/helpers';
 import { Disc, Music, Search, Hourglass } from 'lucide-react';
-import { appDataDir, join, resolveResource } from '@tauri-apps/api/path';
+import { invoke } from '@tauri-apps/api/core';
 
-import { writeFile, exists, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs';
+
 
 
 interface MobileExpandedPlayerProps {
@@ -233,40 +233,18 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
   //   2. Write the raw bytes to AppData/dsp_cache/ using plugin-fs.
   //   3. Build the absolute physical path via appDataDir() + join().
   //   4. Hand that real path to the C++ engine with LOAD_IR / LOAD_IR_DUAL.
-  //   5. Send CONVOLUTION 0.35 and update UI state to match the Windows path.
-  //
-  // This function is passed to DSPStudio as the `onEnvSelect` prop.
-  // DSPStudio calls it instead of its internal resolveResource handler whenever
-  // the prop is present, so no DSPStudio internals need to change per-platform.
   // ─────────────────────────────────────────────────────────────────────────
 
-  /** Extract one IR file from the APK bundle to the physical filesystem.
-   *  Returns the absolute path on the device that the C++ engine can open. */
   const extractIRFile = useCallback(async (assetPath: string): Promise<string> => {
-    // Resolve the resource path to an internal asset URL so the WebView can read inside the APK
-    const assetUrl = await resolveResource(assetPath);
-    const response = await fetch(assetUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch IR asset: ${assetPath} (${response.status})`);
+    // Legacy function, no longer used for file extraction on Android!
+    // We now bypass the filesystem entirely and load the raw memory directly into the C++ engine.
+    try {
+      const result = await invoke<string>('load_ir_memory_android', { assetPath });
+      return result;
+    } catch (e) {
+      console.error('[Android] Failed to load IR to memory:', e);
+      return '';
     }
-    const arrayBuffer = await response.arrayBuffer();
-
-    // Keep it as raw binary — never convert to Array or string
-    const uint8Array = new Uint8Array(arrayBuffer);
-    const filename = assetPath.split('/').pop() || 'fallback_ir.wav';
-
-    // Ensure the cache directory exists
-    const dspDirExists = await exists('dsp_cache', { baseDir: BaseDirectory.AppData });
-    if (!dspDirExists) {
-      await mkdir('dsp_cache', { baseDir: BaseDirectory.AppData, recursive: true });
-    }
-
-    // Write directly to flash storage (bypasses JSON IPC size limits)
-    await writeFile(`dsp_cache/${filename}`, uint8Array, { baseDir: BaseDirectory.AppData });
-
-    // Build and return the physical path the C++ engine can use
-    const baseAppDir = await appDataDir();
-    return await join(baseAppDir, 'dsp_cache', filename);
   }, []);
 
   /**
@@ -275,8 +253,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
    *
    * Handles:
    *   - "Off" (id === 'NONE') → clear IR and reset state
-   *   - Mono IR  (single path)  → LOAD_IR <physicalPath>
-   *   - Stereo IR (path has '|') → LOAD_IR_DUAL <pathL>|<pathR>
+   *   - Mono IR  (single path)  → load_ir_memory_android
+   *   - Stereo IR (path has '|') → load_ir_memory_android for both
    * Then fires CONVOLUTION 0.35 and sets manual-override state, identical to
    * the Windows path in DSPStudio so behavior is 1:1 across platforms.
    */
@@ -284,28 +262,26 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
     // Update dropdown display immediately so the UI feels responsive
     p.setSelectedAcousticEnv(env.id);
 
-    // ── "Off" selected ──────────────────────────────────────────────────────
-    if (env.id === 'NONE' || !env.path) {
-      await p.writeToEngine('LOAD_IR ');       // clear the IR buffer
-      await p.writeToEngine('CONVOLUTION 0.0');
-      p.setIsManualOverride(false);
-      return;
-    }
-
-    // ── Load IR from APK bundle ─────────────────────────────────────────────
     try {
+      if (env.id === 'NONE' || !env.path) {
+        await p.writeToEngine('LOAD_IR ');       // clear the IR buffer
+        await p.writeToEngine('CONVOLUTION 0.0');
+        p.setIsManualOverride(false);
+        return;
+      }
+
       if (env.path.includes('|')) {
         // Stereo / dual-channel IR (e.g. Dolby Atmos, Sony WH1000XM2)
         const [pathL, pathR] = env.path.split('|');
-        const [physL, physR] = await Promise.all([
+        await Promise.all([
           extractIRFile(pathL),
           extractIRFile(pathR),
         ]);
-        await p.writeToEngine(`LOAD_IR_DUAL ${physL}|${physR}`);
+        // The C++ memory bridge already loaded it into g_convolutionNode!
+        // No need to send LOAD_IR_DUAL to the CommandParser since it's already active.
       } else {
         // Standard mono IR
-        const physicalPath = await extractIRFile(env.path);
-        await p.writeToEngine(`LOAD_IR ${physicalPath}`);
+        await extractIRFile(env.path);
       }
 
       // Activate convolution and update UI state — mirrors the Windows path exactly

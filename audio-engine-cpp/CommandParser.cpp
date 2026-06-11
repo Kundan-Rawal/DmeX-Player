@@ -606,3 +606,40 @@ extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, floa
     }
     return false;
 }
+extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
+{
+    float* newIrL = (float*)malloc(lenL * sizeof(float));
+    float* newIrR = (float*)malloc(lenR * sizeof(float));
+    float* newHistL = (float*)malloc(lenL * sizeof(float));
+    float* newHistR = (float*)malloc(lenR * sizeof(float));
+
+    if (newIrL && newIrR && newHistL && newHistR)
+    {
+        memcpy(newIrL, irL, lenL * sizeof(float));
+        memcpy(newIrR, irR, lenR * sizeof(float));
+        memset(newHistL, 0, lenL * sizeof(float));
+        memset(newHistR, 0, lenR * sizeof(float));
+
+        std::lock_guard<std::mutex> lock(g_irMutex);
+        if (g_convolutionNode.irDataL) free(g_convolutionNode.irDataL);
+        if (g_convolutionNode.irDataR) free(g_convolutionNode.irDataR);
+        if (g_convolutionNode.historyL) free(g_convolutionNode.historyL);
+        if (g_convolutionNode.historyR) free(g_convolutionNode.historyR);
+
+        g_convolutionNode.irDataL = newIrL;
+        g_convolutionNode.irDataR = newIrR;
+        g_convolutionNode.historyL = newHistL;
+        g_convolutionNode.historyR = newHistR;
+        g_convolutionNode.irLength = lenL;
+        g_convolutionNode.historyIdx = 0;
+        g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
+        g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
+    }
+    else
+    {
+        if (newIrL) free(newIrL);
+        if (newIrR) free(newIrR);
+        if (newHistL) free(newHistL);
+        if (newHistR) free(newHistR);
+    }
+}
