@@ -241,10 +241,10 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
 
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. Isolate the Sub-Bass perfectly (80Hz LR4 Crossover)
-        float bassL, nonBassL, bassR, nonBassR;
-        p->crossBassL.process(L, bassL, nonBassL);
-        p->crossBassR.process(R, bassR, nonBassR);
+        // 1. Isolate the full Bass band up to 180Hz (Sub-bass + Kick Punch + Bass Guitar)
+        float bassBandL, nonBassL, bassBandR, nonBassR;
+        p->crossMidBassL.process(L, bassBandL, nonBassL);
+        p->crossMidBassR.process(R, bassBandR, nonBassR);
 
         // 2. Isolate the Mids from the Treble (8000Hz LR4 Crossover)
         float midL, trebleL, midR, trebleR;
@@ -259,8 +259,8 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         // 4. Parallel Summation
         // Because LR4 crossovers sum perfectly flat, re-combining these bands 
         // with their respective gains yields a completely zero-phase, distortion-free output.
-        pOut[i * 2] = (bassL * gBass) + (midL * gMid) + (trebleL * gTreble);
-        pOut[i * 2 + 1] = (bassR * gBass) + (midR * gMid) + (trebleR * gTreble);
+        pOut[i * 2] = (bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble);
+        pOut[i * 2 + 1] = (bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble);
     }
 }
 ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
@@ -469,27 +469,38 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        // TRUE STEREO, LR4 ISOLATED BASS
-        float bassL, nonBassL, bassR, nonBassR;
-        p->crossBassL.process(L, bassL, nonBassL);
-        p->crossBassR.process(R, bassR, nonBassR);
+        // 1. Isolate everything below 180Hz (The entire bass range)
+        float totalBassL, nonBassL, totalBassR, nonBassR;
+        p->crossMidBassL.process(L, totalBassL, nonBassL);
+        p->crossMidBassR.process(R, totalBassR, nonBassR);
+
+        // 2. Split the Bass into Sub-Bass (0-80Hz) and Mid-Bass (80-180Hz)
+        float subL, midBassL, subR, midBassR;
+        p->crossBassL.process(totalBassL, subL, midBassL);
+        p->crossBassR.process(totalBassR, subR, midBassR);
 
         float drive = g_bassGain * 1.2f;
         
-        // Soft saturation wave-shaper to keep the bass punchy without digital clipping
+        // Soft saturation wave-shaper for Sub-Bass only
         auto saturate = [](float x) {
             float ax = fabsf(x);
             if (ax > 1.0f) ax = 1.0f;
             return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
         };
 
-        float saturatedL = saturate(bassL * drive * 3.0f);
-        float saturatedR = saturate(bassR * drive * 3.0f);
+        // Deep Sub-Bass (0-80Hz) gets the heavy 3.0x saturated multiplier for massive thump
+        float processedSubL = saturate(subL * drive * 3.0f);
+        float processedSubR = saturate(subR * drive * 3.0f);
 
-        // Sum the saturated bass back with the perfectly untouched non-bass signal
-        // This guarantees true stereo width and absolute zero phase smearing in the midrange
-        pOut[i * 2] = nonBassL + saturatedL;
-        pOut[i * 2 + 1] = nonBassR + saturatedR;
+        // Mid-Bass (80-180Hz) gets a clean, linear 1.5x multiplier to restore kick body & bass guitar
+        // without adding muddy harmonic distortion to the low-mids.
+        float processedMidBassL = midBassL * drive * 1.5f;
+        float processedMidBassR = midBassR * drive * 1.5f;
+
+        // Sum the Sub, Mid-Bass, and the completely untouched non-bass signal (>180Hz)
+        // This guarantees absolute zero phase smearing in the midrange while providing huge, wide bass.
+        pOut[i * 2] = nonBassL + processedSubL + processedMidBassL;
+        pOut[i * 2 + 1] = nonBassR + processedSubR + processedMidBassR;
     }
 
 }

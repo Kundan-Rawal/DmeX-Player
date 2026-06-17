@@ -182,8 +182,9 @@ struct AudiophileEQNode
     std::atomic<float> targetBass, targetMid, targetHigh;
     float currentBass, currentMid, currentHigh;
     
-    LinkwitzRiley4 crossBassL, crossBassR;     // 80Hz
-    LinkwitzRiley4 crossTrebleL, crossTrebleR; // 8000Hz
+    LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
+    LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    LinkwitzRiley4 crossTrebleL, crossTrebleR;   // 8000Hz
     
     float dcBlockL, dcBlockR;
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve
@@ -217,7 +218,8 @@ struct ReverbNode
 struct SubwooferNode
 {
     ma_node_base baseNode;
-    LinkwitzRiley4 crossBassL, crossBassR;
+    LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
+    LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
 };
 struct ConvolutionNode
 {
