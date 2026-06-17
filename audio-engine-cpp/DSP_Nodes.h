@@ -57,6 +57,37 @@ struct BiquadHPF
     }
 };
 
+struct BiquadPeak
+{
+    float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+    float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+
+    void init(float sample_rate, float cutoff_hz, float q, float gain_db)
+    {
+        float A = powf(10.0f, gain_db / 40.0f);
+        float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
+        float alpha = sinf(w0) / (2.0f * q);
+        float a0 = 1.0f + alpha / A;
+
+        b0 = (1.0f + alpha * A) / a0;
+        b1 = (-2.0f * cosf(w0)) / a0;
+        b2 = (1.0f - alpha * A) / a0;
+        a1 = (-2.0f * cosf(w0)) / a0;
+        a2 = (1.0f - alpha / A) / a0;
+        x1 = x2 = y1 = y2 = 0.0f;
+    }
+
+    float process(float in_sample)
+    {
+        float out_sample = b0 * in_sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = in_sample;
+        y2 = y1;
+        y1 = out_sample;
+        return out_sample;
+    }
+};
+
 struct BiquadLPF
 {
     float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
@@ -185,6 +216,9 @@ struct AudiophileEQNode
     LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
     LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
     LinkwitzRiley4 crossTrebleL, crossTrebleR;   // 8000Hz
+    
+    BiquadPeak presenceL, presenceR; // 2.5kHz Fletcher-Munson presence eq
+    float envUpwardL, envUpwardR;    // Envelope trackers for Upward Compression
     
     float dcBlockL, dcBlockR;
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve

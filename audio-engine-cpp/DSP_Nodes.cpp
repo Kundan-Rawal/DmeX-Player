@@ -251,12 +251,39 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         p->crossTrebleL.process(nonBassL, midL, trebleL);
         p->crossTrebleR.process(nonBassR, midR, trebleR);
 
-        // 3. Absolute Gains
+        // 3. VOCAL PROCESSING (180Hz - 8kHz)
+        // A. Psychoacoustic Vocal Exciter (Harmonic Bite)
+        float satMidL = midL / (1.0f + fabsf(midL));
+        float satMidR = midR / (1.0f + fabsf(midR));
+        // Blend 5% odd-order harmonics back into the clean mid to make vocals cut through
+        midL = midL + (satMidL * 0.05f);
+        midR = midR + (satMidR * 0.05f);
+
+        // B. Mid/Side Stereo Widening (3% Side Boost)
+        float midM = (midL + midR) * 0.5f;
+        float midS = (midL - midR) * 0.5f;
+        midS *= 1.03f; // Boost the stereo width (panned vocals) by 3% while leaving the center completely untouched
+        midL = midM + midS;
+        midR = midM - midS;
+
+        // C. Upward Vocal Compression (The Intimacy Algorithm)
+        float midMonoEnv = fabsf(midM);
+        p->envUpwardL += 0.001f * (midMonoEnv - p->envUpwardL);
+        // If the vocal is quiet (env is near 0), upwardGain approaches 1.15x. If loud (>0.5), it approaches 1.0x.
+        float upwardGain = 1.0f + 0.15f * (1.0f - fminf(p->envUpwardL * 2.0f, 1.0f));
+        midL *= upwardGain;
+        midR *= upwardGain;
+
+        // D. Fletcher-Munson Presence EQ (2.5kHz)
+        midL = p->presenceL.process(midL);
+        midR = p->presenceR.process(midR);
+
+        // 4. Absolute Gains
         float gBass = p->currentBass;
         float gMid = p->currentMid;
         float gTreble = p->currentHigh + g_trebleGain;
 
-        // 4. Parallel Summation
+        // 5. Parallel Summation
         // Because LR4 crossovers sum perfectly flat, re-combining these bands 
         // with their respective gains yields a completely zero-phase, distortion-free output.
         pOut[i * 2] = (bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble);

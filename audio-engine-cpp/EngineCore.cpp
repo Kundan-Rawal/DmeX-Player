@@ -224,6 +224,8 @@ engine_ready:
     g_audiophileEQNode.crossMidBassR.init((float)sr, 180.0f);
     g_audiophileEQNode.crossTrebleL.init((float)sr, 8000.0f);
     g_audiophileEQNode.crossTrebleR.init((float)sr, 8000.0f);
+    g_audiophileEQNode.presenceL.init((float)sr, 2500.0f, 0.707f, 2.0f);
+    g_audiophileEQNode.presenceR.init((float)sr, 2500.0f, 0.707f, 2.0f);
     ma_node_config cEQ = ma_node_config_init();
     cEQ.vtable = &g_audiophile_eq_vtable;
     cEQ.pInputChannels = g_inCh;
