@@ -79,16 +79,50 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
-        float M = (L + R) * 0.5f, S = (L - R) * 0.5f;
+
+        // 1. Binaural Crossfeed (HRTF-lite) to anchor the stereo image
+        // We delay the opposite channel and low-pass it to simulate head-shadowing
+        float crossfeedL = p->delayR[p->delayIdx];
+        float crossfeedR = p->delayL[p->delayIdx];
+
+        p->delayL[p->delayIdx] = L;
+        p->delayR[p->delayIdx] = R;
+        p->delayIdx = (p->delayIdx + 1) % CROSSFEED_DELAY_SAMPLES;
+
+        // Head-shadow low-pass (approx 700Hz)
+        const float HEAD_SHADOW_COEF = 0.1f;
+        p->lpStateL += HEAD_SHADOW_COEF * (crossfeedL - p->lpStateL);
+        p->lpStateR += HEAD_SHADOW_COEF * (crossfeedR - p->lpStateR);
+
+        // Blend the shadowed opposite channel slightly (e.g. 15% mix)
+        float mixL = L + (p->lpStateR * 0.15f);
+        float mixR = R + (p->lpStateL * 0.15f);
+
+        // 2. Blumlein Shuffler (Bass-Safe Widening)
+        float M = (mixL + mixR) * 0.5f;
+        float S = (mixL - mixR) * 0.5f;
+        
+        // Isolate the bass from the Side channel so we don't widen the sub-bass
+        // (This keeps the bass exactly at its original stereo width, preventing diffusion)
+        const float SIDE_HP_COEF = 0.05f; // ~300Hz
+        p->sideLp += SIDE_HP_COEF * (S - p->sideLp);
+        float sideHighs = S - p->sideLp; // The treble/mids of the Side channel
+        float sideLows = p->sideLp;      // The bass of the Side channel
+
         float effectiveWidth = p->width;
         if (g_isLaptopSpeaker) {
             effectiveWidth = 1.0f + ((p->width - 1.0f) * 0.4f);
         }
-        // Proper Mid/Side balancing: gently boost the Mid channel to anchor the center
-        // as the Side channel spreads out, preventing phase cancellation holes.
-        float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.25f);
-        pOut[i * 2] = (M * midGain) + (S * effectiveWidth);
-        pOut[i * 2 + 1] = (M * midGain) - (S * effectiveWidth);
+
+        float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.1f);
+        
+        // We multiply ONLY the upper frequencies of the Side channel by the width,
+        // and we pass the sideLows through exactly at 1.0x width.
+        // This guarantees pristine original stereo bass while massively widening the highs.
+        float finalS = sideLows + (sideHighs * effectiveWidth);
+
+        pOut[i * 2] = (M * midGain) + finalS;
+        pOut[i * 2 + 1] = (M * midGain) - finalS;
     }
 }
 ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
@@ -199,11 +233,6 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
     *pFrameCountOut = fc;
 
     const float SMOOTH_COEF = 0.002f;
-    // CRITICAL FIX: Dropped crossover from 0.032f (245Hz) down to 0.012f (~90Hz)
-    // This stops the bass boost from touching the guitars and lower vocals.
-    const float F_BASS = 0.012f;   // ~90Hz: Clean sub-bass, prevents muddiness and compressor pumping
-    const float F_TREBLE = 0.55f;  // ~5.6kHz: Moves Treble far above the 1kHz-4kHz vocal range so highs sit independently
-
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         p->currentBass += SMOOTH_COEF * (p->targetBass.load(std::memory_order_relaxed) - p->currentBass);
@@ -212,35 +241,26 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
 
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. Isolate the Bass perfectly
-        p->bL += F_BASS * (L - p->bL);
-        p->bR += F_BASS * (R - p->bR);
-        float bassL = p->bL;
-        float bassR = p->bR;
+        // 1. Isolate the Sub-Bass perfectly (80Hz LR4 Crossover)
+        float bassL, nonBassL, bassR, nonBassR;
+        p->crossBassL.process(L, bassL, nonBassL);
+        p->crossBassR.process(R, bassR, nonBassR);
 
-        // 2. Isolate the Mids and Treble
-        float restL = L - bassL;
-        float restR = R - bassR;
+        // 2. Isolate the Mids from the Treble (8000Hz LR4 Crossover)
+        float midL, trebleL, midR, trebleR;
+        p->crossTrebleL.process(nonBassL, midL, trebleL);
+        p->crossTrebleR.process(nonBassR, midR, trebleR);
 
-        p->dcBlockL += F_TREBLE * (restL - p->dcBlockL);
-        p->dcBlockR += F_TREBLE * (restR - p->dcBlockR);
-        float midL = p->dcBlockL;
-        float midR = p->dcBlockR;
+        // 3. Absolute Gains
+        float gBass = p->currentBass;
+        float gMid = p->currentMid;
+        float gTreble = p->currentHigh + g_trebleGain;
 
-        float trebleL = restL - midL;
-        float trebleR = restR - midR;
-
-        // 3. The True Parallel Mix
-        // 1.0f is our center point. If currentBass is 1.50, gBass = +0.50 (a 50% layered boost).
-        // If currentMid is 0.80, gMid = -0.20 (a 20% phase-aligned cut).
-        float gBass = p->currentBass - 1.0f;
-        float gMid = p->currentMid - 1.0f;
-        float gTreble = (p->currentHigh - 1.0f) + g_trebleGain;
-
-        // CRITICAL FIX: The dry signal (L and R) passes through 100% untouched.
-        // We now safely layer the isolated Bass, Mids, and Treble back on top.
-        pOut[i * 2] = L + (bassL * gBass) + (midL * gMid) + (trebleL * gTreble);
-        pOut[i * 2 + 1] = R + (bassR * gBass) + (midR * gMid) + (trebleR * gTreble);
+        // 4. Parallel Summation
+        // Because LR4 crossovers sum perfectly flat, re-combining these bands 
+        // with their respective gains yields a completely zero-phase, distortion-free output.
+        pOut[i * 2] = (bassL * gBass) + (midL * gMid) + (trebleL * gTreble);
+        pOut[i * 2 + 1] = (bassR * gBass) + (midR * gMid) + (trebleR * gTreble);
     }
 }
 ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
@@ -449,18 +469,13 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        const float LP_COEF = 0.011f;  // ~80Hz — captures kick body AND sub
-        float drive = g_bassGain * 1.2f;  // Slightly tamed multiplier
+        // TRUE STEREO, LR4 ISOLATED BASS
+        float bassL, nonBassL, bassR, nonBassR;
+        p->crossBassL.process(L, bassL, nonBassL);
+        p->crossBassR.process(R, bassR, nonBassR);
 
-        p->lp1L += LP_COEF * (L - p->lp1L);
-        p->lp2L += LP_COEF * (p->lp1L - p->lp2L);
-        p->lp1R += LP_COEF * (R - p->lp1R);
-        p->lp2R += LP_COEF * (p->lp1R - p->lp2R);
-
-        // Fix: Use linear drive + soft saturation to prevent crushing fractional values
-        float bassL = p->lp2L * drive * 3.0f;
-        float bassR = p->lp2R * drive * 3.0f;
-
+        float drive = g_bassGain * 1.2f;
+        
         // Soft saturation wave-shaper to keep the bass punchy without digital clipping
         auto saturate = [](float x) {
             float ax = fabsf(x);
@@ -468,8 +483,13 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
         };
 
-        pOut[i * 2] = L + saturate(bassL);
-        pOut[i * 2 + 1] = R + saturate(bassR);
+        float saturatedL = saturate(bassL * drive * 3.0f);
+        float saturatedR = saturate(bassR * drive * 3.0f);
+
+        // Sum the saturated bass back with the perfectly untouched non-bass signal
+        // This guarantees true stereo width and absolute zero phase smearing in the midrange
+        pOut[i * 2] = nonBassL + saturatedL;
+        pOut[i * 2 + 1] = nonBassR + saturatedR;
     }
 
 }

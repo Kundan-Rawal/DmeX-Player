@@ -218,6 +218,10 @@ engine_ready:
     g_audiophileEQNode.currentBass = 1.0f;
     g_audiophileEQNode.currentMid = 1.0f;
     g_audiophileEQNode.currentHigh = 1.0f;
+    g_audiophileEQNode.crossBassL.init((float)sr, 80.0f);
+    g_audiophileEQNode.crossBassR.init((float)sr, 80.0f);
+    g_audiophileEQNode.crossTrebleL.init((float)sr, 8000.0f);
+    g_audiophileEQNode.crossTrebleR.init((float)sr, 8000.0f);
     ma_node_config cEQ = ma_node_config_init();
     cEQ.vtable = &g_audiophile_eq_vtable;
     cEQ.pInputChannels = g_inCh;
@@ -225,6 +229,8 @@ engine_ready:
     ma_node_init(pg, &cEQ, NULL, &g_audiophileEQNode.baseNode);
 
     memset(&g_subwooferNode, 0, sizeof(g_subwooferNode));
+    g_subwooferNode.crossBassL.init((float)sr, 80.0f);
+    g_subwooferNode.crossBassR.init((float)sr, 80.0f);
     ma_node_config subCfg = ma_node_config_init();
     subCfg.vtable = &g_subwoofer_vtable;
     subCfg.pInputChannels = g_inCh;

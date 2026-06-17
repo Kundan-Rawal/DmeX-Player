@@ -136,10 +136,19 @@ struct StudioExciterNode
     float hpStateL, hpStateR;
 };
 
+#define CROSSFEED_DELAY_SAMPLES 22
+
 struct StereoWidenerNode
 {
     ma_node_base baseNode;
     float width;
+    
+    // Crossfeed states
+    float delayL[CROSSFEED_DELAY_SAMPLES];
+    float delayR[CROSSFEED_DELAY_SAMPLES];
+    int delayIdx;
+    float lpStateL, lpStateR;
+    float sideLp;
 };
 
 #define HAAS_DELAY_SAMPLES 88
@@ -172,7 +181,10 @@ struct AudiophileEQNode
     ma_node_base baseNode;
     std::atomic<float> targetBass, targetMid, targetHigh;
     float currentBass, currentMid, currentHigh;
-    float bL, bR, tL, tR;
+    
+    LinkwitzRiley4 crossBassL, crossBassR;     // 80Hz
+    LinkwitzRiley4 crossTrebleL, crossTrebleR; // 8000Hz
+    
     float dcBlockL, dcBlockR;
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve
 };
@@ -205,8 +217,7 @@ struct ReverbNode
 struct SubwooferNode
 {
     ma_node_base baseNode;
-    float lp1L, lp2L, lp1R, lp2R;
-    float hp1L, hp1R; // <--- ADD THESE TWO VARIABLES
+    LinkwitzRiley4 crossBassL, crossBassR;
 };
 struct ConvolutionNode
 {
