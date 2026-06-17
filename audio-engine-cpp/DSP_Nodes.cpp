@@ -187,24 +187,30 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
         
         // Invert phase to trick the brain into rear localization
-        float virtualRearL = -p->rearLpL * 0.7f * intensity;
-        float virtualRearR = -p->rearLpR * 0.7f * intensity;
+        // TUNING FIX: Reduced from 0.7f to 0.35f to prevent the rear from overpowering the front
+        float virtualRearL = -p->rearLpL * 0.35f * intensity;
+        float virtualRearR = -p->rearLpR * 0.35f * intensity;
 
         // 4. Downmix to Binaural Stereo
-        // Center + Original Front Sides + Virtual Rear Sides
-        float outL = virtualCenterL + sideL + virtualRearL;
-        float outR = virtualCenterR + sideR + virtualRearR;
+        // Center + Boosted Front Sides + Virtual Rear Sides
+        // TUNING FIX: Boost the front sides slightly to balance the rear depth
+        float frontSideL = sideL * (1.0f + 0.25f * intensity);
+        float frontSideR = sideR * (1.0f + 0.25f * intensity);
+        
+        float outL = virtualCenterL + frontSideL + virtualRearL;
+        float outR = virtualCenterR + frontSideR + virtualRearR;
 
-        // 5. Top Elevation Notch (12kHz pinna cue)
-        // Simulates high-frequency reflections off the ceiling for vertical height
-        const float TOP_NOTCH_COEF = 0.65f; 
+        // 5. Top Elevation Notch (8kHz pinna cue)
+        // TUNING FIX: Moved from 12kHz (0.65f) down to 8kHz (0.45f). 
+        // Cutting 12kHz makes things sound "muffled" or "down". Cutting 8kHz triggers the "Up/Top" brain cue.
+        const float TOP_NOTCH_COEF = 0.45f; 
         p->notchTopL1 += TOP_NOTCH_COEF * (outL - p->notchTopL1);
         p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
-        outL -= (outL - p->notchTopL2) * 0.15f * intensity;
+        outL -= (outL - p->notchTopL2) * 0.08f * intensity; // Reduced depth from 0.15 to 0.08
 
         p->notchTopR1 += TOP_NOTCH_COEF * (outR - p->notchTopR1);
         p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
-        outR -= (outR - p->notchTopR2) * 0.15f * intensity;
+        outR -= (outR - p->notchTopR2) * 0.08f * intensity;
 
         // 6. Sum Bypassed Subwoofer
         pOut[i * 2] = outL + bassL;

@@ -258,6 +258,10 @@ struct SubwooferNode
     ma_node_base baseNode;
     LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
     LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    
+    // Legacy 1-pole filter states for Android/Laptop Speaker protection
+    float hp1L, hp1R;
+    float lp1L, lp1R;
 };
 struct ConvolutionNode
 {

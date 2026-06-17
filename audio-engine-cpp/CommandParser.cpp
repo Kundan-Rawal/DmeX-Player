@@ -245,15 +245,16 @@ extern "C" void execute_audio_command(const char *cmd_in)
         
         ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(stof(args) * (float)target_sr));
 
-        g_subwooferNode.lp1L = g_subwooferNode.lp2L = g_subwooferNode.lp1R = g_subwooferNode.lp2R = 0.0f;
-        memset(g_spatializerNode.haasBufL, 0, sizeof(g_spatializerNode.haasBufL));
-        memset(g_spatializerNode.itdBufL, 0, sizeof(g_spatializerNode.itdBufL));
-        memset(g_spatializerNode.itdBufR, 0, sizeof(g_spatializerNode.itdBufR));
-        g_spatializerNode.shadowStateL = g_spatializerNode.shadowStateR = 0.0f;
-        g_spatializerNode.notchStateL1 = g_spatializerNode.notchStateL2 = 0.0f;
-        g_spatializerNode.notchStateR1 = g_spatializerNode.notchStateR2 = 0.0f;
-        g_spatializerNode.crossHpL = g_spatializerNode.crossHpR = 0.0f;
-        g_spatializerNode.sideHp = 0.0f;
+        g_subwooferNode.lp1L = g_subwooferNode.lp1R = 0.0f;
+        g_subwooferNode.hp1L = g_subwooferNode.hp1R = 0.0f;
+
+        memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
+        memset(g_spatializerNode.rearDelayBufL, 0, sizeof(g_spatializerNode.rearDelayBufL));
+        memset(g_spatializerNode.rearDelayBufR, 0, sizeof(g_spatializerNode.rearDelayBufR));
+        
+        g_spatializerNode.rearLpL = g_spatializerNode.rearLpR = 0.0f;
+        g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;
+        g_spatializerNode.notchTopR1 = g_spatializerNode.notchTopR2 = 0.0f;
     }
     else if (command == "REMASTER")
     {
