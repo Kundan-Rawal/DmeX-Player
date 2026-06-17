@@ -182,29 +182,33 @@ struct StereoWidenerNode
     float sideLp;
 };
 
-#define HAAS_DELAY_SAMPLES 88
-#define ITD_DELAY_SAMPLES 26
+#define SURROUND_HAAS_DELAY 882
+#define CENTER_ITD_DELAY 22
 
 struct PsychoacousticNode
 {
     ma_node_base baseNode;
-    float haasBufL[HAAS_DELAY_SAMPLES];
-    float itdBufL[ITD_DELAY_SAMPLES];
-    float itdBufR[ITD_DELAY_SAMPLES];
-    int haasIdx, itdIdx;
+    
+    // Subwoofer Bypass (180Hz) to keep bass completely dry
+    LinkwitzRiley4 crossSubwooferL, crossSubwooferR;
 
-    float shadowStateL, shadowStateR;
+    // Center ITD Delay
+    float centerDelayBuf[CENTER_ITD_DELAY];
+    int centerIdx;
 
-    // CRITICAL FIX: Proper independent 2-pole notch states
-    float notchStateL1, notchStateL2;
-    float notchStateR1, notchStateR2;
+    // Rear Haas Delay
+    float rearDelayBufL[SURROUND_HAAS_DELAY];
+    float rearDelayBufR[SURROUND_HAAS_DELAY];
+    int rearIdx;
 
-    // CRITICAL FIX: Independent crossfeed high-pass states to protect bass
-    float crossHpL, crossHpR;
-    float sideHp;
+    // Low-Pass states for Rear
+    float rearLpL, rearLpR;
+
+    // Top Elevation Notch States (12kHz pinna notch)
+    float notchTopL1, notchTopL2;
+    float notchTopR1, notchTopR2;
 
     float spatialIntensity;
-    float env;
 };
 
 struct AudiophileEQNode

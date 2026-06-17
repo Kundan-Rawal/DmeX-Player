@@ -259,6 +259,8 @@ engine_ready:
     ma_node_init(pg, &c2, NULL, &g_widenerNode.baseNode);
 
     memset(&g_spatializerNode, 0, sizeof(g_spatializerNode));
+    g_spatializerNode.crossSubwooferL.init((float)sr, 180.0f);
+    g_spatializerNode.crossSubwooferR.init((float)sr, 180.0f);
     ma_node_config c3 = ma_node_config_init();
     c3.vtable = &g_psychoacoustic_vtable;
     c3.pInputChannels = g_inCh;

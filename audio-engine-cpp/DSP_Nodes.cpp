@@ -133,77 +133,82 @@ ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
 static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     PsychoacousticNode *p = (PsychoacousticNode *)pNode;
-    if (p->spatialIntensity < 0.001f)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
-
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    const float HEAD_SHADOW_COEF = 0.18f;
-    const float PINNA_NOTCH_COEF = 0.45f;
-    const float SIDE_HP_COEF = 0.05f;
-
     float intensity = p->spatialIntensity;
+
+    if (intensity < 0.001f)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], fc * 2 * sizeof(float));
+        return;
+    }
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
-        float inL = pIn[i * 2];
-        float inR = pIn[i * 2 + 1];
+        float L = pIn[i * 2];
+        float R = pIn[i * 2 + 1];
 
-        float mid = (inL + inR) * 0.5f;
-        float side = (inL - inR) * 0.5f;
+        // 0. Extract Bass (Subwoofer Bypass at 180Hz)
+        // We completely bypass the 180Hz bass from the 3D delays to keep it perfectly punchy and clear.
+        float bassL, nonBassL, bassR, nonBassR;
+        p->crossSubwooferL.process(L, bassL, nonBassL);
+        p->crossSubwooferR.process(R, bassR, nonBassR);
 
-        // 1. Bass-Protection (Side Channel)
-        p->sideHp += SIDE_HP_COEF * (side - p->sideHp);
-        float safeSide = side - p->sideHp;
+        float inL = nonBassL;
+        float inR = nonBassR;
 
-        // 2. Haas Delay
-        float delayedSide = p->haasBufL[p->haasIdx];
-        p->haasBufL[p->haasIdx] = safeSide;
-        p->haasIdx = (p->haasIdx + 1) % HAAS_DELAY_SAMPLES;
+        // 1. The 5.1 Extraction Matrix
+        float center = (inL + inR) * 0.5f;
+        float sideL  = (inL - inR) * 0.5f;
+        float sideR  = (inR - inL) * 0.5f; 
+        
+        // 2. Virtual Center (Front Speaker) 
+        // 0.5ms ITD crossfeed to pull the center channel out of the head.
+        float delayedCenter = p->centerDelayBuf[p->centerIdx];
+        p->centerDelayBuf[p->centerIdx] = center;
+        p->centerIdx = (p->centerIdx + 1) % CENTER_ITD_DELAY;
+        float virtualCenterL = center + (delayedCenter * 0.25f * intensity);
+        float virtualCenterR = center + (delayedCenter * 0.25f * intensity);
 
-        // 3. Head Shadow Filter
-        p->shadowStateL += HEAD_SHADOW_COEF * (inL - p->shadowStateL);
-        p->shadowStateR += HEAD_SHADOW_COEF * (inR - p->shadowStateR);
+        // 3. Virtual Rear (Surround L/R)
+        // 20ms Haas Delay, Low-Passed (Head Shadow), and phase inverted.
+        float rearL = p->rearDelayBufL[p->rearIdx];
+        float rearR = p->rearDelayBufR[p->rearIdx];
+        p->rearDelayBufL[p->rearIdx] = sideL;
+        p->rearDelayBufR[p->rearIdx] = sideR;
+        p->rearIdx = (p->rearIdx + 1) % SURROUND_HAAS_DELAY;
 
-        // 4. Bass-Protected ITD Crossfeed
-        // High-pass the shadowed signal before crossing it over so we NEVER phase-cancel the low end.
-        p->crossHpL += SIDE_HP_COEF * (p->shadowStateL - p->crossHpL);
-        p->crossHpR += SIDE_HP_COEF * (p->shadowStateR - p->crossHpR);
+        // Head shadow low-pass on the rear speakers
+        const float REAR_LP_COEF = 0.15f;
+        p->rearLpL += REAR_LP_COEF * (rearL - p->rearLpL);
+        p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
+        
+        // Invert phase to trick the brain into rear localization
+        float virtualRearL = -p->rearLpL * 0.7f * intensity;
+        float virtualRearR = -p->rearLpR * 0.7f * intensity;
 
-        float crossfeedInL = p->shadowStateL - p->crossHpL;
-        float crossfeedInR = p->shadowStateR - p->crossHpR;
+        // 4. Downmix to Binaural Stereo
+        // Center + Original Front Sides + Virtual Rear Sides
+        float outL = virtualCenterL + sideL + virtualRearL;
+        float outR = virtualCenterR + sideR + virtualRearR;
 
-        float crossL = p->itdBufL[p->itdIdx];
-        float crossR = p->itdBufR[p->itdIdx];
-        p->itdBufL[p->itdIdx] = crossfeedInR; // Right feeds to Left
-        p->itdBufR[p->itdIdx] = crossfeedInL; // Left feeds to Right
-        p->itdIdx = (p->itdIdx + 1) % ITD_DELAY_SAMPLES;
+        // 5. Top Elevation Notch (12kHz pinna cue)
+        // Simulates high-frequency reflections off the ceiling for vertical height
+        const float TOP_NOTCH_COEF = 0.65f; 
+        p->notchTopL1 += TOP_NOTCH_COEF * (outL - p->notchTopL1);
+        p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
+        outL -= (outL - p->notchTopL2) * 0.15f * intensity;
 
-        // 5. 3D Reconstruction (With Absolute Zero-Intensity Transparency)
-        // If intensity is 0, finalSide equals side, and crossfeed drops to 0.
-        float finalSide = side + (delayedSide - side) * intensity;
+        p->notchTopR1 += TOP_NOTCH_COEF * (outR - p->notchTopR1);
+        p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
+        outR -= (outR - p->notchTopR2) * 0.15f * intensity;
 
-        float outL = mid + finalSide * (1.0f + intensity) - (crossL * 0.35f * intensity);
-        float outR = mid - finalSide * (1.0f + intensity) - (crossR * 0.35f * intensity);
-
-        // 6. Pinna Notch (Proper Independent 2-Pole Filters)
-        p->notchStateL1 += PINNA_NOTCH_COEF * (outL - p->notchStateL1);
-        p->notchStateL2 += PINNA_NOTCH_COEF * (p->notchStateL1 - p->notchStateL2);
-        outL -= (outL - p->notchStateL2) * 0.15f * intensity;
-
-        p->notchStateR1 += PINNA_NOTCH_COEF * (outR - p->notchStateR1);
-        p->notchStateR2 += PINNA_NOTCH_COEF * (p->notchStateR1 - p->notchStateR2);
-        outR -= (outR - p->notchStateR2) * 0.15f * intensity;
-
-        pOut[i * 2] = outL;
-        pOut[i * 2 + 1] = outR;
+        // 6. Sum Bypassed Subwoofer
+        pOut[i * 2] = outL + bassL;
+        pOut[i * 2 + 1] = outR + bassR;
     }
 }
 ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0};
