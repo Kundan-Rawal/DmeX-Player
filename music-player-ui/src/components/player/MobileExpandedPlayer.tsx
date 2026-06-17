@@ -273,10 +273,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
       if (env.path.includes('|')) {
         // Stereo / dual-channel IR (e.g. Dolby Atmos, Sony WH1000XM2)
         const [pathL, pathR] = env.path.split('|');
-        await Promise.all([
-          extractIRFile(pathL),
-          extractIRFile(pathR),
-        ]);
+        await invoke<string>('load_ir_memory_dual_android', { assetPathL: pathL, assetPathR: pathR });
         // The C++ memory bridge already loaded it into g_convolutionNode!
         // No need to send LOAD_IR_DUAL to the CommandParser since it's already active.
       } else {
