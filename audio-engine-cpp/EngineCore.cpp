@@ -90,20 +90,13 @@ extern "C" void init_audio_engine()
         ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
         deviceConfig.playback.format   = ma_format_f32;
         deviceConfig.playback.channels = 2;
-        deviceConfig.sampleRate        = 0; // Hardware native rate (bypass OS resampler)
-        deviceConfig.performanceProfile = ma_performance_profile_low_latency; // Request MMAP exclusive path
+        deviceConfig.sampleRate        = 44100; // Force 44.1kHz (bypasses miniaudio's cheap linear resampler)
+        deviceConfig.performanceProfile = ma_performance_profile_conservative; // Larger buffer to handle heavy 5.1 DSP math
         deviceConfig.dataCallback      = manual_data_callback;
         deviceConfig.pUserData         = &g_engine;
 
         // miniaudio auto-prefers AAudio over OpenSL on Android 8+
         bool deviceReady = (ma_device_init(NULL, &deviceConfig, &g_device) == MA_SUCCESS);
-
-        if (!deviceReady)
-        {
-            // Low-latency failed — retry with conservative profile (shared mode)
-            deviceConfig.performanceProfile = ma_performance_profile_conservative;
-            deviceReady = (ma_device_init(NULL, &deviceConfig, &g_device) == MA_SUCCESS);
-        }
 
         if (!deviceReady)
         {
