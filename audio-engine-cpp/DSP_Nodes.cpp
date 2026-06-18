@@ -263,12 +263,14 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         p->crossTrebleR.process(nonBassR, midR, trebleR);
 
         // 3. VOCAL PROCESSING (180Hz - 8kHz)
+#ifndef __ANDROID__
         // A. Psychoacoustic Vocal Exciter (Harmonic Bite)
+        // Disabled on Android: Mobile DACs struggle with synthetic harmonics, causing intermodulation noise/distortion.
         float satMidL = midL / (1.0f + fabsf(midL));
         float satMidR = midR / (1.0f + fabsf(midR));
-        // Blend 5% odd-order harmonics back into the clean mid to make vocals cut through
         midL = midL + (satMidL * 0.05f);
         midR = midR + (satMidR * 0.05f);
+#endif
 
         // B. Mid/Side Stereo Widening (3% Side Boost)
         float midM = (midL + midR) * 0.5f;
@@ -278,6 +280,7 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         midR = midM - midS;
 
         // C. Upward Vocal Compression (The Intimacy Algorithm)
+        // Kept ON for Android: This cleanly boosts quiet vocals so they aren't overshadowed by the bass!
         float midMonoEnv = fabsf(midM);
         p->envUpwardL += 0.001f * (midMonoEnv - p->envUpwardL);
         // If the vocal is quiet (env is near 0), upwardGain approaches 1.15x. If loud (>0.5), it approaches 1.0x.
@@ -286,8 +289,11 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         midR *= upwardGain;
 
         // D. Fletcher-Munson Presence EQ (2.5kHz)
+#ifndef __ANDROID__
+        // Disabled on Android: Bypassing the 2.5kHz boost prevents the treble from sounding "cheap" or "tinny".
         midL = p->presenceL.process(midL);
         midR = p->presenceR.process(midR);
+#endif
 
         // 4. Absolute Gains
         float gBass = p->currentBass;
@@ -297,8 +303,17 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         // 5. Parallel Summation
         // Because LR4 crossovers sum perfectly flat, re-combining these bands 
         // with their respective gains yields a completely zero-phase, distortion-free output.
-        pOut[i * 2] = (bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble);
-        pOut[i * 2 + 1] = (bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble);
+#ifdef __ANDROID__
+        // Android DACs hard-clip at 0 dBFS. Lower the master volume by ~3dB (-30%) to give
+        // the saturated bass and the excited trebles room to breathe without distorting.
+        // If playing on the internal phone speaker, keep it at 1.0f so it stays loud.
+        float MASTER_GAIN = g_isAndroidSpeaker ? 1.0f : 0.707f;
+#else
+        const float MASTER_GAIN = 1.0f;
+#endif
+
+        pOut[i * 2] = ((bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble)) * MASTER_GAIN;
+        pOut[i * 2 + 1] = ((bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble)) * MASTER_GAIN;
     }
 }
 ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
@@ -527,13 +542,21 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         };
 
         // Deep Sub-Bass (0-80Hz) gets the heavy 3.0x saturated multiplier for massive thump
-        float processedSubL = saturate(subL * drive * 3.0f);
-        float processedSubR = saturate(subR * drive * 3.0f);
+#ifdef __ANDROID__
+        float subMult = 1.6f; // Prevent 0 dBFS hard clipping on low-headroom Android DACs
+        float midMult = 0.8f; // Reduce 80-180Hz so it doesn't overshadow the weakened sub-bass
+#else
+        float subMult = 3.0f;
+        float midMult = 1.5f;
+#endif
 
-        // Mid-Bass (80-180Hz) gets a clean, linear 1.5x multiplier to restore kick body & bass guitar
+        float processedSubL = saturate(subL * drive * subMult);
+        float processedSubR = saturate(subR * drive * subMult);
+
+        // Mid-Bass (80-180Hz) gets a clean, linear multiplier to restore kick body & bass guitar
         // without adding muddy harmonic distortion to the low-mids.
-        float processedMidBassL = midBassL * drive * 1.5f;
-        float processedMidBassR = midBassR * drive * 1.5f;
+        float processedMidBassL = midBassL * drive * midMult;
+        float processedMidBassR = midBassR * drive * midMult;
 
         // Sum the Sub, Mid-Bass, and the completely untouched non-bass signal (>180Hz)
         // This guarantees absolute zero phase smearing in the midrange while providing huge, wide bass.
