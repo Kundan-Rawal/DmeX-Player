@@ -1485,40 +1485,207 @@
   will-change: transform, opacity;
 }
 
+  border: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent) !important;
+
+
+  color: var(--text-secondary) !important;
+
+
+}
+
+
+
+
+
+.mep-root .glass-options-menu .glass-slider {
+
+
+  background: color-mix(in srgb, var(--text-primary) 20%, transparent) !important;
+
+
+}
+
+
+
+
+
+/* 5. TSX INTERCEPTION */
+
+
+[data-theme="dark"] .mep-root .glass-boost-btn.active[style*="255,255,255"],
+
+
+[data-theme="dark"] .mep-root .glass-boost-btn.active[style*="#fff"] {
+
+
+  background: rgba(0, 0, 0, 0.08) !important;
+
+
+  border-color: rgba(0, 0, 0, 0.25) !important;
+
+
+  color: #111111 !important;
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =====================================================================
+
+
+     MEP FIX: PUNCHY MULTI-COLOR BLOBS (RESTORED PALETTE)
+
+
+     ===================================================================== */
+
+
+
+
+
+  /* 1. Target the Ambient Background elements inside the Mobile UI */
+
+
+  .mep-root .ambient-background {
+
+
+    /* Kills the 'divide/screen' logic that washes colors out against the background */
+
+
+    mix-blend-mode: normal !important;
+
+
+  }
+
+
+
+
+
+  /* 2. Force maximum opacity on the diverse blobs to stop the "white-wash" */
+
+
+  .mep-root .blob-1,
+
+
+  .mep-root .blob-2,
+
+
+  .mep-root .blob-3,
+
+
+  .mep-root [class*="corner"] {
+
+
+    /* Kills the 0.45/0.55 global opacity. Pushes it to 95% so the distinct palette colors actually show up vibrant. */
+
+
+    opacity: 0.95 !important; 
+
+
+    
+
+
+    /* We DO NOT override the background here. 
+
+
+       This allows var(--blob-1), var(--blob-2), and var(--blob-3) from your album extraction to shine through naturally. */
+
+
+    
+
+
+    /* Kills performance-expensive shadow layers that can desaturate */
+
+
+    box-shadow: none !important;
+
+
+    border: none !important;
+
+
+  }
+
+
+
+
+
+
+
+
+  @keyframes spinDiamondY {
+
+
+    0% { transform: perspective(200px) rotateY(0deg); }
+
+
+    100% { transform: perspective(200px) rotateY(360deg); }
+
+
+  }
+
+
+
+
+
+  /* Only apply the animation if the parent pill has the active class */
+
+
+  .mep-root .mep-taste-pill--active .hd-diamond {
+
+
+    animation: spinDiamondY 2.5s linear infinite;
+
+
+    transform-origin: center;
+
+
+    display: inline-block;
+
+
+  }
+
+/* NEON BASS RIPPLE */
+
+.mep-neon-ripple {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  max-width: 250px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 10px 2px var(--theme-color), inset 0 0 10px 2px var(--theme-color);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  will-change: transform, opacity;
+}
+
 @keyframes mep-neon-expand {
   0% { transform: translate(-50%, -50%) scale(0.2); opacity: 1; }
   100% { transform: translate(-50%, -50%) scale(4.5); opacity: 0; }
 }
 
-.mep-dust-layer {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
 
-.mep-dust-mote {
-  position: absolute;
-  background-color: #ffffff;
-  border-radius: 50%;
-  opacity: 0;
-  box-shadow: none; /* Removed for performance */
-  will-change: transform, opacity;
-}
-
-@keyframes mep-dust-float {
-  0% { transform: translateY(100vh); opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { transform: translateY(-20vh); opacity: 0; }
-}
-
-[data-theme='light'] .mep-dust-mote {
-  background-color: var(--theme-color);
-}
 
 [data-theme='light'] .mep-neon-ripple {
   border-color: var(--theme-color);
 }
-

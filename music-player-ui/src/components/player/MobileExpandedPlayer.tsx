@@ -139,28 +139,68 @@ const Android8BRipples: React.FC<{ spatialData: React.MutableRefObject<any>, isP
   );
 };
 
-const Android8BDustCSS: React.FC = () => {
-  const motes = useMemo(() => Array.from({ length: 70 }).map(() => ({
-    x: Math.random() * 100,
-    y: Math.random() * 100,
-    size: Math.random() * 3.5 + 2.5,
-    opacity: Math.random() * 0.5 + 0.1,
-    delay: -Math.random() * 15,
-    duration: Math.random() * 10 + 10
-  })), []);
+const Android8BDustCanvas: React.FC = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  return (
-    <div className="mep-dust-layer">
-      {motes.map((p, i) => (
-        <div key={i} className="mep-dust-mote" style={{
-          left: `${p.x}vw`, top: `${p.y}vh`,
-          width: `${p.size}px`, height: `${p.size}px`,
-          opacity: p.opacity,
-          animation: `mep-dust-float ${p.duration}s linear ${p.delay}s infinite`
-        }} />
-      ))}
-    </div>
-  );
+  const motes = useRef(Array.from({ length: 40 }).map(() => ({
+    x: Math.random() * (window.innerWidth || 500),
+    y: Math.random() * (window.innerHeight || 800),
+    // Enforce exactly 1px, 2px, 3px, 4px, or 5px distinct sizes
+    size: Math.floor(Math.random() * 5) + 1,
+    opacity: 1.0, // 100% visible, no fading
+    vy: -(Math.random() * 1.5 + 1.0), // Much faster upward movement
+    vx: (Math.random() - 0.5) * 0.8 // Faster horizontal drift
+  })));
+
+  useEffect(() => {
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d', { alpha: true, desynchronized: true });
+    if (!ctx) return;
+    
+    cvs.width = window.innerWidth;
+    cvs.height = window.innerHeight;
+
+    let rafId: number;
+    const draw = () => {
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
+      
+      const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+      // Use pure white/black without any background washing out the color
+      ctx.fillStyle = theme === 'light' ? 'rgba(0,0,0,1)' : 'rgba(255,255,255,1)';
+      
+      motes.current.forEach(m => {
+        m.x += m.vx;
+        m.y += m.vy;
+        if (m.y < -10) m.y = cvs.height + 10;
+        if (m.x < -10) m.x = cvs.width + 10;
+        if (m.x > cvs.width + 10) m.x = -10;
+        
+        ctx.globalAlpha = m.opacity;
+        
+        // Render perfect circles instead of squares
+        ctx.beginPath();
+        // m.size is the diameter, so radius is m.size / 2
+        ctx.arc(m.x, m.y, m.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      rafId = requestAnimationFrame(draw);
+    };
+    rafId = requestAnimationFrame(draw);
+
+    const handleResize = () => {
+      cvs.width = window.innerWidth;
+      cvs.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'none' }} />;
 };
 
 export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => {
@@ -297,7 +337,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
       />
 
-      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCSS />}
+      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas />}
 
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">
