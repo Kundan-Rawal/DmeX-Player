@@ -175,11 +175,18 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
 
         // 3. Virtual Rear (Surround L/R)
         // 20ms Haas Delay, Low-Passed (Head Shadow), and phase inverted.
+#ifndef __ANDROID__
         float rearL = p->rearDelayBufL[p->rearIdx];
         float rearR = p->rearDelayBufR[p->rearIdx];
         p->rearDelayBufL[p->rearIdx] = sideL;
         p->rearDelayBufR[p->rearIdx] = sideR;
         p->rearIdx = (p->rearIdx + 1) % SURROUND_HAAS_DELAY;
+#else
+        // Android Lite 5.1: Bypass the heavy 20ms Haas delay which causes phase cancellation mud on cheap DACs.
+        // We feed the sides directly into the Head Shadow filter to create directionality without driver stress.
+        float rearL = sideL;
+        float rearR = sideR;
+#endif
 
         // Head shadow low-pass on the rear speakers
         const float REAR_LP_COEF = 0.15f;
@@ -187,9 +194,16 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
         
         // Invert phase to trick the brain into rear localization
+#ifndef __ANDROID__
         // TUNING FIX: Reduced from 0.7f to 0.35f to prevent the rear from overpowering the front
         float virtualRearL = -p->rearLpL * 0.35f * intensity;
         float virtualRearR = -p->rearLpR * 0.35f * intensity;
+#else
+        // Android Lite 5.1: Keep phase normal to prevent destructive interference, but rely on the low-pass
+        // and 8kHz pinna notch to trick the brain into hearing 5.1 width without phase-mud.
+        float virtualRearL = p->rearLpL * 0.35f * intensity;
+        float virtualRearR = p->rearLpR * 0.35f * intensity;
+#endif
 
         // 4. Downmix to Binaural Stereo
         // Center + Boosted Front Sides + Virtual Rear Sides
