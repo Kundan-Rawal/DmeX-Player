@@ -18,6 +18,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 
 interface MobileExpandedPlayerProps {
+  isExpanded?: boolean;
   trackTitle: string; trackArtist: string; albumArt: string | null;
   isPlaying: boolean; currentTime: number; duration: number;
   isShuffle: boolean; repeatMode: 'OFF'|'ALL'|'ONE'; repeatDeg: number; repeatBusy: boolean;
@@ -139,7 +140,7 @@ const Android8BRipples: React.FC<{ spatialData: React.MutableRefObject<any>, isP
   );
 };
 
-const Android8BDustCanvas: React.FC = () => {
+const Android8BDustCanvas: React.FC<{ isExpanded?: boolean }> = ({ isExpanded = true }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const motes = useRef(Array.from({ length: 40 }).map(() => ({
@@ -152,6 +153,12 @@ const Android8BDustCanvas: React.FC = () => {
     vx: (Math.random() - 0.5) * 0.8 // Faster horizontal drift
   })));
 
+  // Use a mutable ref to track isExpanded inside the RAF without recreating the function
+  const isExpandedRef = useRef(isExpanded);
+  useEffect(() => {
+    isExpandedRef.current = isExpanded;
+  }, [isExpanded]);
+
   useEffect(() => {
     const cvs = canvasRef.current;
     if (!cvs) return;
@@ -163,6 +170,12 @@ const Android8BDustCanvas: React.FC = () => {
 
     let rafId: number;
     const draw = () => {
+      // Pause battery-draining math when UI is minimized
+      if (!isExpandedRef.current) {
+        rafId = requestAnimationFrame(draw);
+        return;
+      }
+
       ctx.clearRect(0, 0, cvs.width, cvs.height);
       
       const theme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -337,7 +350,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
       />
 
-      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas />}
+      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} />}
 
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">

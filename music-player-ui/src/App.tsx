@@ -1456,21 +1456,26 @@ function App() {
             handlePlayPause={handlePlayPause} handlePrev={handlePrev} handleNext={handleNext}
           />
 
-          {/* 2. Expanded Player: Fully painted in the background on boot. Zero layout math on click. */}
+          {/* 2. Expanded Player: Hardware Accelerated Decoupled Layout */}
           <div className="expanded-player-content" style={{ 
             opacity: isExpanded ? 1 : 0, 
             pointerEvents: isExpanded ? 'auto' : 'none',
-            visibility: isExpanded ? 'visible' : 'hidden', 
-            position: 'absolute', /* <-- CRITICAL FIX: NEVER TOGGLE THIS TO RELATIVE */
+            // CRITICAL FIX: 'fixed' decouples this heavy DOM tree from the parent's width/height animation!
+            // The browser calculates this 100vw/100vh layout ONCE and stores it on the GPU.
+            position: 'fixed', 
             top: 0,
             left: 0,
-            height: '100%',
-            width: '100%',
-            transition: 'opacity 0.3s ease',
-            zIndex: 2
+            height: '100vh',
+            width: '100vw',
+            transform: isExpanded ? 'translateY(0) scale(1)' : 'translateY(8%) scale(0.95)',
+            // 0.7s gives it enough time to breathe, cubic-bezier makes it feel physically heavy and premium
+            transition: 'opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1)',
+            willChange: 'opacity, transform',
+            zIndex: 3000
           }}>
             {IS_ANDROID ? (
               <MobileExpandedPlayer 
+                isExpanded={isExpanded}
                 trackTitle={trackTitle} trackArtist={trackArtist} albumArt={albumArt}
                 isPlaying={isPlaying} currentTime={currentTime} duration={duration}
                 isShuffle={isShuffle} repeatMode={repeatMode} repeatDeg={repeatDeg} repeatBusy={repeatBusy}
