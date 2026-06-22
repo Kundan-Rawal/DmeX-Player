@@ -245,15 +245,16 @@ extern "C" void execute_audio_command(const char *cmd_in)
         
         ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(stof(args) * (float)target_sr));
 
-        g_subwooferNode.lp1L = g_subwooferNode.lp2L = g_subwooferNode.lp1R = g_subwooferNode.lp2R = 0.0f;
-        memset(g_spatializerNode.haasBufL, 0, sizeof(g_spatializerNode.haasBufL));
-        memset(g_spatializerNode.itdBufL, 0, sizeof(g_spatializerNode.itdBufL));
-        memset(g_spatializerNode.itdBufR, 0, sizeof(g_spatializerNode.itdBufR));
-        g_spatializerNode.shadowStateL = g_spatializerNode.shadowStateR = 0.0f;
-        g_spatializerNode.notchStateL1 = g_spatializerNode.notchStateL2 = 0.0f;
-        g_spatializerNode.notchStateR1 = g_spatializerNode.notchStateR2 = 0.0f;
-        g_spatializerNode.crossHpL = g_spatializerNode.crossHpR = 0.0f;
-        g_spatializerNode.sideHp = 0.0f;
+        g_subwooferNode.lp1L = g_subwooferNode.lp1R = 0.0f;
+        g_subwooferNode.hp1L = g_subwooferNode.hp1R = 0.0f;
+
+        memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
+        memset(g_spatializerNode.rearDelayBufL, 0, sizeof(g_spatializerNode.rearDelayBufL));
+        memset(g_spatializerNode.rearDelayBufR, 0, sizeof(g_spatializerNode.rearDelayBufR));
+        
+        g_spatializerNode.rearLpL = g_spatializerNode.rearLpR = 0.0f;
+        g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;
+        g_spatializerNode.notchTopR1 = g_spatializerNode.notchTopR2 = 0.0f;
     }
     else if (command == "REMASTER")
     {
@@ -314,6 +315,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
     {
         g_bassGain = stof(args);
     }
+    else if (command == "TREBLE")
+    {
+        g_trebleGain = stof(args);
+    }
     else if (command == "LOAD_IR")
     {
         // 1. UNIVERSAL FIX: Stop the memory leaks and thread crashes on ALL platforms
@@ -356,12 +361,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
         if (ma_decoder_init_file(args.c_str(), &dcfg, &dec) != MA_SUCCESS)
             return;
 
-// 2. THE WINDOWS SHIELD: PC gets 2048 samples. Android gets throttled to 512.
-#ifdef __ANDROID__
-        const int read_samples = 1024;
-#else
         const int read_samples = MAX_IR_SAMPLES;
-#endif
 
         float *tempInterleaved = (float *)calloc(read_samples * 2, sizeof(float));
         ma_uint64 framesRead = 0;
@@ -440,12 +440,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
         if (ma_decoder_init_file(pathL.c_str(), &dcfg, &decL) != MA_SUCCESS)
             return;
 
-        // 2. THE WINDOWS SHIELD: PC gets 2048 samples. Android gets throttled to 512.
-#ifdef __ANDROID__
-        const int read_samples = 1024;
-#else
         const int read_samples = MAX_IR_SAMPLES;
-#endif
 
         float *tempL = (float *)calloc(read_samples, sizeof(float));
         ma_uint64 framesL = 0;
@@ -611,4 +606,41 @@ extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, floa
         return true;
     }
     return false;
+}
+extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
+{
+    float* newIrL = (float*)malloc(lenL * sizeof(float));
+    float* newIrR = (float*)malloc(lenR * sizeof(float));
+    float* newHistL = (float*)malloc(lenL * sizeof(float));
+    float* newHistR = (float*)malloc(lenR * sizeof(float));
+
+    if (newIrL && newIrR && newHistL && newHistR)
+    {
+        memcpy(newIrL, irL, lenL * sizeof(float));
+        memcpy(newIrR, irR, lenR * sizeof(float));
+        memset(newHistL, 0, lenL * sizeof(float));
+        memset(newHistR, 0, lenR * sizeof(float));
+
+        std::lock_guard<std::mutex> lock(g_irMutex);
+        if (g_convolutionNode.irDataL) free(g_convolutionNode.irDataL);
+        if (g_convolutionNode.irDataR) free(g_convolutionNode.irDataR);
+        if (g_convolutionNode.historyL) free(g_convolutionNode.historyL);
+        if (g_convolutionNode.historyR) free(g_convolutionNode.historyR);
+
+        g_convolutionNode.irDataL = newIrL;
+        g_convolutionNode.irDataR = newIrR;
+        g_convolutionNode.historyL = newHistL;
+        g_convolutionNode.historyR = newHistR;
+        g_convolutionNode.irLength = lenL;
+        g_convolutionNode.historyIdx = 0;
+        g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
+        g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
+    }
+    else
+    {
+        if (newIrL) free(newIrL);
+        if (newIrR) free(newIrR);
+        if (newHistL) free(newHistL);
+        if (newHistR) free(newHistR);
+    }
 }

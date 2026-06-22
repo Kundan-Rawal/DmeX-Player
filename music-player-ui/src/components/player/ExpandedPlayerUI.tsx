@@ -53,6 +53,7 @@ interface DSPStudioProps {
   setIsManualOverride: (v: boolean) => void;
   setSmartTaste: (v: Taste) => void;
   setBassLevel: (v: number) => void;
+  setTrebleLevel: (v: number) => void;
   writeToEngine: (cmd: string) => Promise<void>;
 
   // ── ANDROID ESCAPE HATCH ──────────────────────────────────────────────────
@@ -73,17 +74,17 @@ interface DSPStudioProps {
 export const DSPStudio = ({
   isRemastered, setIsRemastered, isCompressed, setIsCompressed, selectedAcousticEnv, setSelectedAcousticEnv,
   isEnvDropdownOpen, setIsEnvDropdownOpen, upscaleDrive, setUpscaleDrive, widenWidth, setWidenWidth,
-  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, setIsManualOverride, setSmartTaste, setBassLevel,
+  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, setIsManualOverride, setSmartTaste, setBassLevel, setTrebleLevel,
   writeToEngine,  // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
 }: DSPStudioProps) => {
 
   const applyPreset = async (preset:'STUDIO'|'CINEMATIC'|'RELAX') => {
-    let pRem=false,pCmp=false,pDrv=0.0,pWid=1.0,p3D=0.0,pRvb=0.0,pBas=0.0;
-    if(preset==='STUDIO'){pCmp=true;pDrv=0.7;pWid=1.10;pBas=0.3;}
-    else if(preset==='CINEMATIC'){pRem=true;pCmp=true;pDrv=1.2;pWid=1.35;p3D=0.25;pRvb=0.16;pBas=0.8;}
-    else{p3D=0.40;pRvb=0.22;pBas=0.1;}
-    setIsRemastered(pRem);setIsCompressed(pCmp);setUpscaleDrive(pDrv);setWidenWidth(pWid);setSpatialExtra(p3D);setReverbWet(pRvb);setBassLevel(pBas);
-    await writeToEngine(`REMASTER ${pRem?1:0}`);await writeToEngine(`COMPRESS ${pCmp?1:0}`);await writeToEngine(`UPSCALE ${pDrv}`);await writeToEngine(`WIDEN ${pWid}`);await writeToEngine(`3D ${p3D}`);await writeToEngine(`REVERB ${pRvb}`);await writeToEngine(`BASS ${pBas}`);
+    let pRem=false,pCmp=false,pDrv=0.0,pWid=1.0,p3D=0.0,pRvb=0.0,pBas=0.0,pTrb=0.0;
+    if(preset==='STUDIO'){pCmp=true;pDrv=0.7;pWid=1.10;pBas=0.3;pTrb=0.3;}
+    else if(preset==='CINEMATIC'){pRem=true;pCmp=true;pDrv=1.2;pWid=1.35;p3D=0.25;pRvb=0.16;pBas=0.8;pTrb=0.5;}
+    else{p3D=0.40;pRvb=0.22;pBas=0.1;pTrb=0.1;}
+    setIsRemastered(pRem);setIsCompressed(pCmp);setUpscaleDrive(pDrv);setWidenWidth(pWid);setSpatialExtra(p3D);setReverbWet(pRvb);setBassLevel(pBas);setTrebleLevel(pTrb);
+    await writeToEngine(`REMASTER ${pRem?1:0}`);await writeToEngine(`COMPRESS ${pCmp?1:0}`);await writeToEngine(`UPSCALE ${pDrv}`);await writeToEngine(`WIDEN ${pWid}`);await writeToEngine(`3D ${p3D}`);await writeToEngine(`REVERB ${pRvb}`);await writeToEngine(`BASS ${pBas}`);await writeToEngine(`TREBLE ${pTrb}`);
   };
 
   const isConvActive = selectedAcousticEnv !== 'NONE';

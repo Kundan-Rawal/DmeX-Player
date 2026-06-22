@@ -17,6 +17,7 @@ bool g_soundInitialized = false;
 bool g_usingCustomDevice = false; // True when we own a manual ma_device (AAudio/WASAPI)
 
 float g_bassGain = 0.0f;
+float g_trebleGain = 0.0f;
 std::mutex g_irMutex;
 std::mutex g_pathMutex;
 std::mutex g_audioMutex;
@@ -89,20 +90,13 @@ extern "C" void init_audio_engine()
         ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
         deviceConfig.playback.format   = ma_format_f32;
         deviceConfig.playback.channels = 2;
-        deviceConfig.sampleRate        = 0; // Hardware native rate (bypass OS resampler)
-        deviceConfig.performanceProfile = ma_performance_profile_low_latency; // Request MMAP exclusive path
+        deviceConfig.sampleRate        = 44100; // Force 44.1kHz (bypasses miniaudio's cheap linear resampler)
+        deviceConfig.performanceProfile = ma_performance_profile_conservative; // Larger buffer to handle heavy 5.1 DSP math
         deviceConfig.dataCallback      = manual_data_callback;
         deviceConfig.pUserData         = &g_engine;
 
         // miniaudio auto-prefers AAudio over OpenSL on Android 8+
         bool deviceReady = (ma_device_init(NULL, &deviceConfig, &g_device) == MA_SUCCESS);
-
-        if (!deviceReady)
-        {
-            // Low-latency failed — retry with conservative profile (shared mode)
-            deviceConfig.performanceProfile = ma_performance_profile_conservative;
-            deviceReady = (ma_device_init(NULL, &deviceConfig, &g_device) == MA_SUCCESS);
-        }
 
         if (!deviceReady)
         {
@@ -201,11 +195,11 @@ engine_ready:
     ma_node_graph *pg = ma_engine_get_node_graph(&g_engine);
     ma_uint32 sr = ma_engine_get_sample_rate(&g_engine);
 
-    ma_loshelf_node_config bc = ma_loshelf_node_config_init(g_channels, sr, 8.0f, 1.0f, 175.0f);
+    ma_loshelf_node_config bc = ma_loshelf_node_config_init(g_channels, sr, 8.0f, 1.0f, 130.0f);
     ma_loshelf_node_init(pg, &bc, NULL, &g_bassNode);
     ma_peak_node_config mc2 = ma_peak_node_config_init(g_channels, sr, -5.0f, 1.0f, 400.0f);
     ma_peak_node_init(pg, &mc2, NULL, &g_midNode);
-    ma_hishelf_node_config tc = ma_hishelf_node_config_init(g_channels, sr, -12.0f, 1.0f, 10000.0f);
+    ma_hishelf_node_config tc = ma_hishelf_node_config_init(g_channels, sr, -12.0f, 1.0f, 6000.0f);
     ma_hishelf_node_init(pg, &tc, NULL, &g_trebleNode);
     ma_node_attach_output_bus(&g_bassNode, 0, &g_midNode, 0);
     ma_node_attach_output_bus(&g_midNode, 0, &g_trebleNode, 0);
@@ -217,6 +211,14 @@ engine_ready:
     g_audiophileEQNode.currentBass = 1.0f;
     g_audiophileEQNode.currentMid = 1.0f;
     g_audiophileEQNode.currentHigh = 1.0f;
+    g_audiophileEQNode.crossBassL.init((float)sr, 80.0f);
+    g_audiophileEQNode.crossBassR.init((float)sr, 80.0f);
+    g_audiophileEQNode.crossMidBassL.init((float)sr, 180.0f);
+    g_audiophileEQNode.crossMidBassR.init((float)sr, 180.0f);
+    g_audiophileEQNode.crossTrebleL.init((float)sr, 8000.0f);
+    g_audiophileEQNode.crossTrebleR.init((float)sr, 8000.0f);
+    g_audiophileEQNode.presenceL.init((float)sr, 2500.0f, 0.707f, 2.0f);
+    g_audiophileEQNode.presenceR.init((float)sr, 2500.0f, 0.707f, 2.0f);
     ma_node_config cEQ = ma_node_config_init();
     cEQ.vtable = &g_audiophile_eq_vtable;
     cEQ.pInputChannels = g_inCh;
@@ -224,6 +226,10 @@ engine_ready:
     ma_node_init(pg, &cEQ, NULL, &g_audiophileEQNode.baseNode);
 
     memset(&g_subwooferNode, 0, sizeof(g_subwooferNode));
+    g_subwooferNode.crossBassL.init((float)sr, 80.0f);
+    g_subwooferNode.crossBassR.init((float)sr, 80.0f);
+    g_subwooferNode.crossMidBassL.init((float)sr, 180.0f);
+    g_subwooferNode.crossMidBassR.init((float)sr, 180.0f);
     ma_node_config subCfg = ma_node_config_init();
     subCfg.vtable = &g_subwoofer_vtable;
     subCfg.pInputChannels = g_inCh;
@@ -246,6 +252,8 @@ engine_ready:
     ma_node_init(pg, &c2, NULL, &g_widenerNode.baseNode);
 
     memset(&g_spatializerNode, 0, sizeof(g_spatializerNode));
+    g_spatializerNode.crossSubwooferL.init((float)sr, 180.0f);
+    g_spatializerNode.crossSubwooferR.init((float)sr, 180.0f);
     ma_node_config c3 = ma_node_config_init();
     c3.vtable = &g_psychoacoustic_vtable;
     c3.pInputChannels = g_inCh;
@@ -278,7 +286,7 @@ engine_ready:
 
     memset(&g_compressorNode, 0, sizeof(g_compressorNode));
     g_compressorNode.threshold.store(0.251f, std::memory_order_relaxed);
-    g_compressorNode.makeupGain.store(1.05f, std::memory_order_relaxed);
+    g_compressorNode.makeupGain.store(1.0f, std::memory_order_relaxed); // Safe headroom for AAudio
     g_compressorNode.attackCoef = expf(-1.0f / (0.005f * (float)sr));
     g_compressorNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
     g_compressorNode.delayLpStateL = 0.0f;
@@ -294,8 +302,8 @@ engine_ready:
     memset(&g_limiterNode, 0, sizeof(g_limiterNode));
     g_limiterNode.boost = 1.0f;
     g_limiterNode.gainEnv = 1.0f;
-    g_limiterNode.attackCoef = expf(-1.0f / (0.0015f * (float)sr));
-    g_limiterNode.releaseCoef = expf(-1.0f / (0.200f * (float)sr));
+    g_limiterNode.attackCoef = expf(-1.0f / (0.0005f * (float)sr)); // Ultra-fast attack to prevent DAC hard-clipping
+    g_limiterNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
     memset(g_limiterNode.dlyL, 0, sizeof(g_limiterNode.dlyL));
     memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
     ma_node_config c6 = ma_node_config_init();

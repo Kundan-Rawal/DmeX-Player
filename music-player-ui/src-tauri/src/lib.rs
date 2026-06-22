@@ -726,7 +726,11 @@ pub fn run() {
             fetch_library, add_to_library, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, get_all_artist_images, get_setting, set_setting,
             audio_command, extract_and_load_ir, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
-            scan_android_music
+            scan_android_music, 
+            #[cfg(target_os = "android")]
+            load_ir_memory_android,
+            #[cfg(target_os = "android")]
+            load_ir_memory_dual_android
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -737,3 +741,220 @@ pub fn run() {
             _ => {}
         });
 }
+#[cfg(target_os = "android")]
+extern "C" {
+    fn load_ir_from_memory_cpp(irL: *const f32, lenL: i32, irR: *const f32, lenR: i32);
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn load_ir_memory_android(asset_path: String) -> Result<String, String> {
+    let filename = asset_path.split('/').last().unwrap_or(&asset_path);
+    let bytes: &[u8] = match filename {
+        "DTSXHeadphonewide.wav" => include_bytes!("../resources/impulses/DTSXHeadphonewide.wav"),
+        "SennheiserHD.wav" => include_bytes!("../resources/impulses/SennheiserHD.wav"),
+        "Head360.wav" => include_bytes!("../resources/impulses/Head360.wav"),
+        "XHRQSurround.wav" => include_bytes!("../resources/impulses/XHRQSurround.wav"),
+        "xiaomipiston2.wav" => include_bytes!("../resources/impulses/xiaomipiston2.wav"),
+        "XHRStudioSurround.wav" => include_bytes!("../resources/impulses/XHRStudioSurround.wav"),
+        "dolbybassboost.wav" => include_bytes!("../resources/impulses/dolbybassboost.wav"),
+        "dolbydimension.wav" => include_bytes!("../resources/impulses/dolbydimension.wav"),
+        "OppoPM3.wav" => include_bytes!("../resources/impulses/OppoPM3.wav"),
+        "HyperXCloudalpha.wav" => include_bytes!("../resources/impulses/HyperXCloudalpha.wav"),
+        "AppleEarPods.wav" => include_bytes!("../resources/impulses/AppleEarPods.wav"),
+        "AppleAirPods.wav" => include_bytes!("../resources/impulses/AppleAirPods.wav"),
+        "AKGK240.wav" => include_bytes!("../resources/impulses/AKGK240.wav"),
+        "SteelSeriesArctic9X.wav" => include_bytes!("../resources/impulses/SteelSeriesArctic9X.wav"),
+        "dolbyheadR.wav" => include_bytes!("../resources/impulses/dolbyheadR.wav"),
+        "dolbyheadL.wav" => include_bytes!("../resources/impulses/dolbyheadL.wav"),
+        "dolbyvirtualspeakerL.wav" => include_bytes!("../resources/impulses/dolbyvirtualspeakerL.wav"),
+        "dolbyvirtualspeakerR.wav" => include_bytes!("../resources/impulses/dolbyvirtualspeakerR.wav"),
+        "Sony_WH1000XM2L.wav" => include_bytes!("../resources/impulses/Sony_WH1000XM2L.wav"),
+        "Sony_WH1000XM2R.wav" => include_bytes!("../resources/impulses/Sony_WH1000XM2R.wav"),
+        "AKGK701L.wav" => include_bytes!("../resources/impulses/AKGK701L.wav"),
+        "AKGK701R.wav" => include_bytes!("../resources/impulses/AKGK701R.wav"),
+        _ => return Err(format!("Unknown IR filename: {}", filename)),
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Cursor;
+        use symphonia::core::io::MediaSourceStream;
+        use symphonia::core::probe::Hint;
+        use symphonia::core::formats::FormatOptions;
+        use symphonia::core::meta::MetadataOptions;
+        use symphonia::core::codecs::DecoderOptions;
+        use symphonia::core::audio::SampleBuffer;
+
+        let cursor = Cursor::new(bytes);
+        let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+        
+        let mut hint = Hint::new();
+        hint.with_extension("wav");
+
+        let probed = match symphonia::default::get_probe().format(
+            &hint, mss, &FormatOptions::default(), &MetadataOptions::default()
+        ) {
+            Ok(p) => p, Err(e) => return format!("Probe err: {}", e),
+        };
+
+        let mut format = probed.format;
+        let track = match format.default_track() {
+            Some(t) => t, None => return "No track".to_string(),
+        };
+        let track_id = track.id;
+        let channels = track.codec_params.channels.map(|c| c.count() as u32).unwrap_or(2);
+
+        let mut decoder = match symphonia::default::get_codecs().make(
+            &track.codec_params, &DecoderOptions::default()
+        ) {
+            Ok(d) => d, Err(e) => return format!("Decoder err: {}", e),
+        };
+
+        let mut left: Vec<f32> = Vec::new();
+        let mut right: Vec<f32> = Vec::new();
+
+        loop {
+            let packet = match format.next_packet() {
+                Ok(p) => p,
+                Err(symphonia::core::errors::Error::IoError(_)) => break,
+                Err(_) => continue, 
+            };
+
+            if packet.track_id() != track_id { continue; }
+
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
+                    buf.copy_interleaved_ref(decoded);
+                    let samples = buf.samples();
+                    if channels == 1 {
+                        for &s in samples {
+                            left.push(s);
+                            right.push(s);
+                        }
+                    } else if channels == 2 {
+                        let mut i = 0;
+                        while i < samples.len() {
+                            left.push(samples[i]);
+                            right.push(samples[i+1]);
+                            i += 2;
+                        }
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+
+        unsafe {
+            load_ir_from_memory_cpp(
+                left.as_ptr(), left.len() as i32,
+                right.as_ptr(), right.len() as i32
+            );
+        }
+
+        "MEMORY_LOADED".to_string()
+    }).await.map_err(|e| e.to_string())
+}
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn load_ir_memory_dual_android(asset_path_l: String, asset_path_r: String) -> Result<String, String> {
+    let filename_l = asset_path_l.split('/').last().unwrap_or(&asset_path_l);
+    let filename_r = asset_path_r.split('/').last().unwrap_or(&asset_path_r);
+
+    let get_bytes = |filename: &str| -> Result<&'static [u8], String> {
+        match filename {
+            "DTSXHeadphonewide.wav" => Ok(include_bytes!("../resources/impulses/DTSXHeadphonewide.wav")),
+            "SennheiserHD.wav" => Ok(include_bytes!("../resources/impulses/SennheiserHD.wav")),
+            "Head360.wav" => Ok(include_bytes!("../resources/impulses/Head360.wav")),
+            "XHRQSurround.wav" => Ok(include_bytes!("../resources/impulses/XHRQSurround.wav")),
+            "xiaomipiston2.wav" => Ok(include_bytes!("../resources/impulses/xiaomipiston2.wav")),
+            "XHRStudioSurround.wav" => Ok(include_bytes!("../resources/impulses/XHRStudioSurround.wav")),
+            "dolbybassboost.wav" => Ok(include_bytes!("../resources/impulses/dolbybassboost.wav")),
+            "dolbydimension.wav" => Ok(include_bytes!("../resources/impulses/dolbydimension.wav")),
+            "OppoPM3.wav" => Ok(include_bytes!("../resources/impulses/OppoPM3.wav")),
+            "HyperXCloudalpha.wav" => Ok(include_bytes!("../resources/impulses/HyperXCloudalpha.wav")),
+            "AppleEarPods.wav" => Ok(include_bytes!("../resources/impulses/AppleEarPods.wav")),
+            "AppleAirPods.wav" => Ok(include_bytes!("../resources/impulses/AppleAirPods.wav")),
+            "AKGK240.wav" => Ok(include_bytes!("../resources/impulses/AKGK240.wav")),
+            "SteelSeriesArctic9X.wav" => Ok(include_bytes!("../resources/impulses/SteelSeriesArctic9X.wav")),
+            "dolbyheadR.wav" => Ok(include_bytes!("../resources/impulses/dolbyheadR.wav")),
+            "dolbyheadL.wav" => Ok(include_bytes!("../resources/impulses/dolbyheadL.wav")),
+            "dolbyvirtualspeakerL.wav" => Ok(include_bytes!("../resources/impulses/dolbyvirtualspeakerL.wav")),
+            "dolbyvirtualspeakerR.wav" => Ok(include_bytes!("../resources/impulses/dolbyvirtualspeakerR.wav")),
+            "Sony_WH1000XM2L.wav" => Ok(include_bytes!("../resources/impulses/Sony_WH1000XM2L.wav")),
+            "Sony_WH1000XM2R.wav" => Ok(include_bytes!("../resources/impulses/Sony_WH1000XM2R.wav")),
+            "AKGK701L.wav" => Ok(include_bytes!("../resources/impulses/AKGK701L.wav")),
+            "AKGK701R.wav" => Ok(include_bytes!("../resources/impulses/AKGK701R.wav")),
+            _ => Err(format!("Unknown IR filename: {}", filename)),
+        }
+    };
+
+    let bytes_l = get_bytes(filename_l)?;
+    let bytes_r = get_bytes(filename_r)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Cursor;
+        use symphonia::core::io::MediaSourceStream;
+        use symphonia::core::probe::Hint;
+        use symphonia::core::formats::FormatOptions;
+        use symphonia::core::meta::MetadataOptions;
+        use symphonia::core::codecs::DecoderOptions;
+        use symphonia::core::audio::SampleBuffer;
+
+        let decode_channel = |bytes: &'static [u8]| -> Result<Vec<f32>, String> {
+            let cursor = Cursor::new(bytes);
+            let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+            let mut hint = Hint::new();
+            hint.with_extension("wav");
+
+            let probed = symphonia::default::get_probe()
+                .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+                .map_err(|e| format!("Probe err: {}", e))?;
+
+            let mut format = probed.format;
+            let track = format.default_track().ok_or("No track")?.clone();
+            let track_id = track.id;
+
+            let mut decoder = symphonia::default::get_codecs()
+                .make(&track.codec_params, &DecoderOptions::default())
+                .map_err(|e| format!("Decoder err: {}", e))?;
+
+            let mut out: Vec<f32> = Vec::new();
+
+            loop {
+                let packet = match format.next_packet() {
+                    Ok(p) => p,
+                    Err(symphonia::core::errors::Error::IoError(_)) => break,
+                    Err(_) => continue,
+                };
+                if packet.track_id() != track_id { continue; }
+                match decoder.decode(&packet) {
+                    Ok(decoded) => {
+                        let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
+                        buf.copy_interleaved_ref(decoded);
+                        let samples = buf.samples();
+                        for &s in samples {
+                            out.push(s);
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            }
+            Ok(out)
+        };
+
+        let left = decode_channel(bytes_l).unwrap_or_default();
+        let right = decode_channel(bytes_r).unwrap_or_default();
+
+        if !left.is_empty() && !right.is_empty() {
+            unsafe {
+                load_ir_from_memory_cpp(
+                    left.as_ptr(), left.len() as i32,
+                    right.as_ptr(), right.len() as i32
+                );
+            }
+        }
+        "DUAL_MEMORY_LOADED".to_string()
+    }).await.map_err(|e| e.to_string())
+}
+

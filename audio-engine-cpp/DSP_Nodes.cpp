@@ -5,6 +5,8 @@
 
 extern std::atomic<float> g_audioLevel;
 extern float g_bassGain;
+extern float g_trebleGain;
+extern float g_trebleGain;
 extern std::mutex g_irMutex;
 extern bool g_isConvolutionOn;
 extern bool g_isFIRModeOn;
@@ -77,13 +79,50 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
-        float M = (L + R) * 0.5f, S = (L - R) * 0.5f;
+
+        // 1. Binaural Crossfeed (HRTF-lite) to anchor the stereo image
+        // We delay the opposite channel and low-pass it to simulate head-shadowing
+        float crossfeedL = p->delayR[p->delayIdx];
+        float crossfeedR = p->delayL[p->delayIdx];
+
+        p->delayL[p->delayIdx] = L;
+        p->delayR[p->delayIdx] = R;
+        p->delayIdx = (p->delayIdx + 1) % CROSSFEED_DELAY_SAMPLES;
+
+        // Head-shadow low-pass (approx 700Hz)
+        const float HEAD_SHADOW_COEF = 0.1f;
+        p->lpStateL += HEAD_SHADOW_COEF * (crossfeedL - p->lpStateL);
+        p->lpStateR += HEAD_SHADOW_COEF * (crossfeedR - p->lpStateR);
+
+        // Blend the shadowed opposite channel slightly (e.g. 15% mix)
+        float mixL = L + (p->lpStateR * 0.15f);
+        float mixR = R + (p->lpStateL * 0.15f);
+
+        // 2. Blumlein Shuffler (Bass-Safe Widening)
+        float M = (mixL + mixR) * 0.5f;
+        float S = (mixL - mixR) * 0.5f;
+        
+        // Isolate the bass from the Side channel so we don't widen the sub-bass
+        // (This keeps the bass exactly at its original stereo width, preventing diffusion)
+        const float SIDE_HP_COEF = 0.05f; // ~300Hz
+        p->sideLp += SIDE_HP_COEF * (S - p->sideLp);
+        float sideHighs = S - p->sideLp; // The treble/mids of the Side channel
+        float sideLows = p->sideLp;      // The bass of the Side channel
+
         float effectiveWidth = p->width;
         if (g_isLaptopSpeaker) {
             effectiveWidth = 1.0f + ((p->width - 1.0f) * 0.4f);
         }
-        pOut[i * 2] = M + (S * effectiveWidth);
-        pOut[i * 2 + 1] = M - (S * effectiveWidth);
+
+        float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.1f);
+        
+        // We multiply ONLY the upper frequencies of the Side channel by the width,
+        // and we pass the sideLows through exactly at 1.0x width.
+        // This guarantees pristine original stereo bass while massively widening the highs.
+        float finalS = sideLows + (sideHighs * effectiveWidth);
+
+        pOut[i * 2] = (M * midGain) + finalS;
+        pOut[i * 2 + 1] = (M * midGain) - finalS;
     }
 }
 ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
@@ -94,77 +133,102 @@ ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
 static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     PsychoacousticNode *p = (PsychoacousticNode *)pNode;
-    if (p->spatialIntensity < 0.001f)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
-
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    const float HEAD_SHADOW_COEF = 0.18f;
-    const float PINNA_NOTCH_COEF = 0.45f;
-    const float SIDE_HP_COEF = 0.05f;
-
     float intensity = p->spatialIntensity;
+
+    if (intensity < 0.001f)
+    {
+        memcpy(ppFramesOut[0], ppFramesIn[0], fc * 2 * sizeof(float));
+        return;
+    }
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
-        float inL = pIn[i * 2];
-        float inR = pIn[i * 2 + 1];
+        float L = pIn[i * 2];
+        float R = pIn[i * 2 + 1];
 
-        float mid = (inL + inR) * 0.5f;
-        float side = (inL - inR) * 0.5f;
+        // 0. Extract Bass (Subwoofer Bypass at 180Hz)
+        // We completely bypass the 180Hz bass from the 3D delays to keep it perfectly punchy and clear.
+        float bassL, nonBassL, bassR, nonBassR;
+        p->crossSubwooferL.process(L, bassL, nonBassL);
+        p->crossSubwooferR.process(R, bassR, nonBassR);
 
-        // 1. Bass-Protection (Side Channel)
-        p->sideHp += SIDE_HP_COEF * (side - p->sideHp);
-        float safeSide = side - p->sideHp;
+        float inL = nonBassL;
+        float inR = nonBassR;
 
-        // 2. Haas Delay
-        float delayedSide = p->haasBufL[p->haasIdx];
-        p->haasBufL[p->haasIdx] = safeSide;
-        p->haasIdx = (p->haasIdx + 1) % HAAS_DELAY_SAMPLES;
+        // 1. The 5.1 Extraction Matrix
+        float center = (inL + inR) * 0.5f;
+        float sideL  = (inL - inR) * 0.5f;
+        float sideR  = (inR - inL) * 0.5f; 
+        
+        // 2. Virtual Center (Front Speaker) 
+        // 0.5ms ITD crossfeed to pull the center channel out of the head.
+        float delayedCenter = p->centerDelayBuf[p->centerIdx];
+        p->centerDelayBuf[p->centerIdx] = center;
+        p->centerIdx = (p->centerIdx + 1) % CENTER_ITD_DELAY;
+        float virtualCenterL = center + (delayedCenter * 0.25f * intensity);
+        float virtualCenterR = center + (delayedCenter * 0.25f * intensity);
 
-        // 3. Head Shadow Filter
-        p->shadowStateL += HEAD_SHADOW_COEF * (inL - p->shadowStateL);
-        p->shadowStateR += HEAD_SHADOW_COEF * (inR - p->shadowStateR);
+        // 3. Virtual Rear (Surround L/R)
+        // 20ms Haas Delay, Low-Passed (Head Shadow), and phase inverted.
+#ifndef __ANDROID__
+        float rearL = p->rearDelayBufL[p->rearIdx];
+        float rearR = p->rearDelayBufR[p->rearIdx];
+        p->rearDelayBufL[p->rearIdx] = sideL;
+        p->rearDelayBufR[p->rearIdx] = sideR;
+        p->rearIdx = (p->rearIdx + 1) % SURROUND_HAAS_DELAY;
+#else
+        // Android Lite 5.1: Bypass the heavy 20ms Haas delay which causes phase cancellation mud on cheap DACs.
+        // We feed the sides directly into the Head Shadow filter to create directionality without driver stress.
+        float rearL = sideL;
+        float rearR = sideR;
+#endif
 
-        // 4. Bass-Protected ITD Crossfeed
-        // High-pass the shadowed signal before crossing it over so we NEVER phase-cancel the low end.
-        p->crossHpL += SIDE_HP_COEF * (p->shadowStateL - p->crossHpL);
-        p->crossHpR += SIDE_HP_COEF * (p->shadowStateR - p->crossHpR);
+        // Head shadow low-pass on the rear speakers
+        const float REAR_LP_COEF = 0.15f;
+        p->rearLpL += REAR_LP_COEF * (rearL - p->rearLpL);
+        p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
+        
+        // Invert phase to trick the brain into rear localization
+#ifndef __ANDROID__
+        // TUNING FIX: Reduced from 0.7f to 0.35f to prevent the rear from overpowering the front
+        float virtualRearL = -p->rearLpL * 0.35f * intensity;
+        float virtualRearR = -p->rearLpR * 0.35f * intensity;
+#else
+        // Android Lite 5.1: Keep phase normal to prevent destructive interference, but rely on the low-pass
+        // and 8kHz pinna notch to trick the brain into hearing 5.1 width without phase-mud.
+        float virtualRearL = p->rearLpL * 0.35f * intensity;
+        float virtualRearR = p->rearLpR * 0.35f * intensity;
+#endif
 
-        float crossfeedInL = p->shadowStateL - p->crossHpL;
-        float crossfeedInR = p->shadowStateR - p->crossHpR;
+        // 4. Downmix to Binaural Stereo
+        // Center + Boosted Front Sides + Virtual Rear Sides
+        // TUNING FIX: Boost the front sides slightly to balance the rear depth
+        float frontSideL = sideL * (1.0f + 0.25f * intensity);
+        float frontSideR = sideR * (1.0f + 0.25f * intensity);
+        
+        float outL = virtualCenterL + frontSideL + virtualRearL;
+        float outR = virtualCenterR + frontSideR + virtualRearR;
 
-        float crossL = p->itdBufL[p->itdIdx];
-        float crossR = p->itdBufR[p->itdIdx];
-        p->itdBufL[p->itdIdx] = crossfeedInR; // Right feeds to Left
-        p->itdBufR[p->itdIdx] = crossfeedInL; // Left feeds to Right
-        p->itdIdx = (p->itdIdx + 1) % ITD_DELAY_SAMPLES;
+        // 5. Top Elevation Notch (8kHz pinna cue)
+        // TUNING FIX: Moved from 12kHz (0.65f) down to 8kHz (0.45f). 
+        // Cutting 12kHz makes things sound "muffled" or "down". Cutting 8kHz triggers the "Up/Top" brain cue.
+        const float TOP_NOTCH_COEF = 0.45f; 
+        p->notchTopL1 += TOP_NOTCH_COEF * (outL - p->notchTopL1);
+        p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
+        outL -= (outL - p->notchTopL2) * 0.08f * intensity; // Reduced depth from 0.15 to 0.08
 
-        // 5. 3D Reconstruction (With Absolute Zero-Intensity Transparency)
-        // If intensity is 0, finalSide equals side, and crossfeed drops to 0.
-        float finalSide = side + (delayedSide - side) * intensity;
+        p->notchTopR1 += TOP_NOTCH_COEF * (outR - p->notchTopR1);
+        p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
+        outR -= (outR - p->notchTopR2) * 0.08f * intensity;
 
-        float outL = mid + finalSide * (1.0f + intensity) - (crossL * 0.35f * intensity);
-        float outR = mid - finalSide * (1.0f + intensity) - (crossR * 0.35f * intensity);
-
-        // 6. Pinna Notch (Proper Independent 2-Pole Filters)
-        p->notchStateL1 += PINNA_NOTCH_COEF * (outL - p->notchStateL1);
-        p->notchStateL2 += PINNA_NOTCH_COEF * (p->notchStateL1 - p->notchStateL2);
-        outL -= (outL - p->notchStateL2) * 0.15f * intensity;
-
-        p->notchStateR1 += PINNA_NOTCH_COEF * (outR - p->notchStateR1);
-        p->notchStateR2 += PINNA_NOTCH_COEF * (p->notchStateR1 - p->notchStateR2);
-        outR -= (outR - p->notchStateR2) * 0.15f * intensity;
-
-        pOut[i * 2] = outL;
-        pOut[i * 2 + 1] = outR;
+        // 6. Sum Bypassed Subwoofer
+        pOut[i * 2] = outL + bassL;
+        pOut[i * 2 + 1] = outR + bassR;
     }
 }
 ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0};
@@ -181,7 +245,7 @@ ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0}
 static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     AudiophileEQNode *p = (AudiophileEQNode *)pNode;
-    if (!g_isFIRModeOn && !g_isRemasterOn)
+    if (!g_isFIRModeOn && !g_isRemasterOn && g_trebleGain < 0.001f)
     {
         memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
         *pFrameCountOut = *pFrameCountIn;
@@ -194,11 +258,6 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
     *pFrameCountOut = fc;
 
     const float SMOOTH_COEF = 0.002f;
-    // CRITICAL FIX: Dropped crossover from 0.032f (245Hz) down to 0.012f (~90Hz)
-    // This stops the bass boost from touching the guitars and lower vocals.
-    const float F_BASS = 0.025f;   // ~175Hz: Grabs sub-bass and punchy kick drum fundamentals
-    const float F_TREBLE = 0.25f;
-
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         p->currentBass += SMOOTH_COEF * (p->targetBass.load(std::memory_order_relaxed) - p->currentBass);
@@ -207,35 +266,68 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
 
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. Isolate the Bass perfectly
-        p->bL += F_BASS * (L - p->bL);
-        p->bR += F_BASS * (R - p->bR);
-        float bassL = p->bL;
-        float bassR = p->bR;
+        // 1. Isolate the full Bass band up to 180Hz (Sub-bass + Kick Punch + Bass Guitar)
+        float bassBandL, nonBassL, bassBandR, nonBassR;
+        p->crossMidBassL.process(L, bassBandL, nonBassL);
+        p->crossMidBassR.process(R, bassBandR, nonBassR);
 
-        // 2. Isolate the Mids and Treble
-        float restL = L - bassL;
-        float restR = R - bassR;
+        // 2. Isolate the Mids from the Treble (8000Hz LR4 Crossover)
+        float midL, trebleL, midR, trebleR;
+        p->crossTrebleL.process(nonBassL, midL, trebleL);
+        p->crossTrebleR.process(nonBassR, midR, trebleR);
 
-        p->dcBlockL += F_TREBLE * (restL - p->dcBlockL);
-        p->dcBlockR += F_TREBLE * (restR - p->dcBlockR);
-        float midL = p->dcBlockL;
-        float midR = p->dcBlockR;
+        // 3. VOCAL PROCESSING (180Hz - 8kHz)
+#ifndef __ANDROID__
+        // A. Psychoacoustic Vocal Exciter (Harmonic Bite)
+        // Disabled on Android: Mobile DACs struggle with synthetic harmonics, causing intermodulation noise/distortion.
+        float satMidL = midL / (1.0f + fabsf(midL));
+        float satMidR = midR / (1.0f + fabsf(midR));
+        midL = midL + (satMidL * 0.05f);
+        midR = midR + (satMidR * 0.05f);
+#endif
 
-        float trebleL = restL - midL;
-        float trebleR = restR - midR;
+        // B. Mid/Side Stereo Widening (3% Side Boost)
+        float midM = (midL + midR) * 0.5f;
+        float midS = (midL - midR) * 0.5f;
+        midS *= 1.03f; // Boost the stereo width (panned vocals) by 3% while leaving the center completely untouched
+        midL = midM + midS;
+        midR = midM - midS;
 
-        // 3. The True Parallel Mix
-        // 1.0f is our center point. If currentBass is 1.50, gBass = +0.50 (a 50% layered boost).
-        // If currentMid is 0.80, gMid = -0.20 (a 20% phase-aligned cut).
-        float gBass = p->currentBass - 1.0f;
-        float gMid = p->currentMid - 1.0f;
-        float gTreble = p->currentHigh - 1.0f;
+        // C. Upward Vocal Compression (The Intimacy Algorithm)
+        // Kept ON for Android: This cleanly boosts quiet vocals so they aren't overshadowed by the bass!
+        float midMonoEnv = fabsf(midM);
+        p->envUpwardL += 0.001f * (midMonoEnv - p->envUpwardL);
+        // If the vocal is quiet (env is near 0), upwardGain approaches 1.15x. If loud (>0.5), it approaches 1.0x.
+        float upwardGain = 1.0f + 0.15f * (1.0f - fminf(p->envUpwardL * 2.0f, 1.0f));
+        midL *= upwardGain;
+        midR *= upwardGain;
 
-        // CRITICAL FIX: The dry signal (L and R) passes through 100% untouched.
-        // We now safely layer the isolated Bass, Mids, and Treble back on top.
-        pOut[i * 2] = L + (bassL * gBass) + (midL * gMid) + (trebleL * gTreble);
-        pOut[i * 2 + 1] = R + (bassR * gBass) + (midR * gMid) + (trebleR * gTreble);
+        // D. Fletcher-Munson Presence EQ (2.5kHz)
+#ifndef __ANDROID__
+        // Disabled on Android: Bypassing the 2.5kHz boost prevents the treble from sounding "cheap" or "tinny".
+        midL = p->presenceL.process(midL);
+        midR = p->presenceR.process(midR);
+#endif
+
+        // 4. Absolute Gains
+        float gBass = p->currentBass;
+        float gMid = p->currentMid;
+        float gTreble = p->currentHigh + g_trebleGain;
+
+        // 5. Parallel Summation
+        // Because LR4 crossovers sum perfectly flat, re-combining these bands 
+        // with their respective gains yields a completely zero-phase, distortion-free output.
+#ifdef __ANDROID__
+        // Android DACs hard-clip at 0 dBFS. Lower the master volume by ~3dB (-30%) to give
+        // the saturated bass and the excited trebles room to breathe without distorting.
+        // If playing on the internal phone speaker, keep it at 1.0f so it stays loud.
+        float MASTER_GAIN = g_isAndroidSpeaker ? 1.0f : 0.707f;
+#else
+        const float MASTER_GAIN = 1.0f;
+#endif
+
+        pOut[i * 2] = ((bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble)) * MASTER_GAIN;
+        pOut[i * 2 + 1] = ((bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble)) * MASTER_GAIN;
     }
 }
 ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
@@ -444,27 +536,46 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        const float LP_COEF = 0.011f;  // ~80Hz — captures kick body AND sub
-        float drive = g_bassGain * 1.2f;  // Slightly tamed multiplier
+        // 1. Isolate everything below 180Hz (The entire bass range)
+        float totalBassL, nonBassL, totalBassR, nonBassR;
+        p->crossMidBassL.process(L, totalBassL, nonBassL);
+        p->crossMidBassR.process(R, totalBassR, nonBassR);
 
-        p->lp1L += LP_COEF * (L - p->lp1L);
-        p->lp2L += LP_COEF * (p->lp1L - p->lp2L);
-        p->lp1R += LP_COEF * (R - p->lp1R);
-        p->lp2R += LP_COEF * (p->lp1R - p->lp2R);
+        // 2. Split the Bass into Sub-Bass (0-80Hz) and Mid-Bass (80-180Hz)
+        float subL, midBassL, subR, midBassR;
+        p->crossBassL.process(totalBassL, subL, midBassL);
+        p->crossBassR.process(totalBassR, subR, midBassR);
 
-        // Fix: Use linear drive + soft saturation to prevent crushing fractional values
-        float bassL = p->lp2L * drive * 3.0f;
-        float bassR = p->lp2R * drive * 3.0f;
-
-        // Soft saturation wave-shaper to keep the bass punchy without digital clipping
+        float drive = g_bassGain * 1.2f;
+        
+        // Soft saturation wave-shaper for Sub-Bass only
         auto saturate = [](float x) {
             float ax = fabsf(x);
             if (ax > 1.0f) ax = 1.0f;
             return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
         };
 
-        pOut[i * 2] = L + saturate(bassL);
-        pOut[i * 2 + 1] = R + saturate(bassR);
+        // Deep Sub-Bass (0-80Hz) gets the heavy 3.0x saturated multiplier for massive thump
+#ifdef __ANDROID__
+        float subMult = 1.6f; // Prevent 0 dBFS hard clipping on low-headroom Android DACs
+        float midMult = 0.8f; // Reduce 80-180Hz so it doesn't overshadow the weakened sub-bass
+#else
+        float subMult = 3.0f;
+        float midMult = 1.5f;
+#endif
+
+        float processedSubL = saturate(subL * drive * subMult);
+        float processedSubR = saturate(subR * drive * subMult);
+
+        // Mid-Bass (80-180Hz) gets a clean, linear multiplier to restore kick body & bass guitar
+        // without adding muddy harmonic distortion to the low-mids.
+        float processedMidBassL = midBassL * drive * midMult;
+        float processedMidBassR = midBassR * drive * midMult;
+
+        // Sum the Sub, Mid-Bass, and the completely untouched non-bass signal (>180Hz)
+        // This guarantees absolute zero phase smearing in the midrange while providing huge, wide bass.
+        pOut[i * 2] = nonBassL + processedSubL + processedMidBassL;
+        pOut[i * 2 + 1] = nonBassR + processedSubR + processedMidBassR;
     }
 
 }
@@ -523,15 +634,29 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
         p->historyL[p->historyIdx] = feedL;
         p->historyR[p->historyIdx] = feedR;
 
-        float sumL = 0.0f, sumR = 0.0f;
+        float sumL = 1e-18f, sumR = 1e-18f; // Anti-Denormal DC Offset
         int readIdx = p->historyIdx;
+
+#ifdef __ANDROID__
+        // 50% Decimation + Anti-Denormal for ARM Mobile Processors
+        for (int j = 0; j < p->irLength; j += 2)
+        {
+            sumL += p->historyL[readIdx] * p->irDataL[j];
+            sumR += p->historyR[readIdx] * (p->irDataR ? p->irDataR[j] : p->irDataL[j]);
+            readIdx -= 2;
+            if (readIdx < 0) readIdx += p->irLength;
+        }
+        sumL *= 2.0f; // Compensate for 50% decimation volume loss
+        sumR *= 2.0f;
+#else
+        // Full resolution for Desktop
         for (int j = 0; j < p->irLength; ++j)
         {
             sumL += p->historyL[readIdx] * p->irDataL[j];
             sumR += p->historyR[readIdx] * (p->irDataR ? p->irDataR[j] : p->irDataL[j]);
-            if (--readIdx < 0)
-                readIdx = p->irLength - 1;
+            if (--readIdx < 0) readIdx = p->irLength - 1;
         }
+#endif
 
         p->hpStateL += HP_COEF * (sumL - p->hpStateL);
         p->hpStateR += HP_COEF * (sumR - p->hpStateR);

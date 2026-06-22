@@ -57,6 +57,37 @@ struct BiquadHPF
     }
 };
 
+struct BiquadPeak
+{
+    float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+    float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+
+    void init(float sample_rate, float cutoff_hz, float q, float gain_db)
+    {
+        float A = powf(10.0f, gain_db / 40.0f);
+        float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
+        float alpha = sinf(w0) / (2.0f * q);
+        float a0 = 1.0f + alpha / A;
+
+        b0 = (1.0f + alpha * A) / a0;
+        b1 = (-2.0f * cosf(w0)) / a0;
+        b2 = (1.0f - alpha * A) / a0;
+        a1 = (-2.0f * cosf(w0)) / a0;
+        a2 = (1.0f - alpha / A) / a0;
+        x1 = x2 = y1 = y2 = 0.0f;
+    }
+
+    float process(float in_sample)
+    {
+        float out_sample = b0 * in_sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = in_sample;
+        y2 = y1;
+        y1 = out_sample;
+        return out_sample;
+    }
+};
+
 struct BiquadLPF
 {
     float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
@@ -136,35 +167,48 @@ struct StudioExciterNode
     float hpStateL, hpStateR;
 };
 
+#define CROSSFEED_DELAY_SAMPLES 22
+
 struct StereoWidenerNode
 {
     ma_node_base baseNode;
     float width;
+    
+    // Crossfeed states
+    float delayL[CROSSFEED_DELAY_SAMPLES];
+    float delayR[CROSSFEED_DELAY_SAMPLES];
+    int delayIdx;
+    float lpStateL, lpStateR;
+    float sideLp;
 };
 
-#define HAAS_DELAY_SAMPLES 88
-#define ITD_DELAY_SAMPLES 26
+#define SURROUND_HAAS_DELAY 882
+#define CENTER_ITD_DELAY 22
 
 struct PsychoacousticNode
 {
     ma_node_base baseNode;
-    float haasBufL[HAAS_DELAY_SAMPLES];
-    float itdBufL[ITD_DELAY_SAMPLES];
-    float itdBufR[ITD_DELAY_SAMPLES];
-    int haasIdx, itdIdx;
+    
+    // Subwoofer Bypass (180Hz) to keep bass completely dry
+    LinkwitzRiley4 crossSubwooferL, crossSubwooferR;
 
-    float shadowStateL, shadowStateR;
+    // Center ITD Delay
+    float centerDelayBuf[CENTER_ITD_DELAY];
+    int centerIdx;
 
-    // CRITICAL FIX: Proper independent 2-pole notch states
-    float notchStateL1, notchStateL2;
-    float notchStateR1, notchStateR2;
+    // Rear Haas Delay
+    float rearDelayBufL[SURROUND_HAAS_DELAY];
+    float rearDelayBufR[SURROUND_HAAS_DELAY];
+    int rearIdx;
 
-    // CRITICAL FIX: Independent crossfeed high-pass states to protect bass
-    float crossHpL, crossHpR;
-    float sideHp;
+    // Low-Pass states for Rear
+    float rearLpL, rearLpR;
+
+    // Top Elevation Notch States (12kHz pinna notch)
+    float notchTopL1, notchTopL2;
+    float notchTopR1, notchTopR2;
 
     float spatialIntensity;
-    float env;
 };
 
 struct AudiophileEQNode
@@ -172,7 +216,14 @@ struct AudiophileEQNode
     ma_node_base baseNode;
     std::atomic<float> targetBass, targetMid, targetHigh;
     float currentBass, currentMid, currentHigh;
-    float bL, bR, tL, tR;
+    
+    LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
+    LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    LinkwitzRiley4 crossTrebleL, crossTrebleR;   // 8000Hz
+    
+    BiquadPeak presenceL, presenceR; // 2.5kHz Fletcher-Munson presence eq
+    float envUpwardL, envUpwardR;    // Envelope trackers for Upward Compression
+    
     float dcBlockL, dcBlockR;
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve
 };
@@ -205,8 +256,12 @@ struct ReverbNode
 struct SubwooferNode
 {
     ma_node_base baseNode;
-    float lp1L, lp2L, lp1R, lp2R;
-    float hp1L, hp1R; // <--- ADD THESE TWO VARIABLES
+    LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
+    LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    
+    // Legacy 1-pole filter states for Android/Laptop Speaker protection
+    float hp1L, hp1R;
+    float lp1L, lp1R;
 };
 struct ConvolutionNode
 {
