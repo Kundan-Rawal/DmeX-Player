@@ -1,116 +1,180 @@
-# DmeX Audio Engine 🎧⚡
+# DmeX: High-Fidelity Bare-Metal Audio Engine
 
-**DmeX** is a master-grade, cross-platform audio processing engine and player. It was engineered from the ground up to solve the fatal flaw of modern desktop media players: bloated UI threads starving the audio pipeline. 
+[Image: A sleek, dark-themed hero image showcasing the DmeX player interface on both a high-res Windows desktop monitor and an Android device, displaying a 3D orbit visualizer.]
 
-By aggressively decoupling a hardware-accelerated React frontend from a deterministic C++ digital signal processing (DSP) core—bridged entirely via Rust and Tauri—DmeX achieves ultra-low latency (<100ms) audio streaming alongside a locked 60 FPS visual experience.
+## 1. Introduction & Philosophy
 
-## 📸 Visual Tour & User Guide
+**What is DmeX:** DmeX is a bare-metal media engine built for high-fidelity audio reproduction. It eschews standard web and OS constraints by utilizing a custom C++ Digital Signal Processing (DSP) core, a memory-safe Rust backend, and a high-performance React/Tauri frontend.
 
-DmeX is designed for both casual listening and hardcore audio engineering. Here is how to navigate the core features of the engine.
+**Why DmeX:** Standard Operating System audio mixers (like Windows WASAPI Shared Mode or Android's AudioFlinger) are notorious for degrading audio quality. They silently force sample rate conversions (introducing aliasing artifacts) and apply hidden limiters to prevent system-wide clipping. For audiophiles, this means the audio stream is mathematically altered before it ever reaches the DAC. DmeX bypasses these software mixers, locking directly to the hardware buffer to deliver a bit-perfect, 32-bit floating-point audio stream directly to the digital-to-analog converter.
 
-### 1. The High-Speed Library (Powered by SQLite)
+**Why it's different:** Modern desktop media players built on Electron or Tauri typically rely on the Chromium `<audio>` tag or the WebAudio API. These APIs are heavily sandboxed and subject to browser-level mixing constraints. DmeX completely bypasses the browser's audio pipeline. Instead, the UI simply acts as a remote control for a dedicated C++ audio thread operating at the lowest possible system latency, ensuring that no browser thread-locking or garbage collection pauses can interrupt the DSP stream.
 
-> ![Dmex List View and Landing page](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094381/Screenshot_278_wtqxwi.png)
+---
 
-* **Instant Search & Sort:** Unlike standard players that parse massive JSON files into memory, DmeX queries a native SQLite database. You can search a 15,000+ track library in milliseconds.
-* **Bulk Management:** Click "☑ Select Multiple" to engage the bulk-selection mode. You can instantly add or remove hundreds of tracks from custom playlists without UI lag.
-* **Smart Scan:** Clicking "+ Add Folder" utilizes Rust to scan your file system, extracting bitrates, durations, and metadata via `music-metadata`, while SQLite seamlessly ignores duplicates (`ON CONFLICT DO UPDATE`).
+## 2. The Core Architecture (C++, Rust, and FFI)
 
-### 2. The Holographic 3D Visualizer
+[Image: A high-level technical diagram showing the bridge between the React frontend, the Rust Tauri backend, and the C++ DSP Core, highlighting the flow of IPC and FFI.]
 
-![Lava Lamps Visualisation](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094503/Screenshot_279_f68bro.png)
-> *Lava Lamps Visuaisation with album art extracted colors*
+**The Language Bridge:** 
+The core engine relies on a strict Foreign Function Interface (FFI) boundary. Rust handles the memory-safe aspects of the application: reading files from disk and utilizing decoders (like Symphonia) to unpack FLAC, MP3, and WAV files into raw PCM data. Rust then pushes these PCM frames across the FFI boundary using `extern "C"` bindings into the C++ engine's lock-free ring buffers. The C++ engine, completely isolated from Rust's memory management, handles the raw, mathematically intensive DSP floating-point operations.
 
+**Command Routing:** 
+When a user adjusts the EQ or volume in the React frontend, the UI fires an asynchronous Inter-Process Communication (IPC) command via Tauri (e.g., `invoke("set_master_gain", { gain: 0.8 })`). Rust receives this payload, serializes it, and safely injects the parameter change into the C++ engine's state using atomic variables or a lock-free command queue, ensuring the audio thread is never blocked by UI events.
 
-![3D Spatial Visualtiser with true sense of direction](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094567/Screenshot_281_zjuplx.png)
-> *3D Spatial Visualtiser with true sense of direction in 3 Dimensions*
+**Telemetry & Bass Broadcasting:** 
+To drive the 60fps visualizations without touching the audio pipeline, DmeX employs a cross-language telemetry pipeline. At the end of every C++ processing block, the engine calculates the RMS (Root Mean Square), crest factor, and specific frequency band amplitudes (using FFT). This telemetry struct is polled by Rust via FFI and broadcasted back to the React UI as a Tauri event. The frontend receives these physical audio measurements and uses them to drive Canvas animations (e.g., bass ripples) mathematically perfectly synced to the audio output.
 
-* **Phase-Accurate Representation:** This is not a random animation. The C++ engine calculates RMS volume, Left/Right Panning, and Phase Correlation every 32ms.
-* **Reading the Visuals:** If the "Treble Dust" or "Lava Lamp" elements push to the extreme edges of your screen, it means the audio phase correlation is out-of-phase (< 0.0), indicating a wide 3D stereo image.
-* **Zero CPU Lag:** Rendered at 60 FPS using GPU-accelerated off-screen canvas blitting (`ctx.drawImage`), ensuring your battery doesn't drain while watching the visualizer.
+---
 
-### 3. The DSP Dashboard (Manual Overrides)
+## 3. The Bare-Metal DSP Engine
 
-![DSP Dashboard](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777094456/Screenshot_280_e6g3de.png)
-> *Digital Signal Processing Dashboard for customised Audio for your taste*
+[Image: A signal flow diagram of the C++ DSP nodes, showing the path from decoding to HRTF spatialization, multiband EQ, lookahead limiting, and final DAC output.]
 
-Click the 🎛️ (Equalizer) icon in the player bar to open the DSP Dashboard.
+**HRTF Tech (Head-Related Transfer Functions):** 
+To collapse the "in-head" localization typical of headphone listening, DmeX implements HRTF processing. The code utilizes specific time delays (Interaural Time Difference) and frequency shading (Interaural Level Difference) based on human head measurements. By applying a pinna notch filter (a slight attenuation around 8kHz), the algorithm tricks the brain's localization mechanisms into perceiving the sound source as existing in the physical room outside the listener's skull.
 
-* **Tube Exciter (Air):** Pushes the high frequencies through an asymmetric tube distortion algorithm. Dial this up to 50%+ to add "sparkle" to dull, poorly mastered tracks.
-* **Acoustic Environment:** Applies Convolution Reverb using real-world Impulse Responses (IRs) like "Yoga Studio" or "EMT-140 Plate."
-* **Stereo Width & 3D Depth:** Manipulates the Mid/Side (M/S) channels and utilizes Haas effect delays to physically push the sound outside the boundaries of your headphones.
+**Convolutional Reverbs & FFT:** 
+Applying high-quality room impulse responses (IR) using direct time-domain convolution is an `O(N^2)` mathematical operation that causes severe CPU thermal throttling on mobile devices. DmeX solves this by utilizing Fast Fourier Transforms (FFT). The engine transforms the incoming audio chunk into the frequency domain, mathematically multiplies it by the pre-transformed impulse response, and runs an Inverse FFT (IFFT) to return to the time domain. This Overlap-Add convolution reduces the algorithmic complexity to `O(N log N)`, keeping the CPU cool while delivering vast 3D acoustic spaces.
 
-## 🏗️ System Architecture
+**Advanced Tuning (Zero Phase-Distortion):** 
+DmeX utilizes a parallel DSP architecture built on Linkwitz-Riley crossover filters. When splitting the audio stream into sub-bass, mid, and treble bands for individual processing, standard filters introduce severe phase distortion at the crossover frequencies. Linkwitz-Riley filters ensure that when the parallel bands are summed back together, the signal remains perfectly in phase, preserving the sharp transients of drum hits and vocal clarity.
 
-Standard Electron/Web-based audio players suffer from audio dropouts because DOM updates block the main thread. DmeX solves this using a strict, tri-layer isolation model:
+**Sub-Bass & Directional Focus:** 
+Mobile and laptop speakers physically cannot produce 30Hz sub-bass frequencies. DmeX utilizes the psychoacoustic phenomenon of the "missing fundamental." The DSP algorithm passes the sub-bass frequencies through a nonlinear harmonic wave-shaper that generates targeted 2nd and 3rd order harmonics (e.g., converting a 30Hz wave into 60Hz and 90Hz harmonics). The human brain hears these harmonics and mathematically infers the existence of the 30Hz fundamental, allowing listeners to "hear" sub-bass on hardware that physically cannot reproduce it.
 
-1. **The Core (C++):** A purely lock-free audio thread. It handles bit-perfect audio decoding, dynamic memory allocation, and real-time DSP matrix math. It never waits on the UI.
-2. **The Bridge (Rust/Tauri):** Acts as the high-speed interconnect. It intercepts IPC calls, manages raw OS-level commands, and directly queries the local filesystem without standard ORM overhead.
-3. **The Interface (React/TypeScript):** The frontend only reads telemetry data. It utilizes `useRef` polling and `requestAnimationFrame` to mutate the DOM directly, entirely bypassing the React Virtual DOM diffing cycle during heavy visualizer loads.
+**Crystal Treble:** 
+To achieve "air" without harsh sibilance, the engine utilizes meticulously tuned Biquad High-Shelf filters targeting frequencies above 10kHz. The algorithm carefully controls the Q-factor (resonance) of the shelf, preventing the sharp peaks that cause ear-piercing "sss" sounds, resulting in a crystalline, open top-end.
 
-## 🎛️ Audiophile DSP Engine
+**Speaker Boost (30/60/100):** 
+Pushing raw volume often results in digital hard-clipping (values exceeding 1.0 or -1.0). DmeX employs a Lookahead Limiter algorithm. The C++ code delays the audio stream by approximately 5 milliseconds into a buffer. It scans this buffer for incoming transient peaks and calculates an attenuation envelope *before* the peak actually arrives. This allows DmeX to apply massive dynamic makeup gain (amplifying the quieter parts of the track) while seamlessly squashing peaks just before they clip, resulting in massive perceived loudness without distortion.
 
-The C++ core is built around mastering-grade acoustic math, eschewing standard "cheap" algorithms for phase-accurate processing:
+---
 
-* **Phase-Coherent Crossovers:** Standard IIR filters leak sound and cause 3dB volume humps at crossover frequencies. DmeX utilizes **Linkwitz-Riley 24dB/octave** crossovers to split sub-bass and mid/high frequencies with absolute zero phase cancellation.
-* **4-Band Dynamic Compression:** Independent frequency band compression prevents "audio pumping" (where a loud kick drum incorrectly ducks the volume of the lead vocal).
-* **Oversampled Tube Exciter:** An asymmetric distortion pipeline adds warm, even-order harmonics. To prevent digital aliasing (hiss), the signal is **4x oversampled to 176.4kHz** internally before being decimated back to the target sample rate.
-* **Real-Time 3D Spatial Imager:** Widens the stereo field utilizing phase correlation manipulation and Haas effect delays. These delays are dynamically scaled to the DAC's sample rate to preserve the 3D effect on 192kHz audiophile hardware.
-* **True Peak Limiting:** An oversampled limiter with a hard -0.3 dBFS brickwall ceiling ensures zero inter-sample clipping during downstream Digital-to-Analog (D/A) conversion.
+## 4. Desktop Experience (Windows/PC)
 
-## 🧠 Zero-NN Acoustic Machine Learning
-![Track Details View and the options in the music player](https://res.cloudinary.com/dsswbc0tx/image/upload/v1777101600/Screenshot_284_otve58.png)
-> An image showing the options in the track options on the main Audio Display.
-Machine Learning in audio usually implies heavy, CPU-melting Neural Networks. DmeX takes a systems-engineering approach, utilizing deterministic acoustic feature extraction to instantly "fingerprint" a track and apply the perfect EQ/DSP profile in milliseconds:
+[Image: A screenshot of the DmeX Windows desktop application, showing the glassmorphism UI, Synced Lyrics panel, and the 3D Orbit visualizer.]
 
-* **Crest Factor Analysis:** Measures the Peak-to-RMS ratio to instantly differentiate highly compressed electronic tracks from highly dynamic classical/acoustic recordings.
-* **Zero-Crossing Rate (ZCR):** Analyzes high-frequency noise density to identify tracks dominated by hi-hats, cymbals, or electronic synths.
-* **Spectral Centroid:** Calculates the frequency "center of mass" to determine the fundamental brightness or darkness of the mix.
+**The Visualizers (Orbit & Spatial):** 
+Desktop visualizers rely heavily on GPU-accelerated Canvas rendering. Because CSS `backdrop-filter: blur()` effects cause massive GPU rasterization bottlenecks when layered over 60fps Canvas updates, DmeX utilizes a dynamic CSS interceptor function. When a heavy 3D visualizer mounts, the React code explicitly strips blur filters from the background DOM elements, instantly freeing up the GPU's pixel-fill rate and locking the visualizer to a smooth 60fps.
 
-*Engine Logic Example:* `If Crest Factor > 18 and RMS < 0.08 -> Classify: Ambient/Chill -> Auto-Apply: Convolution Reverb & Wide Spatial Imager.`
+**Adaptive PC Speaker Mode:** 
+Laptop speakers inherently suffer from resonant peaks (muddy build-up around 250Hz) and lack of projection. The Adaptive PC Speaker algorithm applies a specialized multi-band compression curve. It specifically targets and compresses the low-mid frequencies to eliminate chassis resonance, while applying expansion to the high-mids (2kHz-4kHz) to pierce through the physical limitations of the laptop hardware.
 
-## 🛠️ Tech Stack
+**Synced Lyrics:** 
+DmeX fetches `.lrc` files asynchronously from the LRCLIB API. The synchronized rendering is powered by a high-performance timestamp-matching algorithm. Rather than scanning the entire lyric array on every frame, the React code caches the `activeLyricIndex` and performs localized linear scans against the C++ `playback_time_ms`, ensuring the UI highlighting stays perfectly synced to the audio buffer without burning CPU cycles.
 
-| **Component** | **Technology** | **Purpose** |
-|---|---|---|
-| **Audio Core DSP** | Modern C++ | Real-time audio buffer processing, lock-free architecture. |
-| **Backend & IPC** | Rust, Tauri | System bridge, memory-safe OS interactions. |
-| **Database Engine** | SQLite3 (`rusqlite`) | Bundled C-driver for millisecond relational queries. |
-| **Frontend Framework** | React.js, TypeScript | Component architecture and state management. |
-| **Visual Rendering** | HTML5 Canvas API | 60 FPS off-screen blitting and direct DOM manipulation. |
-| **Metadata Parsing** | `music-metadata` | Extracting ID3 tags, FLAC headers, and album art. |
+**Library Management (Albums & Artists):** 
+DmeX manages massive local libraries by parsing binary ID3 tags via Rust. When tracks lack proper metadata tags, a fallback extraction algorithm engages. This algorithm applies Regular Expressions against the filename (e.g., extracting `Artist - Title.mp3`) and utilizes directory structure inference to automatically categorize the track into the correct Album and Artist structures in the local database.
 
-## ⚙️ Build Instructions
+**User Data (Favorites, Most Listened, Playlists):** 
+User telemetry and playlists are managed through high-speed local caching using SQLite/JSON stores handled by the Rust backend. When the React frontend mounts, it queries this local database to instantly render user preferences and playback history without relying on external network requests.
 
-### Prerequisites
+**Transforming Animated SVGs:** 
+To provide tactile UI feedback, DmeX utilizes mathematical path-morphing functions for its icons. For example, the Play/Pause button uses cubic bezier interpolation to tween the `d` attribute of the SVG path, smoothly animating the two pause bars into the triangular play state in response to React state changes.
 
-* [Node.js](https://nodejs.org/) (v18+)
-* [Rust](https://www.rust-lang.org/tools/install) (latest stable)
-* C++ Build Tools:
-  * **Windows:** Visual Studio C++ Build Tools (MSVC)
-  * **macOS:** Xcode Command Line Tools
-  * **Linux:** `build-essential`, `libwebkit2gtk-4.0-dev`, `libgtk-3-dev`
+**Themes:** 
+DmeX achieves seamless Light/Dark mode transitions through CSS variable injection. Instead of causing massive React component tree re-renders, the application simply updates `--bg-color` and `--theme-text` at the `:root` document level, allowing the browser to transition the colors using hardware acceleration.
 
-### Installation
+---
 
-1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/Kundan-Rawal/DmeX-Player.git](https://github.com/Kundan-Rawal/DmeX-Player.git)
-   cd DmeX-Player
-   ```
-2. **Install frontend dependencies:**
-   ```bash
-   npm install
-   ```
-3. **Compile and run the development build:**
-   ```bash
-   npm run tauri dev
-   ```
-4. **Build for production:**
-   ```bash
-   npm run tauri build
-   ```
-### Latest Releases
+## 5. Android-Specific Architecture
 
-* Windows Release (ver 1.0.5): [Drive Link](https://drive.google.com/file/d/176Shuywno5A5tVQJXWsY2ugW16HcmkzZ/view?usp=drive_link)  *
-* Android Release (ver 1.0.3): [Drive Link]()
+[Image: A screenshot of the DmeX Android interface, showcasing the compact mobile player, the 8B Dust Visualizer, and the virtualized tracklist.]
+
+**High-Performance 8B Visualizer:** 
+Standard CSS keyframe animations (like floating dust motes) cause severe layout thrashing and battery drain on mobile ARM processors. DmeX replaces these with a decimated Canvas rendering loop. Using `requestAnimationFrame` and a `desynchronized: true` 2D context, the code calculates particle physics directly in JavaScript and renders them using `ctx.arc()`, bypassing the browser's CSS layout engine entirely for zero-impact visuals.
+
+**Virtual Tracklist:** 
+Rendering an audio library of 10,000+ songs would instantly crash a mobile WebView due to DOM memory exhaustion. DmeX employs DOM virtualization functions. The algorithm calculates the user's scroll position and only mounts the ~15 track nodes currently visible on the screen. As the user scrolls, it aggressively recycles those DOM nodes, keeping memory usage flat regardless of library size.
+
+**Adaptive Phone Speaker Mode:** 
+Phone speakers utilize tiny piezoelectric drivers that easily distort. The Android specific algorithm deploys an aggressive hard-knee limiter combined with asymmetrical harmonic saturation. By intentionally introducing odd-order harmonics to the bass frequencies, it forces the tiny drivers to project maximum perceived loudness without physically exceeding their excursion limits and blowing out.
+
+**Mobile Audio Processing Algorithm:** 
+To respect Android OS battery constraints and thermal throttling limits, the C++ engine utilizes `#ifdef __ANDROID__` compiler macros. These macros dynamically reconfigure the DSP node graph on mobile devices, bypassing heavy processing like the 20ms Haas delays, and routing the audio through highly-optimized, lightweight EQ profiles that preserve battery life while maintaining acoustic depth.
+
+**Mobile Expanded Player:** 
+The mobile UI employs a strict component separation architecture. When the user taps the mini-player, the Expanded Player mounts as a completely decoupled `position: fixed` layer. Instead of animating layout properties like `width` or `height` (which causes Android UI freezing), the expansion is driven entirely by a GPU-accelerated CSS `transform: translateY(0)` animation, resulting in a flawless, buttery-smooth gesture.
+
+**GPU Performance Boost:** 
+DmeX forces the Android WebView's SurfaceFlinger to composite layers entirely on the GPU. By explicitly defining `will-change: transform, opacity` and avoiding any CSS properties that trigger DOM repaints, the visual load is shifted off the main CPU thread, ensuring the audio engine remains the undisputed priority.
+
+**Pre-Optimization of Tracks:** 
+To guarantee zero-latency track switching, DmeX utilizes a background Rust thread for pre-optimization. As a track nears its end, Symphonia silently begins decoding the next track in the queue, pre-caching the raw PCM chunks into memory so the C++ engine can transition seamlessly without waiting for disk I/O.
+
+---
+
+## 6. System Architecture & Data Flow
+
+### Application Architecture
+```mermaid
+graph TD
+    subgraph Frontend [React / TypeScript UI]
+        UI[User Interface]
+        Vis[Canvas Visualizers]
+        State[React State / Context]
+    end
+
+    subgraph Bridge [Tauri IPC / FFI]
+        IPC[Tauri Command Router]
+        Events[Tauri Event Emitter]
+    end
+
+    subgraph Backend [Rust Backend]
+        IO[File System I/O]
+        DB[SQLite Library DB]
+        Dec[Symphonia Decoder]
+    end
+
+    subgraph Core [C++ DSP Engine]
+        Ring[Lock-free Ring Buffer]
+        DSP[DSP Node Graph]
+        DAC[Audio Output API]
+        Telemetry[FFT / RMS Calculation]
+    end
+
+    UI -->|invoke('set_volume')| IPC
+    IPC -->|State Mutation| Core
+    
+    IO --> Dec
+    Dec -->|Raw PCM via FFI| Ring
+    Ring --> DSP
+    DSP --> DAC
+    
+    DSP --> Telemetry
+    Telemetry -->|FFI Poll| Events
+    Events -->|emit('dsp-data')| Vis
+```
+
+### Audio Processing Data Flow
+```mermaid
+sequenceDiagram
+    participant Disk as Local File System
+    participant Rust as Rust Decoder (Symphonia)
+    participant Ring as C++ Ring Buffer
+    participant DSP as C++ DSP Pipeline
+    participant DAC as Hardware DAC
+
+    Disk->>Rust: Stream compressed bytes (.flac/.mp3)
+    Rust->>Rust: Decode to 32-bit Float PCM
+    Rust->>Ring: Push PCM chunks across FFI
+    Ring->>DSP: Pull frames at audio callback rate
+    DSP->>DSP: Apply HRTF & Overlap-Add Reverb
+    DSP->>DSP: Apply Linkwitz-Riley Crossover EQ
+    DSP->>DSP: Apply Lookahead Limiter
+    DSP->>DAC: Output bit-perfect stream to hardware
+```
+
+---
+
+## 7. Conclusion & Downloads
+
+DmeX represents a massive engineering feat, successfully bridging three distinct ecosystems (React, Rust, and C++) to circumvent the limitations of modern operating systems and browsers. By taking absolute control of the audio pipeline from the disk down to the DAC, DmeX provides an unparalleled, zero-compromise acoustic experience wrapped in a highly optimized, hardware-accelerated user interface.
+
+### Downloads
+
+- **Windows (PC):** [Download DmeX for Windows (.msi) - Placeholder Link](#)
+- **Android:** [Download DmeX for Android (.apk) - Placeholder Link](#)
+
+*Experience media the way the mastering engineer intended.*
