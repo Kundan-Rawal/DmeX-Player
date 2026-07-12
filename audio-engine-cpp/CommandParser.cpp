@@ -298,7 +298,18 @@ extern "C" void execute_audio_command(const char *cmd_in)
     {
         float d = stof(args);
         g_exciterNode.targetDrive = d * 4.0f;
-        g_isUpscaleOn = (d > 0.01f);
+    }
+    else if (command == "RESTORE_DENOISE")
+    {
+        g_restorationNode.denoiseIntensity = stof(args);
+    }
+    else if (command == "RESTORE_UPSCALE")
+    {
+        g_restorationNode.upscaleTarget = stof(args);
+    }
+    else if (command == "RESTORE_PRESENCE")
+    {
+        g_restorationNode.presenceBoost = stof(args);
     }
     else if (command == "WIDEN")
     {

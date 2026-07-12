@@ -18,6 +18,9 @@ bool g_usingCustomDevice = false; // True when we own a manual ma_device (AAudio
 
 float g_bassGain = 0.0f;
 float g_trebleGain = 0.0f;
+float g_denoiseIntensity = 0.0f;
+float g_upscaleTarget = 0.0f;
+float g_presenceBoost = 0.0f;
 std::mutex g_irMutex;
 std::mutex g_pathMutex;
 std::mutex g_audioMutex;
@@ -52,6 +55,7 @@ LimiterNode g_limiterNode;
 MeterNode g_meterNode;
 SubwooferNode g_subwooferNode;
 DynamicSpatializerNode g_8DNode;
+AudioRestorationNode g_restorationNode;
 
 void updateRouting()
 {
@@ -59,7 +63,8 @@ void updateRouting()
         return;
     // THE STATIC GRAPH FIX:
     // We NEVER tear the graph down. We only plug the newly loaded track into the head of the chain.
-    ma_node_attach_output_bus((ma_node *)&g_sound, 0, &g_convolutionNode, 0);
+    ma_node_attach_output_bus((ma_node *)&g_sound, 0, &g_restorationNode.baseNode, 0);
+    ma_node_attach_output_bus(&g_restorationNode.baseNode, 0, &g_convolutionNode, 0);
 }
 static void manual_data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount)
 {
@@ -225,6 +230,14 @@ engine_ready:
     cEQ.pOutputChannels = g_outCh;
     ma_node_init(pg, &cEQ, NULL, &g_audiophileEQNode.baseNode);
 
+
+    memset(&g_restorationNode, 0, sizeof(g_restorationNode));
+    g_restorationNode.init((float)sr);
+    ma_node_config restCfg = ma_node_config_init();
+    restCfg.vtable = &g_restoration_vtable;
+    restCfg.pInputChannels = g_inCh;
+    restCfg.pOutputChannels = g_outCh;
+    ma_node_init(pg, &restCfg, NULL, &g_restorationNode.baseNode);
     memset(&g_subwooferNode, 0, sizeof(g_subwooferNode));
     g_subwooferNode.crossBassL.init((float)sr, 80.0f);
     g_subwooferNode.crossBassR.init((float)sr, 80.0f);

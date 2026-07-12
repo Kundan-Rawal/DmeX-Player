@@ -152,6 +152,9 @@ function App() {
   const [trebleLevel, setTrebleLevel] = useState(0.0);
   const trebleLevelRef                = useRef(0.0);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [restorationDenoise, setRestorationDenoise] = useState(0.0);
+  const [restorationUpscale, setRestorationUpscale] = useState(0.0);
+  const [restorationPresence, setRestorationPresence] = useState(0.0);
   const [selectedAcousticEnv, setSelectedAcousticEnv] = useState('NONE');
   const [isManualOverride, setIsManualOverride] = useState(false);
   const [isFIRMode, setIsFIRMode]     = useState(false);
@@ -1046,6 +1049,9 @@ function App() {
           widenWidth={widenWidth} setWidenWidth={setWidenWidth}
           spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
           reverbWet={reverbWet} setReverbWet={setReverbWet}
+          restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
+          restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
+          restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
           setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
           setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
         />
@@ -1490,6 +1496,9 @@ function App() {
                 widenWidth={widenWidth} setWidenWidth={setWidenWidth}
                 spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
                 reverbWet={reverbWet} setReverbWet={setReverbWet}
+                restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
+                restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
+                restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
                 setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
                 isProfileActive={isProfileActive} setIsProfileActive={setIsProfileActive}
                 isProfileActiveRef={isProfileActiveRef}
@@ -1719,6 +1728,9 @@ function App() {
                     selectedAcousticEnv={selectedAcousticEnv} setSelectedAcousticEnv={setSelectedAcousticEnv} isEnvDropdownOpen={isEnvDropdownOpen} setIsEnvDropdownOpen={setIsEnvDropdownOpen}
                     upscaleDrive={upscaleDrive} setUpscaleDrive={setUpscaleDrive} widenWidth={widenWidth} setWidenWidth={setWidenWidth}
                     spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra} reverbWet={reverbWet} setReverbWet={setReverbWet}
+                    restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
+                    restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
+                    restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
                     setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
                   />
                 )}

@@ -33,6 +33,9 @@ interface MobileExpandedPlayerProps {
   widenWidth: number;          setWidenWidth: (v: number) => void;
   spatialExtra: number;        setSpatialExtra: (v: number) => void;
   reverbWet: number;           setReverbWet: (v: number) => void;
+  restorationDenoise: number;  setRestorationDenoise: (v: number) => void;
+  restorationUpscale: number;  setRestorationUpscale: (v: number) => void;
+  restorationPresence: number; setRestorationPresence: (v: number) => void;
   setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
   isProfileActive: boolean;    setIsProfileActive: (v: boolean) => void;
   isProfileActiveRef: React.MutableRefObject<boolean>;
@@ -518,6 +521,9 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   widenWidth={p.widenWidth}                   setWidenWidth={p.setWidenWidth}
                   spatialExtra={p.spatialExtra}               setSpatialExtra={p.setSpatialExtra}
                   reverbWet={p.reverbWet}                     setReverbWet={p.setReverbWet}
+                  restorationDenoise={p.restorationDenoise}   setRestorationDenoise={p.setRestorationDenoise}
+                  restorationUpscale={p.restorationUpscale}   setRestorationUpscale={p.setRestorationUpscale}
+                  restorationPresence={p.restorationPresence} setRestorationPresence={p.setRestorationPresence}
                   setIsManualOverride={p.setIsManualOverride} setSmartTaste={p.setSmartTaste}
                   setBassLevel={p.setBassLevel} setTrebleLevel={p.setTrebleLevel} writeToEngine={p.writeToEngine}
           

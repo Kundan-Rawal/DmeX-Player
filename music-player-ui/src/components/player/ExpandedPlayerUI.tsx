@@ -50,6 +50,9 @@ interface DSPStudioProps {
   widenWidth: number; setWidenWidth: (v: number) => void;
   spatialExtra: number; setSpatialExtra: (v: number) => void;
   reverbWet: number; setReverbWet: (v: number) => void;
+  restorationDenoise: number; setRestorationDenoise: (v: number) => void;
+  restorationUpscale: number; setRestorationUpscale: (v: number) => void;
+  restorationPresence: number; setRestorationPresence: (v: number) => void;
   setIsManualOverride: (v: boolean) => void;
   setSmartTaste: (v: Taste) => void;
   setBassLevel: (v: number) => void;
@@ -74,7 +77,9 @@ interface DSPStudioProps {
 export const DSPStudio = ({
   isRemastered, setIsRemastered, isCompressed, setIsCompressed, selectedAcousticEnv, setSelectedAcousticEnv,
   isEnvDropdownOpen, setIsEnvDropdownOpen, upscaleDrive, setUpscaleDrive, widenWidth, setWidenWidth,
-  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, setIsManualOverride, setSmartTaste, setBassLevel, setTrebleLevel,
+  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, 
+  restorationDenoise: _restorationDenoise, setRestorationDenoise, restorationUpscale, setRestorationUpscale, restorationPresence: _restorationPresence, setRestorationPresence,
+  setIsManualOverride, setSmartTaste, setBassLevel, setTrebleLevel,
   writeToEngine,  // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
 }: DSPStudioProps) => {
 
@@ -197,6 +202,32 @@ export const DSPStudio = ({
         <div className="dsp-card" style={disabledStyle}>
           <div className="dsp-label-row"><label>Digital Reverb (Algorithmic)</label><span className="val-orange">{Math.round(reverbWet*100)}%</span></div>
           <input type="range" className="dsp-slider reverb" min="0" max="0.35" step="0.01" value={reverbWet} onChange={e=>{const v=parseFloat(e.target.value);setReverbWet(v);writeToEngine(`REVERB ${v}`);}}/>
+        </div>
+      </div>
+
+      <div className="studio-header" style={{marginTop: '24px'}}><h2>Dynamic Audio Upscaling</h2><p className="studio-subtitle">AI-assisted recovery for low-quality tracks (128kbps)</p></div>
+      <div className="dsp-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <div className="dsp-card" style={disabledStyle}>
+          <div className="dsp-label-row" style={{ marginBottom: '12px' }}><label>Upscaling Power</label><span style={{color:'#ff9800',fontWeight:600}}>{restorationUpscale === 0 ? 'Off' : (restorationUpscale < 0.3 ? 'Min' : (restorationUpscale < 0.7 ? 'Med' : (restorationUpscale < 1.0 ? 'Max' : 'Max+')))}</span></div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {[{label: 'None', vD: 0, vU: 0, vP: 0}, 
+              {label: 'Min', vD: 0.15, vU: 0.2, vP: 0.2}, 
+              {label: 'Med', vD: 0.3, vU: 0.5, vP: 0.5}, 
+              {label: 'Max', vD: 0.6, vU: 0.8, vP: 0.8}, 
+              {label: 'Max+', vD: 1.0, vU: 1.0, vP: 1.0}].map(preset => (
+                <button 
+                  key={preset.label}
+                  style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid rgba(255,152,0,0.3)', background: restorationUpscale === preset.vU ? 'rgba(255,152,0,0.2)' : 'transparent', color: 'var(--text-primary)', cursor: 'pointer', transition: 'background 0.2s' }}
+                  onClick={async () => {
+                    setRestorationDenoise(preset.vD); await writeToEngine(`RESTORE_DENOISE ${preset.vD}`);
+                    setRestorationUpscale(preset.vU); await writeToEngine(`RESTORE_UPSCALE ${preset.vU}`);
+                    setRestorationPresence(preset.vP); await writeToEngine(`RESTORE_PRESENCE ${preset.vP}`);
+                  }}
+                >
+                  {preset.label}
+                </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

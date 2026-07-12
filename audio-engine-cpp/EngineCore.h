@@ -14,6 +14,9 @@ extern bool g_engineInitialized;
 // Global settings
 extern float g_bassGain;
 extern float g_trebleGain;
+extern float g_denoiseIntensity;
+extern float g_upscaleTarget;
+extern float g_presenceBoost;
 extern std::mutex g_irMutex;
 extern std::mutex g_pathMutex;
 extern std::mutex g_audioMutex;
@@ -44,6 +47,7 @@ extern LimiterNode g_limiterNode;
 extern MeterNode g_meterNode;
 extern SubwooferNode g_subwooferNode;
 extern DynamicSpatializerNode g_8DNode;
+extern AudioRestorationNode g_restorationNode;
 
 // Channel Config
 extern ma_uint32 g_channels;

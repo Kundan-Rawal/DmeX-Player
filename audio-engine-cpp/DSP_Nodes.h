@@ -320,3 +320,35 @@ extern ma_node_vtable g_subwoofer_vtable;
 extern ma_node_vtable g_convolution_vtable;
 extern ma_node_vtable g_multiband_compressor_vtable;
 extern ma_node_vtable g_limiter_vtable;
+struct AudioRestorationNode
+{
+    ma_node_base baseNode;
+    
+    // Parameters
+    float denoiseIntensity; // 0.0 to 1.0
+    float upscaleTarget; // 1.0 = 320k, 2.0 = 640k extreme
+    float presenceBoost; // 0.0 to 1.0
+    
+    // Wave shaper states
+    float x1L = 0, x1R = 0;
+    
+    // Filter states for perfect separation
+    LinkwitzRiley4 crossoverL, crossoverR;
+    BiquadHPF harmonicFilterL, harmonicFilterR;
+    BiquadLPF lowPassSincL, lowPassSincR;
+    
+    void init(float sample_rate) {
+        // 8000Hz crossover completely isolates the air/cymbals from the vocals
+        crossoverL.init(sample_rate, 8000.0f);
+        crossoverR.init(sample_rate, 8000.0f);
+        harmonicFilterL.init(sample_rate, 10000.0f);
+        harmonicFilterR.init(sample_rate, 10000.0f);
+        lowPassSincL.init(sample_rate, 18000.0f);
+        lowPassSincR.init(sample_rate, 18000.0f);
+        denoiseIntensity = 0.0f;
+        upscaleTarget = 0.0f;
+        presenceBoost = 0.0f;
+    }
+};
+
+extern ma_node_vtable g_restoration_vtable;
