@@ -658,6 +658,24 @@ fn set_setting(key: String, value: String, state: tauri::State<AppState>) -> Res
     Ok(())
 }
 
+#[tauri::command]
+fn download_cloud_stream(url: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let cache_dir = app_handle.path().app_data_dir().unwrap().join("cloud_cache");
+    if !cache_dir.exists() {
+        std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    }
+    
+    let file_path = cache_dir.join("current_stream.m4a");
+    
+    let client = reqwest::blocking::Client::new();
+    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    let bytes = response.bytes().map_err(|e| e.to_string())?;
+    
+    std::fs::write(&file_path, bytes).map_err(|e| e.to_string())?;
+    
+    Ok(file_path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -726,7 +744,7 @@ pub fn run() {
             fetch_library, add_to_library, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, get_all_artist_images, get_setting, set_setting,
             audio_command, extract_and_load_ir, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
-            scan_android_music, 
+            scan_android_music, download_cloud_stream,
             #[cfg(target_os = "android")]
             load_ir_memory_android,
             #[cfg(target_os = "android")]

@@ -19,7 +19,7 @@ export interface Track {
   isFavorite?: boolean;
 }
 
-export type NavView = 'ALL' | 'FAVORITES' | 'ALBUMS' | 'TOPTRACKS' | 'PLAYLIST_GALLERY' | string;
+export type NavView = 'ALL' | 'FAVORITES' | 'ALBUMS' | 'TOPTRACKS' | 'PLAYLIST_GALLERY' | 'CLOUD_FETCH' | string;
 
 export type Taste = 'ORIGINAL' | 'DEFAULT' | 'QUALITY' | 'IMMERSIVE' | 'BASS' | 'ELECTRONIC' | 'HIPHOP' | 'AMBIENT' | 'POP' | 'CLASSICAL'| 'CHILL';
 

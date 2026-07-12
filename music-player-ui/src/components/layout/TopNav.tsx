@@ -26,6 +26,7 @@ export const TopNav = ({
   const [isKebabOpen, setIsKebabOpen] = useState(false);
 
   const TABS = [
+    { id: 'CLOUD_FETCH', label: 'Discover' },
     { id: 'FAVOURITES', label: 'Favourites' },
     { id: 'PLAYLIST_GALLERY', label: 'Playlists' },
     { id: 'ALL', label: 'Tracks' },

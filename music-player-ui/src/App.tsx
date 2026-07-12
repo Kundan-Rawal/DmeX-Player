@@ -12,6 +12,7 @@ import "./App.css";
 import { useLibraryScanner } from './hooks/useLibraryScanner';
 import { AlbumGalleryView } from './views/AlbumGalleryView';
 import { ArtistGalleryView } from './views/ArtistGalleryView';
+import { CloudFetchView } from './views/CloudFetchView';
 import { vaultGet, vaultSet, initVault } from './services/vault';
 import { splitArtists } from './utils/artistEngine';
 import { formatTime, parseLRC } from './utils/formatters';
@@ -1210,7 +1211,50 @@ function App() {
           >
             
             {/* 1. HIGHEST PRIORITY: PLAYLIST GALLERY */}
-            {currentView === 'PLAYLIST_GALLERY' ? (
+            {currentView === 'CLOUD_FETCH' ? (
+              <CloudFetchView 
+                onPlayCloudTrack={async (trackData) => {
+                  try {
+                    // 1. Fetch the track details to get the raw download URL
+                    // Note: We use the provided Vercel API. 
+                    // Fallback to searching the song if IDs endpoint is broken.
+                    const res = await fetch(`https://saavan-api-psi.vercel.app/api/songs?ids=${trackData.id}`);
+                    const data = await res.json();
+                    
+                    let downloadUrl = "";
+                    if (data && data.success && data.data && data.data[0] && data.data[0].downloadUrl) {
+                        const urls = data.data[0].downloadUrl;
+                        // Get highest quality stream
+                        downloadUrl = urls[urls.length - 1].url;
+                    }
+
+                    if (downloadUrl) {
+                      // 2. Safely download it to a temp cache via Rust
+                      const tempPath = await invoke<string>('download_cloud_stream', { url: downloadUrl });
+                      
+                      // 3. Blast it through the DSP engine!
+                      await invoke('audio_command', { cmd: `LOAD ${tempPath}` });
+                      
+                      // 4. Update the UI
+                      const newTrack = {
+                         path: tempPath,
+                         name: (trackData.name || trackData.title).replace(/&quot;/g, '"').replace(/&amp;/g, '&'),
+                         artist: trackData.artists?.primary?.map((a:any) => a.name).join(', ') || 'Unknown',
+                         album: 'Cloud Stream',
+                         duration: trackData.duration || 0,
+                         thumb: trackData.image?.[2]?.url || trackData.image?.[0]?.url
+                      };
+                      setCurrentTrack(newTrack as any);
+                      setIsPlaying(true);
+                    } else {
+                        console.error("No download URL found in API response");
+                    }
+                  } catch (e) {
+                      console.error("Error streaming cloud track:", e);
+                  }
+                }}
+              />
+            ) : currentView === 'PLAYLIST_GALLERY' ? (
               <PlaylistGalleryView 
                 playlist={playlist} favoritesSet={favoritesSet} customPlaylists={customPlaylists} albumArt={albumArt}
                 setCurrentView={setCurrentView} createPlaylist={createPlaylist} deletePlaylist={deletePlaylist}
