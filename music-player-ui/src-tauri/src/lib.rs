@@ -676,6 +676,19 @@ fn download_cloud_stream(url: String, app_handle: tauri::AppHandle) -> Result<St
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn fetch_cloud_api(url: String) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+        
+    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    let text = response.text().map_err(|e| e.to_string())?;
+    
+    Ok(text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -744,7 +757,7 @@ pub fn run() {
             fetch_library, add_to_library, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, get_all_artist_images, get_setting, set_setting,
             audio_command, extract_and_load_ir, audio_metrics, analyze_current_track, read_file_head, scan_directory, scan_mobile_audio,
-            scan_android_music, download_cloud_stream,
+            scan_android_music, download_cloud_stream, fetch_cloud_api,
             #[cfg(target_os = "android")]
             load_ir_memory_android,
             #[cfg(target_os = "android")]

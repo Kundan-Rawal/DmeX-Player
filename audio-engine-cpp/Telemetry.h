@@ -1,5 +1,6 @@
 #pragma once
 #include "miniaudio.h"
+#include "DSP_Nodes.h"
 #include <atomic>
 
 // Global Atomics for React UI
@@ -11,6 +12,8 @@ extern std::atomic<float> g_tLvl, g_tPan, g_tPhase;
 struct MeterNode {
     ma_node_base baseNode;
     float lowL, lowR, highStateL, highStateR;
+    LinkwitzRiley4 crossLowL, crossLowR;   // 250Hz Crossover
+    LinkwitzRiley4 crossHighL, crossHighR; // 4000Hz Crossover
 };
 
 extern ma_node_vtable g_meter_vtable;

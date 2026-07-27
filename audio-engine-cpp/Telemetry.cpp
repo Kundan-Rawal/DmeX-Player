@@ -26,15 +26,17 @@ static void meter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *p
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
         pOut[i * 2] = L; pOut[i * 2 + 1] = R;
 
-        p->lowL += 0.02f * (L - p->lowL);
-        p->lowR += 0.02f * (R - p->lowR);
-        float bL = p->lowL, bR = p->lowR;
+        float bL, nonLowL, bR, nonLowR;
+        p->crossLowL.process(L, bL, nonLowL);
+        p->crossLowR.process(R, bR, nonLowR);
 
-        p->highStateL += 0.40f * (L - p->highStateL);
-        p->highStateR += 0.40f * (R - p->highStateR);
-        float tL = L - p->highStateL, tR = R - p->highStateR;
+        float mL, tL, mR, tR;
+        p->crossHighL.process(nonLowL, mL, tL);
+        p->crossHighR.process(nonLowR, mR, tR);
 
-        float mL = L - bL - tL, mR = R - bR - tR;
+        // Keep legacy states updated in case of external inspection
+        p->lowL = bL; p->lowR = bR;
+        p->highStateL = L - tL; p->highStateR = R - tR;
 
         bL2 += bL * bL; bR2 += bR * bR; bLR += bL * bR;
         float bp = fmaxf(fabsf(bL), fabsf(bR)); if (bp > bPk) bPk = bp;

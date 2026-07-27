@@ -620,17 +620,18 @@ extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, floa
 }
 extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
 {
-    float* newIrL = (float*)malloc(lenL * sizeof(float));
-    float* newIrR = (float*)malloc(lenR * sizeof(float));
-    float* newHistL = (float*)malloc(lenL * sizeof(float));
-    float* newHistR = (float*)malloc(lenR * sizeof(float));
+    int maxLen = (lenL > lenR) ? lenL : lenR;
+    if (maxLen <= 0) return;
+
+    float* newIrL = (float*)calloc(maxLen, sizeof(float));
+    float* newIrR = (float*)calloc(maxLen, sizeof(float));
+    float* newHistL = (float*)calloc(maxLen, sizeof(float));
+    float* newHistR = (float*)calloc(maxLen, sizeof(float));
 
     if (newIrL && newIrR && newHistL && newHistR)
     {
-        memcpy(newIrL, irL, lenL * sizeof(float));
-        memcpy(newIrR, irR, lenR * sizeof(float));
-        memset(newHistL, 0, lenL * sizeof(float));
-        memset(newHistR, 0, lenR * sizeof(float));
+        if (irL && lenL > 0) memcpy(newIrL, irL, lenL * sizeof(float));
+        if (irR && lenR > 0) memcpy(newIrR, irR, lenR * sizeof(float));
 
         std::lock_guard<std::mutex> lock(g_irMutex);
         if (g_convolutionNode.irDataL) free(g_convolutionNode.irDataL);
@@ -642,7 +643,7 @@ extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float*
         g_convolutionNode.irDataR = newIrR;
         g_convolutionNode.historyL = newHistL;
         g_convolutionNode.historyR = newHistR;
-        g_convolutionNode.irLength = lenL;
+        g_convolutionNode.irLength = maxLen;
         g_convolutionNode.historyIdx = 0;
         g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
         g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;

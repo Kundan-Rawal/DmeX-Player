@@ -77,6 +77,20 @@ struct BiquadPeak
         x1 = x2 = y1 = y2 = 0.0f;
     }
 
+    void update_coeffs(float sample_rate, float cutoff_hz, float q, float gain_db)
+    {
+        float A = powf(10.0f, gain_db / 40.0f);
+        float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
+        float alpha = sinf(w0) / (2.0f * q);
+        float a0 = 1.0f + alpha / A;
+
+        b0 = (1.0f + alpha * A) / a0;
+        b1 = (-2.0f * cosf(w0)) / a0;
+        b2 = (1.0f - alpha * A) / a0;
+        a1 = (-2.0f * cosf(w0)) / a0;
+        a2 = (1.0f - alpha / A) / a0;
+    }
+
     float process(float in_sample)
     {
         float out_sample = b0 * in_sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
@@ -262,6 +276,13 @@ struct SubwooferNode
     // Legacy 1-pole filter states for Android/Laptop Speaker protection
     float hp1L, hp1R;
     float lp1L, lp1R;
+
+    // Adaptive Fundamental Tracking & Dynamic Peaking Highlight
+    float env30_60 = 0.0f, env60_90 = 0.0f, env90_130 = 0.0f;
+    float currentFreq = 70.0f, targetFreq = 70.0f;
+    BiquadPeak highlightL, highlightR;
+    bool isHighlightInit = false;
+    float sampleRate = 44100.0f;
 };
 struct ConvolutionNode
 {
@@ -293,6 +314,7 @@ struct MultibandCompressorNode
     float dlyL[COMP_LOOKAHEAD_SAMPLES];
     float dlyR[COMP_LOOKAHEAD_SAMPLES];
     int dlyIdx;
+    LinkwitzRiley4 crossL, crossR; // Phase-coherent 150Hz crossover
 };
 
 #define LIMITER_LOOKAHEAD_SAMPLES 88

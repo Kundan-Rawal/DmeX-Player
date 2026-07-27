@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Play, Download, Cloud } from 'lucide-react';
 import { Track } from '../types';
+import { invoke } from '@tauri-apps/api/core';
 
 interface CloudFetchViewProps {
   onPlayCloudTrack: (trackData: any) => void;
@@ -18,11 +19,12 @@ export const CloudFetchView = ({ onPlayCloudTrack }: CloudFetchViewProps) => {
     
     setIsLoading(true);
     try {
-      // Hit the user-provided API
-      const response = await fetch(`https://saavan-api-psi.vercel.app/api/search/songs?query=${encodeURIComponent(query)}`);
-      const data = await response.json();
+      // Use the Rust backend to bypass CORS and bot-protection blocks
+      const jsonStr = await invoke<string>('fetch_cloud_api', { 
+        url: `https://saavn.dev/api/search/songs?query=${encodeURIComponent(query)}` 
+      });
+      const data = JSON.parse(jsonStr);
       
-      // Robust parsing: try both /api/search/songs and /api/search structures
       let parsedResults = [];
       if (data && data.success && data.data) {
         if (Array.isArray(data.data.results)) {

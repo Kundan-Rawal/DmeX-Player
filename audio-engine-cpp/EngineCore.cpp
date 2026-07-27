@@ -243,6 +243,7 @@ engine_ready:
     g_subwooferNode.crossBassR.init((float)sr, 80.0f);
     g_subwooferNode.crossMidBassL.init((float)sr, 180.0f);
     g_subwooferNode.crossMidBassR.init((float)sr, 180.0f);
+    g_subwooferNode.sampleRate = (float)sr;
     ma_node_config subCfg = ma_node_config_init();
     subCfg.vtable = &g_subwoofer_vtable;
     subCfg.pInputChannels = g_inCh;
@@ -304,6 +305,8 @@ engine_ready:
     g_compressorNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
     g_compressorNode.delayLpStateL = 0.0f;
     g_compressorNode.delayLpStateR = 0.0f;
+    g_compressorNode.crossL.init((float)sr, 150.0f);
+    g_compressorNode.crossR.init((float)sr, 150.0f);
     memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));
     memset(g_compressorNode.dlyR, 0, sizeof(g_compressorNode.dlyR));
     ma_node_config c5 = ma_node_config_init();
@@ -326,6 +329,10 @@ engine_ready:
     ma_node_init(pg, &c6, NULL, &g_limiterNode.baseNode);
 
     memset(&g_meterNode, 0, sizeof(g_meterNode));
+    g_meterNode.crossLowL.init(sr, 250.0f);
+    g_meterNode.crossLowR.init(sr, 250.0f);
+    g_meterNode.crossHighL.init(sr, 4000.0f);
+    g_meterNode.crossHighR.init(sr, 4000.0f);
     ma_node_config cMeter = ma_node_config_init();
     cMeter.vtable = &g_meter_vtable;
     cMeter.pInputChannels = g_inCh;

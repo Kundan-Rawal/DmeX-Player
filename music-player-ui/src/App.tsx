@@ -1216,10 +1216,11 @@ function App() {
                 onPlayCloudTrack={async (trackData) => {
                   try {
                     // 1. Fetch the track details to get the raw download URL
-                    // Note: We use the provided Vercel API. 
-                    // Fallback to searching the song if IDs endpoint is broken.
-                    const res = await fetch(`https://saavan-api-psi.vercel.app/api/songs?ids=${trackData.id}`);
-                    const data = await res.json();
+                    // Use the Rust backend to bypass CORS blocks
+                    const jsonStr = await invoke<string>('fetch_cloud_api', { 
+                        url: `https://saavn.dev/api/songs?ids=${trackData.id}` 
+                    });
+                    const data = JSON.parse(jsonStr);
                     
                     let downloadUrl = "";
                     if (data && data.success && data.data && data.data[0] && data.data[0].downloadUrl) {
