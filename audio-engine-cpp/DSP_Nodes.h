@@ -277,10 +277,11 @@ struct SubwooferNode
     float hp1L, hp1R;
     float lp1L, lp1R;
 
-    // Adaptive Fundamental Tracking & Dynamic Peaking Highlight
+    // Adaptive Fundamental Tracking & Dual-Peak Bi-Modal Highlighting
     float env30_60 = 0.0f, env60_90 = 0.0f, env90_130 = 0.0f;
-    float currentFreq = 70.0f, targetFreq = 70.0f;
-    BiquadPeak highlightL, highlightR;
+    float currentFreq = 95.0f, targetFreq = 95.0f;
+    BiquadPeak subPeakL, subPeakR; // Peak 1: Permanent 45Hz tactile anchor
+    BiquadPeak midPeakL, midPeakR; // Peak 2: Dynamic 85-115Hz acoustic fundamental anchor
     bool isHighlightInit = false;
     float sampleRate = 44100.0f;
 };

@@ -541,13 +541,14 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         p->crossBassL.process(totalBassL, subL, midBassL);
         p->crossBassR.process(totalBassR, subR, midBassR);
 
-        // 3. ADAPTIVE FUNDAMENTAL TRACKING & DYNAMIC PEAK HIGHLIGHTING
-        // Continuously profile spectral energy distribution between deep sub-bass and acoustic/tabla bass
+        // 3. DUAL-PEAK BI-MODAL ARCHITECTURE (With 4 Strict Anti-Mud Safeguards)
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
         if (!p->isHighlightInit)
         {
-            p->highlightL.init(sr, 70.0f, 1.25f, 0.0f);
-            p->highlightR.init(sr, 70.0f, 1.25f, 0.0f);
+            p->subPeakL.init(sr, 45.0f, 1.65f, 0.0f); // Peak 1: Permanent 45Hz tactile anchor
+            p->subPeakR.init(sr, 45.0f, 1.65f, 0.0f);
+            p->midPeakL.init(sr, 95.0f, 1.65f, 0.0f); // Peak 2: Dynamic 85-115Hz acoustic fundamental
+            p->midPeakR.init(sr, 95.0f, 1.65f, 0.0f);
             p->isHighlightInit = true;
         }
 
@@ -561,28 +562,40 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         p->env90_130 = (midEnergy > p->env90_130) ? (p->env90_130 + ENV_ATTACK * (midEnergy - p->env90_130))
                                                   : (p->env90_130 + ENV_RELEASE * (midEnergy - p->env90_130));
 
-        // Dynamically calculate center frequency of dominant musical fundamental (e.g. 45Hz for 808s vs 95Hz for Tabla)
-        float totalEnv = p->env30_60 + p->env90_130 + 0.0001f;
-        float target = (p->env30_60 * 48.0f + p->env90_130 * 102.0f) / totalEnv;
-        if (target < 40.0f) target = 40.0f;
-        if (target > 125.0f) target = 125.0f; // Strictly clamped below vocal/chest resonance to prevent muddiness!
+        // Safeguard 2: Brickwall Psychoacoustic Ceiling (85Hz - 115Hz for Peak 2)
+        // Peak 1 stays anchored at 45Hz for tactile sub-bass weight.
+        // Peak 2 tracks Tabla/kick fundamental without ever bleeding above 125Hz into vocals!
+        float target = 95.0f;
+        if (p->env90_130 > 0.0001f)
+        {
+            target = 85.0f + 30.0f * (p->env90_130 / (p->env30_60 + p->env90_130 + 0.0001f));
+        }
+        if (target < 85.0f) target = 85.0f;
+        if (target > 115.0f) target = 115.0f;
         p->targetFreq = target;
 
         // One-Pole Ballistic Flywheel Slewing (~600ms time constant) ensures non-abrupt frequency shifting
-        // with zero phase warbles or psychoacoustic fatigue
         const float SLEW_COEF = 0.000035f;
         p->currentFreq += SLEW_COEF * (p->targetFreq - p->currentFreq);
 
-        // Update dynamic peaking bell curve (sloping shoulders with Q = 1.25) centered on detected fundamental
-        float boostDb = g_bassGain * 4.5f;
-        p->highlightL.update_coeffs(sr, p->currentFreq, 1.25f, boostDb);
-        p->highlightR.update_coeffs(sr, p->currentFreq, 1.25f, boostDb);
+        // Safeguard 4: Dynamic Headroom Balancing (Anti-Bloat Ducking)
+        // If both sub-bass and mid-bass are blasting simultaneously, gently scale boosts to share headroom cleanly
+        float totalEnergy = p->env30_60 + p->env90_130;
+        float duckFactor = 1.0f / (1.0f + totalEnergy * 1.5f);
+        float subBoostDb = g_bassGain * 5.0f * (0.7f + 0.3f * duckFactor);
+        float midBoostDb = g_bassGain * 4.0f * (0.7f + 0.3f * duckFactor);
 
-        // Apply adaptive fundamental highlight to the isolated bass bands
-        float highlightedSubL = p->highlightL.process(subL);
-        float highlightedSubR = p->highlightR.process(subR);
-        float highlightedMidL = p->highlightL.process(midBassL);
-        float highlightedMidR = p->highlightR.process(midBassR);
+        // Safeguard 1: Tighter Q = 1.65 creates a natural acoustic valley dip around 65-75Hz!
+        p->subPeakL.update_coeffs(sr, 45.0f, 1.65f, subBoostDb);
+        p->subPeakR.update_coeffs(sr, 45.0f, 1.65f, subBoostDb);
+        p->midPeakL.update_coeffs(sr, p->currentFreq, 1.65f, midBoostDb);
+        p->midPeakR.update_coeffs(sr, p->currentFreq, 1.65f, midBoostDb);
+
+        // Apply Bi-Modal peaks independently to their corresponding bands
+        float highlightedSubL = p->subPeakL.process(subL);
+        float highlightedSubR = p->subPeakR.process(subR);
+        float highlightedMidL = p->midPeakL.process(midBassL);
+        float highlightedMidR = p->midPeakR.process(midBassR);
 
         float drive = g_bassGain * 1.2f;
         
@@ -605,8 +618,7 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float processedSubL = saturate(highlightedSubL * drive * subMult);
         float processedSubR = saturate(highlightedSubR * drive * subMult);
 
-        // Mid-Bass (80-180Hz) gets a clean, linear multiplier to restore kick body & bass guitar
-        // without adding muddy harmonic distortion to the low-mids.
+        // Safeguard 3: Mid-Bass (80-180Hz) gets clean linear multiplication (ZERO distortion)
         float processedMidBassL = highlightedMidL * drive * midMult;
         float processedMidBassR = highlightedMidR * drive * midMult;
 
