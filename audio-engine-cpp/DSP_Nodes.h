@@ -193,7 +193,7 @@ struct StereoWidenerNode
     float delayR[CROSSFEED_DELAY_SAMPLES];
     int delayIdx;
     float lpStateL, lpStateR;
-    float sideLp;
+    float sideLp, sideLp2;
 };
 
 #define SURROUND_HAAS_DELAY 882
@@ -324,8 +324,8 @@ struct LimiterNode
 {
     ma_node_base baseNode;
     float boost, gainEnv;
-    // CRITICAL FIX 3: Added missing attack coefficient
     float attackCoef, releaseCoef;
+    float peakEnv; // Anti-motorboating envelope peak follower
 
     float dlyL[LIMITER_LOOKAHEAD_SAMPLES];
     float dlyR[LIMITER_LOOKAHEAD_SAMPLES];

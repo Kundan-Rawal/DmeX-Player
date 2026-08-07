@@ -1307,6 +1307,7 @@ extern "C"
         g_limiterNode.ceiling = 0.98f;
         g_limiterNode.boost = 1.0f;
         g_limiterNode.gainEnv = 1.0f;
+        g_limiterNode.peakEnv = 0.0f;
         g_limiterNode.releaseCoef = expf(-1.0f / (0.050f * (float)sr)); // 50ms release
         // g_limiterNode.delayIdx = 0;
 

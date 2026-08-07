@@ -3,7 +3,11 @@ fn main() {
     tauri_build::build();
 
     // Compile the custom C++ DSP engine
-    println!("cargo:rerun-if-changed=../../audio-engine-cpp/main.cpp"); println!("cargo:rerun-if-changed=../../audio-engine-cpp/CommandParser.cpp");
+    println!("cargo:rerun-if-changed=../../audio-engine-cpp/main.cpp");
+    println!("cargo:rerun-if-changed=../../audio-engine-cpp/CommandParser.cpp");
+    println!("cargo:rerun-if-changed=../../audio-engine-cpp/DSP_Nodes.cpp");
+    println!("cargo:rerun-if-changed=../../audio-engine-cpp/DSP_Nodes.h");
+    println!("cargo:rerun-if-changed=../../audio-engine-cpp/EngineCore.cpp");
     
     cc::Build::new()
         .cpp(true)

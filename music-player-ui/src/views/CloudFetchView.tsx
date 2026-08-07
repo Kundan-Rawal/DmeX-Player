@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Play, Download, Cloud } from 'lucide-react';
-import { Track } from '../types';
+import { Search, Play, Cloud } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface CloudFetchViewProps {

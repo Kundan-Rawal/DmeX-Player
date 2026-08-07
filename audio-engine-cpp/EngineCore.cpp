@@ -318,6 +318,7 @@ engine_ready:
     memset(&g_limiterNode, 0, sizeof(g_limiterNode));
     g_limiterNode.boost = 1.0f;
     g_limiterNode.gainEnv = 1.0f;
+    g_limiterNode.peakEnv = 0.0f;
     g_limiterNode.attackCoef = expf(-1.0f / (0.0005f * (float)sr)); // Ultra-fast attack to prevent DAC hard-clipping
     g_limiterNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
     memset(g_limiterNode.dlyL, 0, sizeof(g_limiterNode.dlyL));

@@ -104,12 +104,13 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         float M = (mixL + mixR) * 0.5f;
         float S = (mixL - mixR) * 0.5f;
         
-        // Isolate the bass from the Side channel so we don't widen the sub-bass
-        // (This keeps the bass exactly at its original stereo width, preventing diffusion)
-        const float SIDE_HP_COEF = 0.05f; // ~300Hz
+        // Isolate the bass from the Side channel so we don't widen the sub-bass or kick body
+        // 2-Pole steeper slope (12 dB/oct) prevents 100-180Hz from leaking into widening and causing phase hollowing!
+        const float SIDE_HP_COEF = 0.08f; // ~350Hz
         p->sideLp += SIDE_HP_COEF * (S - p->sideLp);
-        float sideHighs = S - p->sideLp; // The treble/mids of the Side channel
-        float sideLows = p->sideLp;      // The bass of the Side channel
+        p->sideLp2 += SIDE_HP_COEF * (p->sideLp - p->sideLp2);
+        float sideLows = p->sideLp2;     // The bass of the Side channel
+        float sideHighs = S - sideLows;  // The treble/mids of the Side channel
 
         float effectiveWidth = p->width;
         if (g_isLaptopSpeaker) {
@@ -153,8 +154,8 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         float L = pIn[i * 2];
         float R = pIn[i * 2 + 1];
 
-        // 0. Extract Bass (Subwoofer Bypass at 180Hz)
-        // We completely bypass the 180Hz bass from the 3D delays to keep it perfectly punchy and clear.
+        // 0. Extract Bass (Subwoofer Crossover at 180Hz)
+        // Keep 100% of bass out of the Haas delay lines so zero 18ms comb filtering or phase cancellation occurs!
         float bassL, nonBassL, bassR, nonBassR;
         p->crossSubwooferL.process(L, bassL, nonBassL);
         p->crossSubwooferR.process(R, bassR, nonBassR);
@@ -185,9 +186,9 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         float rearR = p->rearDelayBufR[readIdx];
         p->rearIdx = (p->rearIdx + 1) % SURROUND_HAAS_DELAY;
 
-        // Head shadow low-pass on rear speakers: 0.45f (~4.5 kHz) lifts sound UP to ear level
-        // instead of trapping it "back down" on the floor!
-        const float REAR_LP_COEF = 0.45f;
+        // Head shadow low-pass on rear speakers: 0.25f (~2.5 kHz) creates acoustic shadow / distance cue
+        // projecting the sound "around" you rather than directly inside your ear!
+        const float REAR_LP_COEF = 0.25f;
         p->rearLpL += REAR_LP_COEF * (rearL - p->rearLpL);
         p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
         
@@ -195,11 +196,12 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         const float TOP_NOTCH_COEF = 0.45f; 
         p->notchTopL1 += TOP_NOTCH_COEF * (p->rearLpL - p->notchTopL1);
         p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
-        float rearNotchL = p->rearLpL - (p->rearLpL - p->notchTopL2) * 0.25f;
+        // Deep 75% notch forces the human brain's HRTF to perceive strong vertical "up and down" elevation!
+        float rearNotchL = p->rearLpL - (p->rearLpL - p->notchTopL2) * 0.75f;
 
         p->notchTopR1 += TOP_NOTCH_COEF * (p->rearLpR - p->notchTopR1);
         p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
-        float rearNotchR = p->rearLpR - (p->rearLpR - p->notchTopR2) * 0.25f;
+        float rearNotchR = p->rearLpR - (p->rearLpR - p->notchTopR2) * 0.75f;
 
         // Keep phase POSITIVE (+) to prevent artificial hollow/phasey bathroom reverb!
         float virtualRearL = rearNotchL * 0.25f * intensity;
@@ -213,9 +215,12 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         float outL = virtualCenterL + frontSideL + virtualRearL;
         float outR = virtualCenterR + frontSideR + virtualRearR;
 
-        // 6. Sum Bypassed Subwoofer
-        pOut[i * 2] = outL + bassL;
-        pOut[i * 2 + 1] = outR + bassR;
+        // 6. Sum Acoustic Room-Compensated Bass
+        // When intensity > 0 (Immersive Mode), the 3D soundstage expands. We apply a clean, phase-perfect 
+        // room presence compensation so the bass scales cleanly with the room without overdriving IEM drivers!
+        float roomBassComp = 1.0f + (0.15f * intensity);
+        pOut[i * 2] = outL + (bassL * roomBassComp);
+        pOut[i * 2 + 1] = outR + (bassR * roomBassComp);
     }
 }
 ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0};
@@ -420,12 +425,12 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         }
         oL *= 0.25f;
         oR *= 0.25f;
-        oL = ap_tick(&r->apL[1], ap_tick(&r->apL[0], oL));
-        oR = ap_tick(&r->apR[1], ap_tick(&r->apR[0], oR));
-
-        // 4. Output: The dry signal (iL/iR) is STILL 100% UNTOUCHED
-        pOut[i * 2] = iL * dry + oL * r->wetMix;
-        pOut[i * 2 + 1] = iR * dry + oR * r->wetMix;
+        // 4. Output: Keep 100% of the bass (<180 Hz) at full 1.0x volume so Reverb never attenuates low-end punch!
+        // Only apply the wet/dry crossfade to the mids and highs (>180 Hz).
+        float bassL = iL - hpL;
+        float bassR = iR - hpR;
+        pOut[i * 2] = bassL + (hpL * dry + oL * r->wetMix);
+        pOut[i * 2 + 1] = bassR + (hpR * dry + oR * r->wetMix);
     }
 }
 ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
@@ -523,13 +528,12 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        if (g_bassGain < 0.001f)
-        {
-            // Safe to bypass only if we are in earphone mode and bass is 0
-            pOut[i * 2] = L;
-            pOut[i * 2 + 1] = R;
-            continue;
-        }
+        // BASE MODE TACTILE FOUNDATION (Never bypass the subwoofer node!)
+        // Even when the Subwoofer Bass slider is 0.0 (base mode), we provide an always-active 
+        // warm tactile foundation (0.35 effective gain = ~1.75 dB sub boost & warm saturation) 
+        // so bass is never missing or thin on standard playback!
+        // We apply a rapid-ramp power curve (powf) so the bass slider is highly responsive even at 30-40%!
+        float effectiveGain = 0.35f + (powf(g_bassGain, 0.75f) * 0.85f);
 
         // 1. Isolate everything below 180Hz (The entire bass range)
         float totalBassL, nonBassL, totalBassR, nonBassR;
@@ -545,8 +549,8 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
         if (!p->isHighlightInit)
         {
-            p->subPeakL.init(sr, 45.0f, 1.65f, 0.0f); // Peak 1: Permanent 45Hz tactile anchor
-            p->subPeakR.init(sr, 45.0f, 1.65f, 0.0f);
+            p->subPeakL.init(sr, 45.0f, 3.2f, 0.0f); // Peak 1: Massive dominant 45Hz subwoofer tactile anchor
+            p->subPeakR.init(sr, 45.0f, 3.2f, 0.0f);
             p->midPeakL.init(sr, 95.0f, 1.65f, 0.0f); // Peak 2: Dynamic 85-115Hz acoustic fundamental
             p->midPeakR.init(sr, 95.0f, 1.65f, 0.0f);
             p->isHighlightInit = true;
@@ -582,8 +586,8 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         // If both sub-bass and mid-bass are blasting simultaneously, gently scale boosts to share headroom cleanly
         float totalEnergy = p->env30_60 + p->env90_130;
         float duckFactor = 1.0f / (1.0f + totalEnergy * 1.5f);
-        float subBoostDb = g_bassGain * 5.0f * (0.7f + 0.3f * duckFactor);
-        float midBoostDb = g_bassGain * 4.0f * (0.7f + 0.3f * duckFactor);
+        float subBoostDb = effectiveGain * 5.0f * (0.7f + 0.3f * duckFactor);
+        float midBoostDb = effectiveGain * 4.0f * (0.7f + 0.3f * duckFactor);
 
         // Safeguard 1: Tighter Q = 1.65 creates a natural acoustic valley dip around 65-75Hz!
         p->subPeakL.update_coeffs(sr, 45.0f, 1.65f, subBoostDb);
@@ -597,22 +601,22 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float highlightedMidL = p->midPeakL.process(midBassL);
         float highlightedMidR = p->midPeakR.process(midBassR);
 
-        float drive = g_bassGain * 1.2f;
+        float drive = effectiveGain * 1.2f;
         
-        // Soft saturation wave-shaper for Sub-Bass only
+        // Clean analog tanh soft saturation wave-shaper for Sub-Bass only
+        // Smooth hyperbolic tangent: never flat-tops or generates square-wave harmonics that rattle IEM drivers!
         auto saturate = [](float x) {
-            float ax = fabsf(x);
-            if (ax > 1.0f) ax = 1.0f;
-            return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
+            return tanhf(x * 0.90f);
         };
 
-        // Deep Sub-Bass (0-80Hz) gets the heavy saturated multiplier for massive thump
+        // Deep Sub-Bass (0-80Hz) multiplier for massive thump without digital clipping overload
 #ifdef __ANDROID__
-        float subMult = 1.6f; // Prevent 0 dBFS hard clipping on low-headroom Android DACs
-        float midMult = 0.8f; // Reduce 80-180Hz so it doesn't overshadow the weakened sub-bass
+        // Protected by tanh diaphragm bounding, we can now unleash 2.2x heavy sub-bass!
+        float subMult = 2.2f; 
+        float midMult = 0.8f; // Reduce 80-180Hz so it doesn't overshadow the sub-bass
 #else
-        float subMult = 3.0f;
-        float midMult = 1.5f;
+        float subMult = 1.45f; // Sane, studio-grade multiplier for high-end IEMs & headphones (e.g. Realme Buds 2 Pro)
+        float midMult = 0.85f;
 #endif
 
         float processedSubL = saturate(highlightedSubL * drive * subMult);
@@ -622,10 +626,22 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float processedMidBassL = highlightedMidL * drive * midMult;
         float processedMidBassR = highlightedMidR * drive * midMult;
 
+        // Anti-Rattle Diaphragm Protection: Smoothly bound the combined low-frequency energy to ~0.75 max
+        // so IEM driver diaphragms never hit maximum physical excursion when bass and vocals play together!
+        float combinedBassL = processedSubL + processedMidBassL;
+        float combinedBassR = processedSubR + processedMidBassR;
+        auto protectExcursion = [](float b) {
+            float ab = fabsf(b);
+            if (ab <= 0.60f) return b;
+            float over = ab - 0.60f;
+            float lim = 0.60f + 0.15f * tanhf(over / 0.15f);
+            return (b > 0) ? lim : -lim;
+        };
+
         // Sum the Sub, Mid-Bass, and the completely untouched non-bass signal (>180Hz)
-        // This guarantees absolute zero phase smearing in the midrange while providing huge, wide bass.
-        pOut[i * 2] = nonBassL + processedSubL + processedMidBassL;
-        pOut[i * 2 + 1] = nonBassR + processedSubR + processedMidBassR;
+        // This guarantees absolute zero phase smearing in the midrange while providing huge, wide bass without rattling.
+        pOut[i * 2] = nonBassL + protectExcursion(combinedBassL);
+        pOut[i * 2 + 1] = nonBassR + protectExcursion(combinedBassR);
     }
 
 }
@@ -847,8 +863,15 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         float L = pIn[i * 2] * p->boost * multiplier;
         float R = pIn[i * 2 + 1] * p->boost * multiplier;
 
-        // 2. Peak Detection (Find the loudest channel)
-        float peak = fmaxf(fabsf(L), fabsf(R));
+        // 2. Peak Detection with Envelope Inertia (Find loudest channel with peak follower)
+        // Prevents 45-60Hz sub-bass zero-crossings from causing intermodulation gain pumping ("bag bag bag bag") on vocals!
+        float rawPeak = fmaxf(fabsf(L), fabsf(R));
+        if (rawPeak > p->peakEnv) {
+            p->peakEnv = rawPeak;
+        } else {
+            p->peakEnv = p->peakEnv * 0.9995f + rawPeak * 0.0005f; // ~35ms inertia at 44.1kHz
+        }
+        float peak = p->peakEnv;
 
         // 3. Calculate Target Gain (How much do we need to duck to prevent clipping?)
         float targetGain = 1.0f;

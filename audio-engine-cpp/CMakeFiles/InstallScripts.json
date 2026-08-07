@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/DmeX-Player/audio-engine-cpp/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
