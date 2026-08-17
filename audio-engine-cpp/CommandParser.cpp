@@ -249,8 +249,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
         g_subwooferNode.hp1L = g_subwooferNode.hp1R = 0.0f;
 
         memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
-        memset(g_spatializerNode.rearDelayBufL, 0, sizeof(g_spatializerNode.rearDelayBufL));
-        memset(g_spatializerNode.rearDelayBufR, 0, sizeof(g_spatializerNode.rearDelayBufR));
+        for (int i = 0; i < 3; ++i) {
+            memset(g_spatializerNode.rearApL[i].buf, 0, sizeof(g_spatializerNode.rearApL[i].buf));
+            memset(g_spatializerNode.rearApR[i].buf, 0, sizeof(g_spatializerNode.rearApR[i].buf));
+        }
         
         g_spatializerNode.rearLpL = g_spatializerNode.rearLpR = 0.0f;
         g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;

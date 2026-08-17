@@ -12,18 +12,6 @@
 // ================================================================
 // AUXILIARY HIGH-PASS FILTER (For Spatial/Reverb Sends)
 // ================================================================
-#include "miniaudio.h"
-#include <atomic>
-#include <vector>
-#include <cmath>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// ================================================================
-// AUXILIARY HIGH-PASS FILTER (For Spatial/Reverb Sends)
-// ================================================================
 
 // --- ADD THESE NEW STRUCTS ---
 
@@ -196,6 +184,17 @@ struct StereoWidenerNode
     float sideLp, sideLp2;
 };
 
+#define MAX_AP_BUF 600
+
+struct AllPassFilter
+{
+    float buf[MAX_AP_BUF];
+    int size, idx;
+    float feedback;
+};
+
+void ap_init(AllPassFilter *a, int sz, float fb);
+
 #define SURROUND_HAAS_DELAY 882
 #define CENTER_ITD_DELAY 22
 
@@ -210,10 +209,9 @@ struct PsychoacousticNode
     float centerDelayBuf[CENTER_ITD_DELAY];
     int centerIdx;
 
-    // Rear Haas Delay
-    float rearDelayBufL[SURROUND_HAAS_DELAY];
-    float rearDelayBufR[SURROUND_HAAS_DELAY];
-    int rearIdx;
+    // Rear Decorrelation (Allpass Filter Bank)
+    AllPassFilter rearApL[3];
+    AllPassFilter rearApR[3];
 
     // Low-Pass states for Rear
     float rearLpL, rearLpR;
@@ -251,12 +249,7 @@ struct CombFilter
     float feedback, damp, store;
 };
 
-struct AllPassFilter
-{
-    float buf[MAX_AP_BUF];
-    int size, idx;
-    float feedback;
-};
+
 
 struct ReverbNode
 {
@@ -357,6 +350,7 @@ struct AudioRestorationNode
     
     // Wave shaper states
     float x1L = 0, x1R = 0;
+    float prevTrebleL = 0, prevTrebleR = 0;
     
     // Filter states for perfect separation
     LinkwitzRiley4 crossoverL, crossoverR;

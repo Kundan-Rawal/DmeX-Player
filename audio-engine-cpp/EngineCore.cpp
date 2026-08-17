@@ -268,6 +268,17 @@ engine_ready:
     memset(&g_spatializerNode, 0, sizeof(g_spatializerNode));
     g_spatializerNode.crossSubwooferL.init((float)sr, 180.0f);
     g_spatializerNode.crossSubwooferR.init((float)sr, 180.0f);
+    
+    // Initialize Decorrelation Allpass filters for Rear
+    // Using prime-ish numbers for decorrelation delays to scatter phases completely
+    ap_init(&g_spatializerNode.rearApL[0], 227, 0.6f);
+    ap_init(&g_spatializerNode.rearApL[1], 401, 0.6f);
+    ap_init(&g_spatializerNode.rearApL[2], 587, 0.6f);
+    
+    ap_init(&g_spatializerNode.rearApR[0], 233, 0.6f);
+    ap_init(&g_spatializerNode.rearApR[1], 409, 0.6f);
+    ap_init(&g_spatializerNode.rearApR[2], 593, 0.6f);
+    
     ma_node_config c3 = ma_node_config_init();
     c3.vtable = &g_psychoacoustic_vtable;
     c3.pInputChannels = g_inCh;
@@ -355,9 +366,9 @@ engine_ready:
 
     // THE ONLY WIRING THAT SHOULD EXIST FOR THIS SECTION:
     ma_node_attach_output_bus(&g_convolutionNode, 0, &g_audiophileEQNode, 0);
-    ma_node_attach_output_bus(&g_audiophileEQNode, 0, &g_subwooferNode, 0);
-    ma_node_attach_output_bus(&g_subwooferNode, 0, &g_compressorNode, 0);
-    ma_node_attach_output_bus(&g_compressorNode, 0, &g_exciterNode, 0);
+    ma_node_attach_output_bus(&g_audiophileEQNode, 0, &g_compressorNode, 0);
+    ma_node_attach_output_bus(&g_compressorNode, 0, &g_subwooferNode, 0);
+    ma_node_attach_output_bus(&g_subwooferNode, 0, &g_exciterNode, 0);
     ma_node_attach_output_bus(&g_exciterNode, 0, &g_widenerNode, 0);
 
     // --- 8D Amputated. Direct connection to Haas Spatializer ---

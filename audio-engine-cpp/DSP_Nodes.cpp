@@ -22,6 +22,26 @@ extern bool g_isLaptopSpeaker;
 extern bool g_is8DModeOn;
 
 // ================================================================
+// ALLPASS FUNCTIONS
+// ================================================================
+
+void ap_init(AllPassFilter *a, int sz, float fb)
+{
+    memset(a->buf, 0, sizeof(a->buf));
+    a->size = sz;
+    a->idx = 0;
+    a->feedback = fb;
+}
+
+static float ap_tick(AllPassFilter *a, float in)
+{
+    float b = a->buf[a->idx];
+    a->buf[a->idx] = in + b * a->feedback;
+    a->idx = (a->idx + 1) % a->size;
+    return b - in;
+}
+
+// ================================================================
 // STUDIO AURAL EXCITER
 // ================================================================
 static void exciter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
@@ -175,16 +195,12 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         float virtualCenterL = center;
         float virtualCenterR = center;
 
-        // 3. Virtual Rear (Surround L/R)
-        // Store in delay buffer and read at 1.5ms (66 samples) distance cue.
-        // 1.5ms is below the Haas echo threshold, creating distinct physical rear separation
-        // without sounding like artificial reverb or echo!
-        p->rearDelayBufL[p->rearIdx] = sideL;
-        p->rearDelayBufR[p->rearIdx] = sideR;
-        int readIdx = (p->rearIdx + SURROUND_HAAS_DELAY - 66) % SURROUND_HAAS_DELAY;
-        float rearL = p->rearDelayBufL[readIdx];
-        float rearR = p->rearDelayBufR[readIdx];
-        p->rearIdx = (p->rearIdx + 1) % SURROUND_HAAS_DELAY;
+        // 3. Virtual Rear Decorrelation (Allpass Bank)
+        // Instead of a static Haas delay which causes metallic comb filtering, we use
+        // a 3-stage allpass filter bank to scatter the phase of the side signals.
+        // This creates a diffuse, natural spaciousness that mimics real room reflections!
+        float rearL = ap_tick(&p->rearApL[2], ap_tick(&p->rearApL[1], ap_tick(&p->rearApL[0], sideL)));
+        float rearR = ap_tick(&p->rearApR[2], ap_tick(&p->rearApR[1], ap_tick(&p->rearApR[0], sideR)));
 
         // Head shadow low-pass on rear speakers: 0.45f (~4.5 kHz) lifts sound UP to ear level
         // without muffling the vital vocal breath and cymbal clarity in the surround channels!
@@ -357,13 +373,6 @@ void comb_init(CombFilter *c, int sz, float fb, float dp)
     c->damp = dp;
     c->store = 0;
 }
-void ap_init(AllPassFilter *a, int sz, float fb)
-{
-    memset(a->buf, 0, sizeof(a->buf));
-    a->size = sz;
-    a->idx = 0;
-    a->feedback = fb;
-}
 void reverb_init_filters(ReverbNode *r)
 {
     float fb = r->roomSize, dp = r->damp;
@@ -387,13 +396,6 @@ static float comb_tick(CombFilter *c, float in)
     c->buf[c->idx] = in + c->store * c->feedback;
     c->idx = (c->idx + 1) % c->size;
     return o;
-}
-static float ap_tick(AllPassFilter *a, float in)
-{
-    float b = a->buf[a->idx];
-    a->buf[a->idx] = in + b * a->feedback;
-    a->idx = (a->idx + 1) % a->size;
-    return b - in;
 }
 static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
@@ -430,8 +432,11 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
             oL += comb_tick(&r->combL[j], feed);
             oR += comb_tick(&r->combR[j], feed);
         }
-        oL *= 0.25f;
-        oR *= 0.25f;
+        
+        // Apply soft clipping to prevent 32-bit float->int wrap distortion on heavy feedback
+        oL = tanhf(oL * 0.25f);
+        oR = tanhf(oR * 0.25f);
+        
         // 4. Output: Keep 100% of the bass (<180 Hz) at full 1.0x volume so Reverb never attenuates low-end punch!
         // Only apply the wet/dry crossfade to the mids and highs (>180 Hz).
         float bassL = iL - hpL;
@@ -442,12 +447,6 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
 }
 ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
 
-// ================================================================
-// SUBWOOFER NODE (Dynamic Thump Expander)
-// ================================================================
-// ================================================================
-// SUBWOOFER NODE (Dynamic Thump Expander)
-// ================================================================
 // ================================================================
 // SUBWOOFER NODE (Dynamic Thump Expander & Speaker Protection)
 // ================================================================
@@ -656,6 +655,12 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
 ma_node_vtable g_subwoofer_vtable = {subwoofer_process, NULL, 1, 1, 0};
 
 // ================================================================
+// CORE ENGINE DSP NODES
+// ================================================================
+
+
+
+// ================================================================
 // CONVOLUTION NODE
 // ================================================================
 static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
@@ -680,7 +685,7 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
         return;
     }
 
-    const float dry = (p->wetMix > 0.99f) ? 0.0f : 1.0f;
+    const float dry = 1.0f - p->wetMix;
     const float wet = p->wetMix;
     const float HP_COEF = 0.011f;
     const float LP_COEF = 0.92f;
@@ -866,7 +871,7 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         // 1. Read raw input and apply the user's boost
-        float multiplier = g_isLaptopSpeaker ? 2.5f : 1.0f; // Aggressively boost laptop speakers into the lookahead limiter for major RMS gains
+        float multiplier = g_isLaptopSpeaker ? 1.3f : 1.0f; // Give laptop speakers a reasonable boost without squashing the limiter
         float L = pIn[i * 2] * p->boost * multiplier;
         float R = pIn[i * 2 + 1] * p->boost * multiplier;
 
@@ -1037,24 +1042,6 @@ ma_node_vtable g_dynamic_spatializer_vtable = {
 // AUDIO RESTORATION (FFT DENOISER & UPSCALER)
 // ================================================================
 
-// Basic recursive Cooley-Tukey FFT for the Denoiser
-void simple_fft(std::vector<std::complex<float>>& x) {
-    const size_t N = x.size();
-    if (N <= 1) return;
-    std::vector<std::complex<float>> even(N / 2), odd(N / 2);
-    for (size_t i = 0; i < N / 2; i++) {
-        even[i] = x[i * 2];
-        odd[i] = x[i * 2 + 1];
-    }
-    simple_fft(even);
-    simple_fft(odd);
-    for (size_t k = 0; k < N / 2; k++) {
-        std::complex<float> t = std::polar(1.0f, -2.0f * (float)M_PI * k / N) * odd[k];
-        x[k] = even[k] + t;
-        x[k + N / 2] = even[k] - t;
-    }
-}
-
 static void audio_restoration_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     AudioRestorationNode *p = (AudioRestorationNode *)pNode;
@@ -1089,10 +1076,22 @@ static void audio_restoration_process(ma_node *pNode, const float **ppFramesIn, 
 
         // 3. Bitwise Predictive Upscale (Synthesize upper harmonic air)
         // Mathematically square the treble to generate the exact Octave (2nd Harmonic)
-        // This perfectly predicts the missing 16kHz+ frequencies without ANY crackly tanhf distortion!
-        // We multiply by 15.0f to match the previous amplitude since squaring numbers < 1.0 makes them much smaller
-        float synthL = (trebleL * trebleL) * 15.0f;
-        float synthR = (trebleR * trebleR) * 15.0f;
+        // We use a cheap 2x oversampling (linear interpolation) to push aliasing distortion out of the audible band!
+        float midTrebleL = (p->prevTrebleL + trebleL) * 0.5f;
+        float midTrebleR = (p->prevTrebleR + trebleR) * 0.5f;
+        
+        float synthL1 = (p->prevTrebleL * p->prevTrebleL) * 15.0f;
+        float synthR1 = (p->prevTrebleR * p->prevTrebleR) * 15.0f;
+        
+        float synthL2 = (midTrebleL * midTrebleL) * 15.0f;
+        float synthR2 = (midTrebleR * midTrebleR) * 15.0f;
+        
+        // Simple average downsample
+        float synthL = (synthL1 + synthL2) * 0.5f;
+        float synthR = (synthR1 + synthR2) * 0.5f;
+        
+        p->prevTrebleL = trebleL;
+        p->prevTrebleR = trebleR;
         
         // High-Pass filter at 10kHz instantly strips the mathematically generated DC offset (0Hz)
         // and removes IMD difference frequencies, leaving only pure, predictive crisp 16kHz+ air!

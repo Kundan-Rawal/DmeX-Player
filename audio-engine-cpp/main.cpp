@@ -620,7 +620,7 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
 
     // Headphone EQ mode (wetMix=1.0): mute dry — the IR IS the corrected signal.
     // Room reverb mode (wetMix<1.0): blend dry+wet normally.
-    const float dry = (p->wetMix > 0.99f) ? 0.0f : 1.0f;
+    const float dry = 1.0f - p->wetMix;
     const float wet = p->wetMix;
     const float HP_COEF = 0.011f; // ~80 Hz
     const float LP_COEF = 0.92f;  // ~16 kHz
@@ -1095,15 +1095,15 @@ static void updateRouting()
             ma_node_attach_output_bus(cur, 0, &g_bassNode, 0);
             cur = (ma_node *)&g_trebleNode;
         }
-        if (g_bassGain > 0.01f)
-        {
-            ma_node_attach_output_bus(cur, 0, &g_subwooferNode, 0);
-            cur = (ma_node *)&g_subwooferNode;
-        }
         if (g_isCompressOn)
         {
             ma_node_attach_output_bus(cur, 0, &g_compressorNode, 0);
             cur = (ma_node *)&g_compressorNode;
+        }
+        if (g_bassGain > 0.01f)
+        {
+            ma_node_attach_output_bus(cur, 0, &g_subwooferNode, 0);
+            cur = (ma_node *)&g_subwooferNode;
         }
         // Exciter, widener, spatializer, algo reverb — BLOCKED in conv mode
     }
@@ -1119,6 +1119,11 @@ static void updateRouting()
         {
             ma_node_attach_output_bus(cur, 0, &g_bassNode, 0);
             cur = (ma_node *)&g_trebleNode;
+        }
+        if (g_isCompressOn)
+        {
+            ma_node_attach_output_bus(cur, 0, &g_compressorNode, 0);
+            cur = (ma_node *)&g_compressorNode;
         }
         if (g_bassGain > 0.01f)
         {
@@ -1146,11 +1151,7 @@ static void updateRouting()
             ma_node_attach_output_bus(cur, 0, &g_reverbNode, 0);
             cur = (ma_node *)&g_reverbNode;
         }
-        if (g_isCompressOn)
-        {
-            ma_node_attach_output_bus(cur, 0, &g_compressorNode, 0);
-            cur = (ma_node *)&g_compressorNode;
-        }
+
     }
 
     // Limiter and meter always at the tail
@@ -1307,8 +1308,8 @@ extern "C"
         g_limiterNode.ceiling = 0.98f;
         g_limiterNode.boost = 1.0f;
         g_limiterNode.gainEnv = 1.0f;
-        g_limiterNode.peakEnv = 0.0f;
-        g_limiterNode.releaseCoef = expf(-1.0f / (0.050f * (float)sr)); // 50ms release
+        // g_limiterNode.peakEnv = 0.0f;
+        // g_limiterNode.releaseCoef = expf(-1.0f / (0.050f * (float)sr)); // 50ms release
         // g_limiterNode.delayIdx = 0;
 
         // Meter — always last
