@@ -539,7 +539,8 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         // warm tactile foundation (0.35 effective gain = ~1.75 dB sub boost & warm saturation) 
         // so bass is never missing or thin on standard playback!
         // We apply a rapid-ramp power curve (powf) so the bass slider is highly responsive even at 30-40%!
-        float effectiveGain = 0.35f + (powf(g_bassGain, 0.75f) * 0.85f);
+        float safeBass = (g_bassGain < 0.0f) ? 0.0f : g_bassGain;
+        float effectiveGain = powf(safeBass, 0.75f);
 
         // 1. Isolate everything below 180Hz (The entire bass range)
         float totalBassL, nonBassL, totalBassR, nonBassR;
@@ -777,26 +778,28 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. ISOLATE BASS FOR DETECTION (So treble spikes don't trigger the compressor)
+        // 1. ISOLATE HIGHS FOR DETECTION (So Subwoofer bass boost doesn't trigger the compressor!)
         c->lpStateL += 0.015f * (L - c->lpStateL);
         c->lpStateR += 0.015f * (R - c->lpStateR);
-        float maxLowPeak = fmaxf(fabsf(c->lpStateL), fabsf(c->lpStateR));
+        float highDetL = L - c->lpStateL;
+        float highDetR = R - c->lpStateR;
+        float maxHighPeak = fmaxf(fabsf(highDetL), fabsf(highDetR));
 
-        if (maxLowPeak > c->envLow)
+        if (maxHighPeak > c->envHigh)
         {
-            c->envLow = c->envLow * c->attackCoef + maxLowPeak * (1.0f - c->attackCoef);
+            c->envHigh = c->envHigh * c->attackCoef + maxHighPeak * (1.0f - c->attackCoef);
         }
         else
         {
-            c->envLow = c->envLow * c->releaseCoef + maxLowPeak * (1.0f - c->releaseCoef);
+            c->envHigh = c->envHigh * c->releaseCoef + maxHighPeak * (1.0f - c->releaseCoef);
         }
 
-        // Calculate gain reduction ONLY for the low band
-        float lowGain = 1.0f;
-        if (c->envLow > thresh && thresh > 0.001f)
+        // Calculate gain reduction ONLY for the high band
+        float highGain = 1.0f;
+        if (c->envHigh > thresh && thresh > 0.001f)
         {
-            float over = c->envLow - thresh;
-            lowGain = thresh / (thresh + over * 0.35f); // Golden mid-point: controlled punch without boomy excess or over-clamping
+            float over = c->envHigh - thresh;
+            highGain = thresh / (thresh + over * 0.35f); 
         }
 
         // 2. DELAY LINE
@@ -807,17 +810,17 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
         c->dlyIdx = (c->dlyIdx + 1) % COMP_LOOKAHEAD_SAMPLES;
 
         // 3. SPLIT DELAYED SIGNAL INTO LOW AND HIGH (Phase-coherent LR4)
-        float bassL, highL, bassR, highR;
-        c->crossL.process(dL, bassL, highL);
-        c->crossR.process(dR, bassR, highR);
+        float bassL, highL_d, bassR, highR_d;
+        c->crossL.process(dL, bassL, highL_d);
+        c->crossR.process(dR, bassR, highR_d);
 
         // Keep legacy states updated in case of external inspections
         c->delayLpStateL = bassL;
         c->delayLpStateR = bassR;
 
-        // 4. THE FIX: Apply gain ONLY to bass. Highs/Vocals bypass compression entirely.
-        pOut[i * 2] = ((bassL * lowGain) + highL) * makeup;
-        pOut[i * 2 + 1] = ((bassR * lowGain) + highR) * makeup;
+        // 4. THE FIX: Apply gain ONLY to highs. Bass bypasses compression entirely!
+        pOut[i * 2] = (bassL + (highL_d * highGain)) * makeup;
+        pOut[i * 2 + 1] = (bassR + (highR_d * highGain)) * makeup;
     }
 }
 ma_node_vtable g_multiband_compressor_vtable = {multiband_compressor_process, NULL, 1, 1, 0};
@@ -963,7 +966,8 @@ static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn
     *pFrameCountOut = fc;
 
     // LFO Speed: 0.15 Hz (One full circle around the head every 6.6 seconds)
-    float lfoStep = (2.0f * (float)M_PI * 0.15f) / 44100.0f;
+    float sr = (p->sampleRate > 0) ? p->sampleRate : 48000.0f;
+    float lfoStep = (2.0f * (float)M_PI * 0.15f) / sr;
 
     for (ma_uint32 i = 0; i < fc; i++)
     {
@@ -1011,7 +1015,7 @@ static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn
         p->delayL[p->writeIdx] = pannedMidL;
         p->delayR[p->writeIdx] = pannedMidR;
 
-        float maxDelaySamples = 12.0f * (44100.0f / 1000.0f); // 12ms
+        float maxDelaySamples = 12.0f * (sr / 1000.0f); // 12ms
 
         // If sound is left (lfoVal < 0), delay the Right ear. Vice versa.
         int delayOffsetL = (lfoVal > 0.0f) ? (int)(lfoVal * maxDelaySamples) : 0;

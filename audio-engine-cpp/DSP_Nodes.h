@@ -158,6 +158,7 @@ struct DynamicSpatializerNode
     float delayL[HAAS_BUFFER_SIZE];
     float delayR[HAAS_BUFFER_SIZE];
     int writeIdx;
+    float sampleRate;
 };
 
 extern ma_node_vtable g_dynamic_spatializer_vtable;
