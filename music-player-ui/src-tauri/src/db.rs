@@ -17,6 +17,7 @@ pub struct Track {
     pub play_count: Option<i32>,
     pub total_seconds_listened: Option<i32>,
     pub thumb: Option<String>,
+    pub date_added: Option<i64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -28,13 +29,24 @@ pub struct CustomPlaylist {
 }
 
 pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
+    // Extract true OS-level file CREATION time (when it was copied to the PC/Phone)
+    // If creation time is unavailable (some Linux systems), fallback to modified time.
+    let date_added = track.date_added.unwrap_or_else(|| {
+        std::fs::metadata(&track.path)
+            .and_then(|m| m.created().or_else(|_| m.modified()))
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    });
+
     conn.execute(
         "INSERT INTO tracks (
             path, name, artist, album, year, quality, duration, 
             profile, metadataLoaded, genre, isFavorite, playCount, 
-            totalSecondsListened, thumb
+            totalSecondsListened, thumb, dateAdded
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ON CONFLICT(path) DO UPDATE SET
             name = excluded.name,
             artist = excluded.artist,
@@ -52,7 +64,7 @@ pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
             &track.genre, track.is_favorite.unwrap_or(false),
             track.play_count.unwrap_or(0),
             track.total_seconds_listened.unwrap_or(0),
-            &track.thumb
+            &track.thumb, date_added
         ),
     )?;
     Ok(())
@@ -60,7 +72,7 @@ pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb 
+        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb, dateAdded 
          FROM tracks ORDER BY artist, album, name"
     )?;
     
@@ -80,6 +92,7 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             play_count: row.get(11).unwrap_or(Some(0)),
             total_seconds_listened: row.get(12).unwrap_or(Some(0)),
             thumb: row.get(13).unwrap_or(None),
+            date_added: row.get(14).unwrap_or(Some(0)),
         })
     })?;
 

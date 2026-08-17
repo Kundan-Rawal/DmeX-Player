@@ -79,7 +79,7 @@ function App() {
   const scrollPositionsRef                  = useRef<Record<string, number>>({});
   const trackContainerRef                   = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery]       = useState('');
-  const [sortMode, setSortMode]             = useState<'TITLE'|'ARTIST'|'ALBUM'|'YEAR'>('TITLE');
+  const [sortMode, setSortMode]             = useState<'TITLE'|'ARTIST'|'ALBUM'|'YEAR'|'DATE_ADDED'>('DATE_ADDED');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
   const [isProfileActive, setIsProfileActive] = useState(true);
@@ -185,6 +185,14 @@ function App() {
   const isDarkModeRef = useRef(isDarkMode);
   useEffect(() => { isDarkModeRef.current = isDarkMode; }, [isDarkMode]);
   const isSeekingRef = useRef(false);
+  const durationRef = useRef(0);
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+
+  // Hold-to-seek key trackers
+  const rightKeyTimerRef = useRef<any>(null);
+  const rightKeyIntervalRef = useRef<any>(null);
+  const leftKeyTimerRef = useRef<any>(null);
+  const leftKeyIntervalRef = useRef<any>(null);
 
  
   const spatialData    = useRef({ bLvl:0,bPan:0,mLvl:0,mPan:0,mPhs:1,tLvl:0,tPan:0,tPhs:1 });
@@ -293,6 +301,7 @@ function App() {
     if (currentView === 'TOPTRACKS' || activePlaylistId) return base;
 
     return [...base].sort((a, b) => {
+      if (sortMode === 'DATE_ADDED') return (b.dateAdded || 0) - (a.dateAdded || 0);
       if (sortMode === 'TITLE') return String(a.name || '').localeCompare(String(b.name || ''));
       if (sortMode === 'ARTIST') return String(a.artist || 'Unknown').localeCompare(String(b.artist || 'Unknown'));
       if (sortMode === 'ALBUM') return String(a.album || 'Unknown').localeCompare(String(b.album || 'Unknown'));
@@ -601,7 +610,13 @@ function App() {
       const merged=[...playlistRef.current,...newTracks].sort((a,b)=>a.name.localeCompare(b.name));
       setPlaylist(merged);
       for(const t of newTracks){try{await invoke('add_to_library',{track:t});}catch(e){console.error(e);}}
-      setTimeout(()=>enrichMetadataInBackground(merged),400);
+      
+      // RE-FETCH FROM DB TO GET THE TRUE OS DATE ADDED!
+      const freshDbTracks = await invoke<Track[]>('fetch_library');
+      const sortedFresh = [...freshDbTracks].sort((a,b)=>a.name.localeCompare(b.name));
+      setPlaylist(sortedFresh);
+      
+      setTimeout(()=>enrichMetadataInBackground(sortedFresh), 400);
     } finally { setIsLoading(false); }
   };
 
@@ -1097,6 +1112,172 @@ function App() {
     return null;
   }, [currentView, activeArtistName, activeAlbumName, activePlaylistId, displayedTracks, customPlaylists, albumArt, currentTrack, globalArtistImages]);
 
+  // ==========================================
+  // GLOBAL KEYBOARD SHORTCUTS ENGINE
+  // ==========================================
+  const keyboardActionsRef = useRef({ handlePlayPause, handleNext, handlePrev, handleTasteChange, writeToEngine });
+  useEffect(() => {
+    keyboardActionsRef.current = { handlePlayPause, handleNext, handlePrev, handleTasteChange, writeToEngine };
+  });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Ignore if typing in Search Bar or any input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.repeat) return; // Prevent OS auto-repeat from spamming timeouts
+
+      switch(e.key.toLowerCase()) {
+        case ' ': // Space
+          e.preventDefault();
+          keyboardActionsRef.current.handlePlayPause();
+          break;
+        case 'arrowup':
+          e.preventDefault();
+          const upV = Math.min(1.0, volumeRef.current + 0.05);
+          setVolume(upV);
+          volumeRef.current = upV;
+          keyboardActionsRef.current.writeToEngine(`VOLUME ${upV}`);
+          break;
+        case 'arrowdown':
+          e.preventDefault();
+          const downV = Math.max(0.0, volumeRef.current - 0.05);
+          setVolume(downV);
+          volumeRef.current = downV;
+          keyboardActionsRef.current.writeToEngine(`VOLUME ${downV}`);
+          break;
+        case 'arrowright':
+          if (!rightKeyTimerRef.current && !rightKeyIntervalRef.current) {
+            rightKeyTimerRef.current = setTimeout(() => {
+              rightKeyIntervalRef.current = setInterval(async () => {
+                isSeekingRef.current = true;
+                const newT = Math.min(durationRef.current, currentTimeRef.current + 2.0);
+                setCurrentTime(newT);
+                currentTimeRef.current = newT;
+                await keyboardActionsRef.current.writeToEngine(`SEEK ${newT}`);
+              }, 100);
+            }, 300);
+          }
+          break;
+        case 'arrowleft':
+          if (!leftKeyTimerRef.current && !leftKeyIntervalRef.current) {
+            leftKeyTimerRef.current = setTimeout(() => {
+              leftKeyIntervalRef.current = setInterval(async () => {
+                isSeekingRef.current = true;
+                const newT = Math.max(0, currentTimeRef.current - 2.0);
+                setCurrentTime(newT);
+                currentTimeRef.current = newT;
+                await keyboardActionsRef.current.writeToEngine(`SEEK ${newT}`);
+              }, 100);
+            }, 300);
+          }
+          break;
+        case 'l':
+          setShowLyrics(prev => !prev);
+          break;
+        case 'd':
+          if (IS_ANDROID) {
+            setShowDSPPage(prev => !prev);
+          } else {
+            setShowStudio(prev => !prev);
+          }
+          break;
+        case 'o':
+          setVisMode(prev => prev === 'ORBIT' ? 'RADAR' : 'ORBIT');
+          break;
+        case 's':
+          setIsExpanded(false);
+          break;
+        case 'w':
+          setIsExpanded(true);
+          break;
+        case 'pageup':
+          e.preventDefault();
+          const bassDown = Math.max(0.0, bassLevelRef.current - 0.05);
+          setBassLevel(bassDown);
+          bassLevelRef.current = bassDown;
+          keyboardActionsRef.current.writeToEngine(`BASS ${bassDown}`);
+          break;
+        case 'pagedown':
+          e.preventDefault();
+          const bassUp = Math.min(1.5, bassLevelRef.current + 0.05);
+          setBassLevel(bassUp);
+          bassLevelRef.current = bassUp;
+          keyboardActionsRef.current.writeToEngine(`BASS ${bassUp}`);
+          break;
+        case 'home':
+          e.preventDefault();
+          const trebDown = Math.max(0.0, trebleLevelRef.current - 0.05);
+          setTrebleLevel(trebDown);
+          trebleLevelRef.current = trebDown;
+          keyboardActionsRef.current.writeToEngine(`TREBLE ${trebDown}`);
+          break;
+        case 'end':
+          e.preventDefault();
+          const trebUp = Math.min(1.5, trebleLevelRef.current + 0.05);
+          setTrebleLevel(trebUp);
+          trebleLevelRef.current = trebUp;
+          keyboardActionsRef.current.writeToEngine(`TREBLE ${trebUp}`);
+          break;
+        case 'q':
+          e.preventDefault();
+          if (IS_ANDROID) {
+             setMobileSearchOpen(prev => !prev);
+          } else {
+             const searchInput = document.getElementById('main-search-input') as HTMLInputElement;
+             if (searchInput) {
+                 if (document.activeElement !== searchInput) searchInput.focus();
+                 else searchInput.blur();
+             }
+          }
+          break;
+        case '1':
+          keyboardActionsRef.current.handleTasteChange('QUALITY');
+          break;
+        case '2':
+          keyboardActionsRef.current.handleTasteChange('IMMERSIVE');
+          break;
+        case '3':
+          keyboardActionsRef.current.handleTasteChange('CHILL');
+          break;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key.toLowerCase() === 'arrowright') {
+        if (rightKeyTimerRef.current) { clearTimeout(rightKeyTimerRef.current); rightKeyTimerRef.current = null; }
+        if (rightKeyIntervalRef.current) {
+          clearInterval(rightKeyIntervalRef.current);
+          rightKeyIntervalRef.current = null;
+          isSeekingRef.current = false;
+        } else {
+          keyboardActionsRef.current.handleNext();
+        }
+      } else if (e.key.toLowerCase() === 'arrowleft') {
+        if (leftKeyTimerRef.current) { clearTimeout(leftKeyTimerRef.current); leftKeyTimerRef.current = null; }
+        if (leftKeyIntervalRef.current) {
+          clearInterval(leftKeyIntervalRef.current);
+          leftKeyIntervalRef.current = null;
+          isSeekingRef.current = false;
+        } else {
+          keyboardActionsRef.current.handlePrev();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      if (rightKeyTimerRef.current) clearTimeout(rightKeyTimerRef.current);
+      if (rightKeyIntervalRef.current) clearInterval(rightKeyIntervalRef.current);
+      if (leftKeyTimerRef.current) clearTimeout(leftKeyTimerRef.current);
+      if (leftKeyIntervalRef.current) clearInterval(leftKeyIntervalRef.current);
+    };
+  }, []);
+
+
   return (
     <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
       
@@ -1135,6 +1316,7 @@ function App() {
               
               <input 
                 autoFocus 
+                id="main-search-input"
                 type="text" 
                 placeholder="Search tracks, artists, albums..." 
                 value={searchQuery} 
@@ -1392,16 +1574,16 @@ function App() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
                             {!IS_ANDROID && <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sort By:</span>}
                             <div onClick={(e) => { e.stopPropagation(); setIsSortDropdownOpen(!isSortDropdownOpen); }} style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', minWidth: IS_ANDROID ? 'auto' : '120px', justifyContent: 'space-between', transition: 'background 0.2s' }}>
-                              <span>{sortMode === 'TITLE' ? 'Title (A-Z)' : sortMode === 'ARTIST' ? 'Artist (A-Z)' : sortMode === 'ALBUM' ? 'Album (A-Z)' : 'Year (Newest)'}</span>
+                              <span>{sortMode === 'TITLE' ? 'Title (A-Z)' : sortMode === 'ARTIST' ? 'Artist (A-Z)' : sortMode === 'ALBUM' ? 'Album (A-Z)' : sortMode === 'YEAR' ? 'Year (Newest)' : 'Date Added (Newest)'}</span>
                               <span style={{ fontSize: '10px', opacity: 0.6 }}>▼</span>
                             </div>
                             {isSortDropdownOpen && (
                               <>
                                 <div style={{ position: 'fixed', inset: 0, zIndex: 98 }} onClick={() => setIsSortDropdownOpen(false)} />
                                 <div className="glass-options-menu fade-in" style={{ position: 'absolute', top: '100%', right: 0, zIndex: 99, marginTop: '8px', padding: '6px', width: '160px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-                                  {['TITLE', 'ARTIST', 'ALBUM', 'YEAR'].map(mode => (
+                                  {['DATE_ADDED', 'TITLE', 'ARTIST', 'ALBUM', 'YEAR'].map(mode => (
                                     <div key={mode} style={{ padding: '10px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', background: sortMode === mode ? 'rgba(255,255,255,0.15)' : 'transparent', transition: 'background 0.2s' }} onClick={() => { setSortMode(mode as any); setIsSortDropdownOpen(false); }}>
-                                      {mode === 'TITLE' ? 'Title (A-Z)' : mode === 'ARTIST' ? 'Artist (A-Z)' : mode === 'ALBUM' ? 'Album (A-Z)' : 'Year (Newest)'}
+                                      {mode === 'TITLE' ? 'Title (A-Z)' : mode === 'ARTIST' ? 'Artist (A-Z)' : mode === 'ALBUM' ? 'Album (A-Z)' : mode === 'YEAR' ? 'Year (Newest)' : 'Date Added (Newest)'}
                                     </div>
                                   ))}
                                 </div>

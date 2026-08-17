@@ -716,10 +716,14 @@ pub fn run() {
                     isFavorite BOOLEAN,
                     playCount INTEGER,
                     totalSecondsListened INTEGER,
-                    thumb TEXT
+                    thumb TEXT,
+                    dateAdded INTEGER DEFAULT 0
                 )",
                 [],
             ).expect("Failed to create tracks table");
+
+            // Silent migration for existing users
+            let _ = conn.execute("ALTER TABLE tracks ADD COLUMN dateAdded INTEGER DEFAULT 0", []);
 
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS playlists (

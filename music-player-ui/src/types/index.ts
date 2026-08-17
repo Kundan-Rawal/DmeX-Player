@@ -17,6 +17,7 @@ export interface Track {
   playCount?: number; 
   totalSecondsListened?: number;
   isFavorite?: boolean;
+  dateAdded?: number;
 }
 
 export type NavView = 'ALL' | 'FAVORITES' | 'ALBUMS' | 'TOPTRACKS' | 'PLAYLIST_GALLERY' | 'CLOUD_FETCH' | string;

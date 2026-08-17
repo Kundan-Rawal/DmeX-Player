@@ -330,6 +330,9 @@ struct LimiterNode
     float dlyL[LIMITER_LOOKAHEAD_SAMPLES];
     float dlyR[LIMITER_LOOKAHEAD_SAMPLES];
     int dlyIdx;
+    
+    // High-Pass Sidechain state to prevent Bass from ducking Vocals/Treble
+    float scLpL, scLpR;
 };
 
 void reverb_init_filters(ReverbNode *r);

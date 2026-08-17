@@ -186,9 +186,9 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         float rearR = p->rearDelayBufR[readIdx];
         p->rearIdx = (p->rearIdx + 1) % SURROUND_HAAS_DELAY;
 
-        // Head shadow low-pass on rear speakers: 0.25f (~2.5 kHz) creates acoustic shadow / distance cue
-        // projecting the sound "around" you rather than directly inside your ear!
-        const float REAR_LP_COEF = 0.25f;
+        // Head shadow low-pass on rear speakers: 0.45f (~4.5 kHz) lifts sound UP to ear level
+        // without muffling the vital vocal breath and cymbal clarity in the surround channels!
+        const float REAR_LP_COEF = 0.45f;
         p->rearLpL += REAR_LP_COEF * (rearL - p->rearLpL);
         p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
         
@@ -196,16 +196,23 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         const float TOP_NOTCH_COEF = 0.45f; 
         p->notchTopL1 += TOP_NOTCH_COEF * (p->rearLpL - p->notchTopL1);
         p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
-        // Deep 75% notch forces the human brain's HRTF to perceive strong vertical "up and down" elevation!
-        float rearNotchL = p->rearLpL - (p->rearLpL - p->notchTopL2) * 0.75f;
+        // 4. Vertical Elevation Split (65% Up / 35% Down)
+        // Up-Cue: 65% depth pinna notch pulls the sound precisely upwards above the head
+        float upCueL = p->rearLpL - (p->rearLpL - p->notchTopL2) * 0.65f;
 
         p->notchTopR1 += TOP_NOTCH_COEF * (p->rearLpR - p->notchTopR1);
         p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
-        float rearNotchR = p->rearLpR - (p->rearLpR - p->notchTopR2) * 0.75f;
+        float upCueR = p->rearLpR - (p->rearLpR - p->notchTopR2) * 0.65f;
+        
+        // Down-Cue: 35% Floor shadow (Deep low-pass to simulate sound traveling through floor/legs)
+        // We use notchTopL2 which is naturally double-low-passed, making it a perfect floor cue!
+        float downCueL = p->notchTopL2;
+        float downCueR = p->notchTopR2;
 
         // Keep phase POSITIVE (+) to prevent artificial hollow/phasey bathroom reverb!
-        float virtualRearL = rearNotchL * 0.25f * intensity;
-        float virtualRearR = rearNotchR * 0.25f * intensity;
+        // We mix exactly 65% Upside and 35% Downside to create a massive vertical "Up & Down" spread at the back of the head!
+        float virtualRearL = (upCueL * 0.65f + downCueL * 0.35f) * intensity;
+        float virtualRearR = (upCueR * 0.65f + downCueR * 0.35f) * intensity;
 
         // 5. Downmix to Binaural Stereo
         // Sweet spot mid-point (+12% width expansion) for lush, natural front separation
@@ -549,10 +556,10 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
         if (!p->isHighlightInit)
         {
-            p->subPeakL.init(sr, 45.0f, 3.2f, 0.0f); // Peak 1: Massive dominant 45Hz subwoofer tactile anchor
-            p->subPeakR.init(sr, 45.0f, 3.2f, 0.0f);
-            p->midPeakL.init(sr, 95.0f, 1.65f, 0.0f); // Peak 2: Dynamic 85-115Hz acoustic fundamental
-            p->midPeakR.init(sr, 95.0f, 1.65f, 0.0f);
+            p->subPeakL.init(sr, 45.0f, 1.85f, 0.0f); // Peak 1: Clean, tight 45Hz subwoofer tactile anchor
+            p->subPeakR.init(sr, 45.0f, 1.85f, 0.0f);
+            p->midPeakL.init(sr, 95.0f, 1.85f, 0.0f); // Peak 2: Intelligent dynamic tracking perfectly balanced with sub
+            p->midPeakR.init(sr, 95.0f, 1.85f, 0.0f);
             p->isHighlightInit = true;
         }
 
@@ -611,9 +618,9 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
 
         // Deep Sub-Bass (0-80Hz) multiplier for massive thump without digital clipping overload
 #ifdef __ANDROID__
-        // Protected by tanh diaphragm bounding, we can now unleash 2.2x heavy sub-bass!
-        float subMult = 2.2f; 
-        float midMult = 0.8f; // Reduce 80-180Hz so it doesn't overshadow the sub-bass
+        // Restored to a natural, punchy 1.6x so bass sits perfectly in its place without feeling forced
+        float subMult = 1.6f; 
+        float midMult = 0.85f; // Balanced low-mid support
 #else
         float subMult = 1.45f; // Sane, studio-grade multiplier for high-end IEMs & headphones (e.g. Realme Buds 2 Pro)
         float midMult = 0.85f;
@@ -863,9 +870,18 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         float L = pIn[i * 2] * p->boost * multiplier;
         float R = pIn[i * 2 + 1] * p->boost * multiplier;
 
-        // 2. Peak Detection with Envelope Inertia (Find loudest channel with peak follower)
-        // Prevents 45-60Hz sub-bass zero-crossings from causing intermodulation gain pumping ("bag bag bag bag") on vocals!
-        float rawPeak = fmaxf(fabsf(L), fabsf(R));
+        // 2. High-Pass Sidechain Peak Detection
+        // We use a gentle 1-pole high-pass (subtracting a low-pass) for the envelope detector.
+        // This makes the limiter "blind" to the massive 45Hz sub-bass, completely preventing 
+        // the bass from ducking (depriving) the treble and vocals in Max/Max+ modes!
+        float scCoef = 0.05f; // ~300Hz cutoff for sidechain
+        p->scLpL += scCoef * (L - p->scLpL);
+        p->scLpR += scCoef * (R - p->scLpR);
+        float scHighPassL = L - p->scLpL;
+        float scHighPassR = R - p->scLpR;
+
+        // Peak detection using the high-passed signal!
+        float rawPeak = fmaxf(fabsf(scHighPassL), fabsf(scHighPassR));
         if (rawPeak > p->peakEnv) {
             p->peakEnv = rawPeak;
         } else {
@@ -1071,12 +1087,15 @@ static void audio_restoration_process(ma_node *pNode, const float **ppFramesIn, 
         float cleanTrebleL = trebleL * (1.0f - (p->denoiseIntensity * 0.15f));
         float cleanTrebleR = trebleR * (1.0f - (p->denoiseIntensity * 0.15f));
 
-        // 3. Upscale (Synthesize upper harmonic air)
-        // Extract clean harmonic overtones without unipolar squaring distortion or DC offset
-        float synthL = tanhf(trebleL * 3.0f) - trebleL;
-        float synthR = tanhf(trebleR * 3.0f) - trebleR;
+        // 3. Bitwise Predictive Upscale (Synthesize upper harmonic air)
+        // Mathematically square the treble to generate the exact Octave (2nd Harmonic)
+        // This perfectly predicts the missing 16kHz+ frequencies without ANY crackly tanhf distortion!
+        // We multiply by 15.0f to match the previous amplitude since squaring numbers < 1.0 makes them much smaller
+        float synthL = (trebleL * trebleL) * 15.0f;
+        float synthR = (trebleR * trebleR) * 15.0f;
         
-        // High-Pass filter at 10kHz to strip IMD difference frequencies, leaving only crisp 16kHz+ air
+        // High-Pass filter at 10kHz instantly strips the mathematically generated DC offset (0Hz)
+        // and removes IMD difference frequencies, leaving only pure, predictive crisp 16kHz+ air!
         synthL = p->harmonicFilterL.process(synthL);
         synthR = p->harmonicFilterR.process(synthR);
         
