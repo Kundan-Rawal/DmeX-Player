@@ -190,10 +190,12 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         
         // 2. Virtual Center (Front Speaker) 
         // Zero delay: Keep center vocals and drums 100% upfront without comb filtering!
+        // Dynamic Vocal Compensation: As the 3D room expands, vocals must scale up to remain clear!
+        float vocalBoost = 1.0f + (0.18f * intensity);
         p->centerDelayBuf[p->centerIdx] = center;
         p->centerIdx = (p->centerIdx + 1) % CENTER_ITD_DELAY;
-        float virtualCenterL = center;
-        float virtualCenterR = center;
+        float virtualCenterL = center * vocalBoost;
+        float virtualCenterR = center * vocalBoost;
 
         // 3. Virtual Rear Decorrelation (Allpass Bank)
         // Instead of a static Haas delay which causes metallic comb filtering, we use
