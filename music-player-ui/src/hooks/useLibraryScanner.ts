@@ -81,26 +81,30 @@ export const useLibraryScanner = (
       });
     }, 200);
 
-    const unlistenComplete = listen('scan_complete', () => {
+    const unlistenComplete = listen('scan_complete', async () => {
+      clearInterval(flushInterval);
+      
       if (pending.chunks.length > 0) {
         const batch = pending.chunks.splice(0);
-        setPlaylist(prev => {
-          const existingPaths = new Set(prev.map(t=>t.path));
-          const fresh: Track[] = batch
-            .map((c:any):Track => ({ name:c.title||'Unknown Title', path:c.file_path, artist:c.artist||'Unknown Artist', album:'Unknown Album', year:'-', quality:'-', duration:0, metadataLoaded:false, thumb:c.art_uri?convertFileSrc(c.art_uri):undefined }))
-            .filter(t => !existingPaths.has(t.path));
-            
-          // THE FIX: Lock raw tracks into SQLite immediately
-          for (const t of fresh) {
-            invoke('add_to_library', { track: { ...t, thumb: undefined } }).catch(()=>{});
-          }
-
-          const merged = [...prev, ...fresh].sort((a,b)=>{ const A=String(a?.name||'Unknown').toUpperCase(),B=String(b?.name||'Unknown').toUpperCase(); return A<B?-1:A>B?1:0; });
-          playlistRef.current = merged;
-          return merged;
-        });
+        const existingPaths = new Set(playlistRef.current.map(t=>t.path));
+        const fresh: Track[] = batch
+          .map((c:any):Track => ({ name:c.title||'Unknown Title', path:c.file_path, artist:c.artist||'Unknown Artist', album:'Unknown Album', year:'-', quality:'-', duration:0, metadataLoaded:false, thumb:c.art_uri?convertFileSrc(c.art_uri):undefined }))
+          .filter(t => !existingPaths.has(t.path));
+          
+        // Wait for all final inserts to complete so they are in SQLite
+        await Promise.all(fresh.map(t => invoke('add_to_library', { track: { ...t, thumb: undefined } }).catch(()=>{})));
       }
-      clearInterval(flushInterval);
+
+      // RE-FETCH FROM DB TO GET THE TRUE OS DATE ADDED!
+      try {
+        const freshDbTracks = await invoke<Track[]>('fetch_library');
+        const sortedFresh = [...freshDbTracks].sort((a,b)=>a.name.localeCompare(b.name));
+        playlistRef.current = sortedFresh;
+        setPlaylist(sortedFresh);
+      } catch (err) {
+        console.error("Failed to re-fetch library after scan", err);
+      }
+
       setIsLoading(false);
       setScanProgress('');
     });

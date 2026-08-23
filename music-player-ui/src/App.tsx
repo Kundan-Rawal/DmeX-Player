@@ -148,8 +148,8 @@ function App() {
   const [repeatMode, setRepeatMode]   = useState<'OFF'|'ALL'|'ONE'>('OFF');
   const [repeatDeg, setRepeatDeg]     = useState(0);
   const [repeatBusy, setRepeatBusy]   = useState(false);
-  const [bassLevel, setBassLevel]     = useState(0.0);
-  const bassLevelRef                  = useRef(0.0);
+  const [bassLevel, setBassLevel]     = useState(0.25);
+  const bassLevelRef                  = useRef(0.25);
   const [trebleLevel, setTrebleLevel] = useState(0.0);
   const trebleLevelRef                = useRef(0.0);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);

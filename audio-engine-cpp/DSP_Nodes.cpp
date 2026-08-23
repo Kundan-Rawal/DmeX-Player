@@ -542,7 +542,7 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         // so bass is never missing or thin on standard playback!
         // We apply a rapid-ramp power curve (powf) so the bass slider is highly responsive even at 30-40%!
         float safeBass = (g_bassGain < 0.0f) ? 0.0f : g_bassGain;
-        float effectiveGain = 0.65f + (powf(safeBass, 0.75f) * 0.55f); // Base slider at 0 gives old 25% bass feel
+        float effectiveGain = 0.35f + (powf(safeBass, 0.75f) * 0.85f);
 
         // 1. Isolate everything below 180Hz (The entire bass range)
         float totalBassL, nonBassL, totalBassR, nonBassR;
