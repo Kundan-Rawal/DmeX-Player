@@ -778,28 +778,26 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. ISOLATE HIGHS FOR DETECTION (So Subwoofer bass boost doesn't trigger the compressor!)
+        // 1. ISOLATE BASS FOR DETECTION (So treble spikes don't trigger the compressor)
         c->lpStateL += 0.015f * (L - c->lpStateL);
         c->lpStateR += 0.015f * (R - c->lpStateR);
-        float highDetL = L - c->lpStateL;
-        float highDetR = R - c->lpStateR;
-        float maxHighPeak = fmaxf(fabsf(highDetL), fabsf(highDetR));
+        float maxLowPeak = fmaxf(fabsf(c->lpStateL), fabsf(c->lpStateR));
 
-        if (maxHighPeak > c->envHigh)
+        if (maxLowPeak > c->envLow)
         {
-            c->envHigh = c->envHigh * c->attackCoef + maxHighPeak * (1.0f - c->attackCoef);
+            c->envLow = c->envLow * c->attackCoef + maxLowPeak * (1.0f - c->attackCoef);
         }
         else
         {
-            c->envHigh = c->envHigh * c->releaseCoef + maxHighPeak * (1.0f - c->releaseCoef);
+            c->envLow = c->envLow * c->releaseCoef + maxLowPeak * (1.0f - c->releaseCoef);
         }
 
-        // Calculate gain reduction ONLY for the high band
-        float highGain = 1.0f;
-        if (c->envHigh > thresh && thresh > 0.001f)
+        // Calculate gain reduction ONLY for the low band
+        float lowGain = 1.0f;
+        if (c->envLow > thresh && thresh > 0.001f)
         {
-            float over = c->envHigh - thresh;
-            highGain = thresh / (thresh + over * 0.35f); 
+            float over = c->envLow - thresh;
+            lowGain = thresh / (thresh + over * 0.35f); // Golden mid-point: controlled punch without boomy excess or over-clamping
         }
 
         // 2. DELAY LINE
@@ -809,18 +807,18 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
         c->dlyR[c->dlyIdx] = R;
         c->dlyIdx = (c->dlyIdx + 1) % COMP_LOOKAHEAD_SAMPLES;
 
-        // 3. SPLIT DELAYED SIGNAL INTO LOW AND HIGH (Phase-coherent LR4)
-        float bassL, highL_d, bassR, highR_d;
-        c->crossL.process(dL, bassL, highL_d);
-        c->crossR.process(dR, bassR, highR_d);
+        // 3. SPLIT DELAYED SIGNAL INTO LOW AND HIGH
+        c->delayLpStateL += 0.015f * (dL - c->delayLpStateL);
+        c->delayLpStateR += 0.015f * (dR - c->delayLpStateR);
 
-        // Keep legacy states updated in case of external inspections
-        c->delayLpStateL = bassL;
-        c->delayLpStateR = bassR;
+        float bassL = c->delayLpStateL;
+        float bassR = c->delayLpStateR;
+        float highL = dL - bassL;
+        float highR = dR - bassR;
 
-        // 4. THE FIX: Apply gain ONLY to highs. Bass bypasses compression entirely!
-        pOut[i * 2] = (bassL + (highL_d * highGain)) * makeup;
-        pOut[i * 2 + 1] = (bassR + (highR_d * highGain)) * makeup;
+        // 4. THE FIX: Apply gain ONLY to bass. Highs/Vocals bypass compression entirely.
+        pOut[i * 2] = ((bassL * lowGain) + highL) * makeup;
+        pOut[i * 2 + 1] = ((bassR * lowGain) + highR) * makeup;
     }
 }
 ma_node_vtable g_multiband_compressor_vtable = {multiband_compressor_process, NULL, 1, 1, 0};
