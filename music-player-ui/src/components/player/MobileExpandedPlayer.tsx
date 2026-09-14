@@ -32,6 +32,7 @@ interface MobileExpandedPlayerProps {
   upscaleDrive: number;        setUpscaleDrive: (v: number) => void;
   widenWidth: number;          setWidenWidth: (v: number) => void;
   spatialExtra: number;        setSpatialExtra: (v: number) => void;
+  depthAmount: number;         setDepthAmount: (v: number) => void;
   reverbWet: number;           setReverbWet: (v: number) => void;
   restorationDenoise: number;  setRestorationDenoise: (v: number) => void;
   restorationUpscale: number;  setRestorationUpscale: (v: number) => void;
@@ -520,6 +521,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   upscaleDrive={p.upscaleDrive}               setUpscaleDrive={p.setUpscaleDrive}
                   widenWidth={p.widenWidth}                   setWidenWidth={p.setWidenWidth}
                   spatialExtra={p.spatialExtra}               setSpatialExtra={p.setSpatialExtra}
+                  depthAmount={p.depthAmount}                 setDepthAmount={p.setDepthAmount}
                   reverbWet={p.reverbWet}                     setReverbWet={p.setReverbWet}
                   restorationDenoise={p.restorationDenoise}   setRestorationDenoise={p.setRestorationDenoise}
                   restorationUpscale={p.restorationUpscale}   setRestorationUpscale={p.setRestorationUpscale}

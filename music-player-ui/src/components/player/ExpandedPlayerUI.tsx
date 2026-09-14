@@ -49,6 +49,7 @@ interface DSPStudioProps {
   upscaleDrive: number; setUpscaleDrive: (v: number) => void;
   widenWidth: number; setWidenWidth: (v: number) => void;
   spatialExtra: number; setSpatialExtra: (v: number) => void;
+  depthAmount: number; setDepthAmount: (v: number) => void;
   reverbWet: number; setReverbWet: (v: number) => void;
   restorationDenoise: number; setRestorationDenoise: (v: number) => void;
   restorationUpscale: number; setRestorationUpscale: (v: number) => void;
@@ -77,7 +78,7 @@ interface DSPStudioProps {
 export const DSPStudio = ({
   isRemastered, setIsRemastered, isCompressed, setIsCompressed, selectedAcousticEnv, setSelectedAcousticEnv,
   isEnvDropdownOpen, setIsEnvDropdownOpen, upscaleDrive, setUpscaleDrive, widenWidth, setWidenWidth,
-  spatialExtra, setSpatialExtra, reverbWet, setReverbWet, 
+  spatialExtra, setSpatialExtra, depthAmount, setDepthAmount, reverbWet, setReverbWet, 
   restorationDenoise: _restorationDenoise, setRestorationDenoise, restorationUpscale, setRestorationUpscale, restorationPresence: _restorationPresence, setRestorationPresence,
   setIsManualOverride, setSmartTaste, setBassLevel, setTrebleLevel,
   writeToEngine,  // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
@@ -198,6 +199,10 @@ export const DSPStudio = ({
         <div className="dsp-card" style={disabledStyle}>
           <div className="dsp-label-row"><label>3D Depth</label><span className="val-purple">{spatialExtra>0?`+${Math.round(spatialExtra*100)}%`:'Base'}</span></div>
           <input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={spatialExtra} onChange={e=>{const v=parseFloat(e.target.value);setSpatialExtra(v);writeToEngine(`3D ${v}`);}}/>
+        </div>
+        <div className="dsp-card" style={disabledStyle}>
+          <div className="dsp-label-row"><label>Vocal Frontness (Blauert)</label><span className="val-purple">{depthAmount>0?`+${Math.round(depthAmount*100)}%`:'Off'}</span></div>
+          <input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={depthAmount} onChange={e=>{const v=parseFloat(e.target.value);setDepthAmount(v);writeToEngine(`DEPTH ${v}`);}}/>
         </div>
         <div className="dsp-card" style={disabledStyle}>
           <div className="dsp-label-row"><label>Digital Reverb (Algorithmic)</label><span className="val-orange">{Math.round(reverbWet*100)}%</span></div>

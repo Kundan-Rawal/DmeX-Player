@@ -129,6 +129,7 @@ function App() {
   const [upscaleDrive, setUpscaleDrive]     = useState(0.0);
   const [widenWidth, setWidenWidth]         = useState(1.0);
   const [spatialExtra, setSpatialExtra]     = useState(0.0);
+  const [depthAmount, setDepthAmount]       = useState(0.0);
   const [reverbWet, setReverbWet]           = useState(0.0);
   const [smartTaste, setSmartTaste]         = useState<Taste>('ORIGINAL');
   const [detectedProfile, setDetectedProfile] = useState<AudioProfile | null>(null);
@@ -335,7 +336,7 @@ function App() {
     const settings = {
         isDarkMode, bassLevel, trebleLevel, speakerMode,
         isRemastered, isCompressed, upscaleDrive, widenWidth,
-        spatialExtra, reverbWet, restorationDenoise, restorationUpscale,
+        spatialExtra, depthAmount, reverbWet, restorationDenoise, restorationUpscale,
         restorationPresence, selectedAcousticEnv, smartTaste,
         isManualOverride, visMode, sortMode, volume, isPhoneSpeaker,
         lastTrackPath: currentTrack?.path || null
@@ -344,7 +345,7 @@ function App() {
   }, [
     isBooted, isDarkMode, bassLevel, trebleLevel, speakerMode,
     isRemastered, isCompressed, upscaleDrive, widenWidth,
-    spatialExtra, reverbWet, restorationDenoise, restorationUpscale,
+    spatialExtra, depthAmount, reverbWet, restorationDenoise, restorationUpscale,
     restorationPresence, selectedAcousticEnv, smartTaste,
     isManualOverride, visMode, sortMode, volume, isPhoneSpeaker,
     currentTrack
@@ -387,6 +388,7 @@ function App() {
           if (settings.upscaleDrive !== undefined) setUpscaleDrive(settings.upscaleDrive);
           if (settings.widenWidth !== undefined) setWidenWidth(settings.widenWidth);
           if (settings.spatialExtra !== undefined) setSpatialExtra(settings.spatialExtra);
+          if (settings.depthAmount !== undefined) setDepthAmount(settings.depthAmount);
           if (settings.reverbWet !== undefined) setReverbWet(settings.reverbWet);
           
           if (settings.restorationDenoise !== undefined) setRestorationDenoise(settings.restorationDenoise);
@@ -575,6 +577,7 @@ function App() {
     setUpscaleDrive(s.drive);
     setWidenWidth(s.widen);
     setSpatialExtra(s.spatial);
+      setDepthAmount(0.0);
     setReverbWet(s.reverb);
     setIsCompressed(s.compress);
     setIsRemastered(s.remaster);
@@ -623,7 +626,7 @@ function App() {
     if(isManualOverride){setIsManualOverride(false);setSelectedAcousticEnv('NONE');await writeToEngine(`LOAD_IR `);await writeToEngine(`CONVOLUTION 0.0`);}
     if(detectedProfileRef.current) await applySmartSettings(detectedProfileRef.current,newTaste);
     else if(newTaste==='ORIGINAL'){
-      setUpscaleDrive(0);setWidenWidth(1.0);setSpatialExtra(0);setReverbWet(0);setIsCompressed(false);setIsRemastered(false);
+      setUpscaleDrive(0);setWidenWidth(1.0);setSpatialExtra(0);setDepthAmount(0);setReverbWet(0);setIsCompressed(false);setIsRemastered(false);
       await writeToEngine(`UPSCALE 0`);await writeToEngine(`WIDEN 1.0`);await writeToEngine(`3D 0`);await writeToEngine(`REVERB 0`);await writeToEngine(`COMPRESS 0`);await writeToEngine(`REMASTER 0`);
     }
   };
@@ -1150,7 +1153,7 @@ function App() {
           isEnvDropdownOpen={isEnvDropdownOpen} setIsEnvDropdownOpen={setIsEnvDropdownOpen}
           upscaleDrive={upscaleDrive} setUpscaleDrive={setUpscaleDrive}
           widenWidth={widenWidth} setWidenWidth={setWidenWidth}
-          spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
+          spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra} depthAmount={depthAmount} setDepthAmount={setDepthAmount}
           reverbWet={reverbWet} setReverbWet={setReverbWet}
           restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
           restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
@@ -1808,7 +1811,7 @@ function App() {
                 isEnvDropdownOpen={isEnvDropdownOpen} setIsEnvDropdownOpen={setIsEnvDropdownOpen}
                 upscaleDrive={upscaleDrive} setUpscaleDrive={setUpscaleDrive}
                 widenWidth={widenWidth} setWidenWidth={setWidenWidth}
-                spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra}
+                spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra} depthAmount={depthAmount} setDepthAmount={setDepthAmount}
                 reverbWet={reverbWet} setReverbWet={setReverbWet}
                 restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
                 restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
@@ -2041,7 +2044,7 @@ function App() {
                     isRemastered={isRemastered} setIsRemastered={setIsRemastered} isCompressed={isCompressed} setIsCompressed={setIsCompressed}
                     selectedAcousticEnv={selectedAcousticEnv} setSelectedAcousticEnv={setSelectedAcousticEnv} isEnvDropdownOpen={isEnvDropdownOpen} setIsEnvDropdownOpen={setIsEnvDropdownOpen}
                     upscaleDrive={upscaleDrive} setUpscaleDrive={setUpscaleDrive} widenWidth={widenWidth} setWidenWidth={setWidenWidth}
-                    spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra} reverbWet={reverbWet} setReverbWet={setReverbWet}
+                    spatialExtra={spatialExtra} setSpatialExtra={setSpatialExtra} depthAmount={depthAmount} setDepthAmount={setDepthAmount} reverbWet={reverbWet} setReverbWet={setReverbWet}
                     restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
                     restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
                     restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
