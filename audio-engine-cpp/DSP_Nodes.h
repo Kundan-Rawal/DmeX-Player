@@ -35,6 +35,8 @@ struct BiquadHPF
         x1 = x2 = y1 = y2 = 0.0f;
     }
 
+    void reset() { x1 = 0; x2 = 0; y1 = 0; y2 = 0; }
+
     float process(float in_sample)
     {
         float out_sample = b0 * in_sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
@@ -110,6 +112,8 @@ struct BiquadLPF
         x1 = x2 = y1 = y2 = 0;
     }
 
+    void reset() { x1 = 0; x2 = 0; y1 = 0; y2 = 0; }
+
     float process(float in)
     {
         float out = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
@@ -134,6 +138,8 @@ struct LinkwitzRiley4
         hpf2.init(sample_rate, cutoff_hz);
     }
 
+    void reset() { lpf1.reset(); lpf2.reset(); hpf1.reset(); hpf2.reset(); }
+
     // Splits a single signal into Low and High with perfect flat-sum phase alignment
     void process(float input, float &outLow, float &outHigh)
     {
@@ -143,6 +149,37 @@ struct LinkwitzRiley4
 };
 
 #define HAAS_BUFFER_SIZE 4096
+
+// Phase-coherent 3-way Linkwitz-Riley crossover.
+// Bands sum to unity magnitude and unity phase.
+struct Crossover3 {
+    LinkwitzRiley4 split1;  // low / rest split
+    LinkwitzRiley4 split2;  // mid / high split
+    LinkwitzRiley4 apLo;    // allpass compensation for the LOW band
+
+    void init(float sr, float fLo = 200.0f, float fHi = 4000.0f) {
+        split1.init(sr, fLo);
+        split2.init(sr, fHi);
+        apLo.init(sr, fHi);
+    }
+    
+    void reset() {
+        split1.reset();
+        split2.reset();
+        apLo.reset();
+    }
+
+    inline void process(float x, float& lo, float& mid, float& hi) {
+        float rest;
+        split1.process(x, lo, rest);
+        split2.process(rest, mid, hi);
+        
+        // Phase-match low band: AP4 = LP4 + HP4
+        float loLP, loHP;
+        apLo.process(lo, loLP, loHP);
+        lo = loLP + loHP;
+    }
+};
 
 struct DynamicSpatializerNode
 {
@@ -194,13 +231,8 @@ struct StereoWidenerNode
 {
     ma_node_base baseNode;
     SmoothedParam width;
-    
-    // Crossfeed states
-    float delayL[CROSSFEED_DELAY_SAMPLES];
-    float delayR[CROSSFEED_DELAY_SAMPLES];
-    int delayIdx;
-    float lpStateL, lpStateR;
-    float sideLp, sideLp2;
+    Crossover3 xoverL, xoverR;
+    float corrEnv = 1.0f;
 };
 
 #define MAX_AP_BUF 1500
@@ -242,13 +274,13 @@ struct PsychoacousticNode
     SmoothedParam spatialIntensity;
 };
 
+
 struct AudiophileEQNode
 {
     ma_node_base baseNode;
     SmoothedParam targetBass, targetMid, targetHigh;
     
-    LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
-    LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    Crossover3 xoverL, xoverR;
     LinkwitzRiley4 crossTrebleL, crossTrebleR;   // 8000Hz
     
     BiquadPeak presenceL, presenceR; // 2.5kHz Fletcher-Munson presence eq
@@ -277,11 +309,14 @@ struct ReverbNode
     BiquadHPF hpfL, hpfR; // <-- ADD THIS
 };
 
+#pragma once
+
+
+
 struct SubwooferNode
 {
     ma_node_base baseNode;
-    LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
-    LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    Crossover3 xoverL, xoverR;
     
     // Legacy 1-pole filter states for Android/Laptop Speaker protection
     float hp1L, hp1R;
@@ -315,17 +350,29 @@ struct MultibandCompressorNode
     ma_node_base baseNode;
     SmoothedParam threshold;
     SmoothedParam makeupGain;
-    float envLow, envHigh;
-    float attackCoef, releaseCoef;
-    float lpStateL, lpStateR;
-
-    // CRITICAL FIX 2: Crossover states for the delayed audio path
-    float delayLpStateL, delayLpStateR;
-
+    struct CompBand {
+        float env = 0.0f;
+        float attackCoef = 0.0f;
+        float releaseCoef = 0.0f;
+        float ratio = 1.0f;
+        float thresholdDb = 0.0f;
+        float makeupGain = 1.0f;
+        void init(float sr, float attMs, float relMs, float r, float thDb, float mu) {
+            attackCoef = tauCoef(attMs, sr);
+            releaseCoef = tauCoef(relMs, sr);
+            ratio = r;
+            thresholdDb = thDb;
+            makeupGain = mu;
+            env = 0.0f;
+        }
+    };
+    CompBand bandLo, bandMid, bandHi;
+    
     float dlyL[COMP_LOOKAHEAD_SAMPLES];
     float dlyR[COMP_LOOKAHEAD_SAMPLES];
-    int dlyIdx, delaySamples;
-    LinkwitzRiley4 crossL, crossR; // Phase-coherent 150Hz crossover
+    int dlyIdx = 0;
+    
+    Crossover3 xoverL, xoverR;
 };
 
 #define LIMITER_LOOKAHEAD_SAMPLES 192
@@ -396,3 +443,4 @@ struct AudioRestorationNode
 extern ma_node_vtable g_restoration_vtable;
 
 void dsp_flush_all_state(void);
+

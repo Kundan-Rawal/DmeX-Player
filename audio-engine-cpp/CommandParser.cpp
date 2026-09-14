@@ -572,7 +572,6 @@ extern "C" void get_audio_metrics(float *out_data, float *out_level)
     out_data[7] = g_tLvl.load(std::memory_order_relaxed);
     out_data[8] = g_tPan.load(std::memory_order_relaxed);
     out_data[9] = g_tPhase.load(std::memory_order_relaxed);
-    extern std::atomic<float> g_limiterGR;
     out_data[10] = g_limiterGR.load(std::memory_order_relaxed);
     *out_level = g_audioLevel.load(std::memory_order_relaxed);
 }

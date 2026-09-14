@@ -1,3 +1,4 @@
+extern "C" int engine_get_sample_rate();
 #include "DSP_Nodes.h"
 #include <cmath>
 #include <complex>
@@ -94,66 +95,62 @@ ma_node_vtable g_exciter_vtable = {exciter_process, NULL, 1, 1, 0};
 // ================================================================
 static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
-    if (!g_isWidenOn)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
-    StereoWidenerNode *p = (StereoWidenerNode *)pNode;
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
+    StereoWidenerNode *n = (StereoWidenerNode *)pNode;
+    const float *in = ppFramesIn[0];
+    float *out = ppFramesOut[0];
+    ma_uint32 N = *pFrameCountIn;
+    *pFrameCountOut = N;
 
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        float L = pIn[i * 2], R = pIn[i * 2 + 1];
+    if (!g_isWidenOn) { memcpy(out, in, sizeof(float) * N * 2); return; }
 
-        // 1. Binaural Crossfeed (HRTF-lite) to anchor the stereo image
-        // We delay the opposite channel and low-pass it to simulate head-shadowing
-        float crossfeedL = p->delayR[p->delayIdx];
-        float crossfeedR = p->delayL[p->delayIdx];
+    const float corrCoef = tauCoef(50.0f, ((float)engine_get_sample_rate()));
 
-        p->delayL[p->delayIdx] = L;
-        p->delayR[p->delayIdx] = R;
-        p->delayIdx = (p->delayIdx + 1) % CROSSFEED_DELAY_SAMPLES;
+    for (ma_uint32 i = 0; i < N; ++i) {
+        float gate = 1.0f;
+        float w    = n->width.next();
 
-        // Head-shadow low-pass (approx 700Hz)
-        const float HEAD_SHADOW_COEF = 0.1f;
-        p->lpStateL += HEAD_SHADOW_COEF * (crossfeedL - p->lpStateL);
-        p->lpStateR += HEAD_SHADOW_COEF * (crossfeedR - p->lpStateR);
+        float L = in[i*2], R = in[i*2 + 1];
 
-        // Keep delay lines running for legacy inspection, but DO NOT bleed opposite-ear bass
-        float mixL = L;
-        float mixR = R;
+        // ---- Correlation guard ----
+        float instCorr = (L * R) / (0.5f * (L * L + R * R) + 1e-9f);
+        instCorr = fmaxf(-1.0f, fminf(1.0f, instCorr));
+        n->corrEnv += (instCorr - n->corrEnv) * corrCoef;
 
-        // 2. Blumlein Shuffler (Bass-Safe Widening)
-        float M = (mixL + mixR) * 0.5f;
-        float S = (mixL - mixR) * 0.5f;
-        
-        // Isolate the bass from the Side channel so we don't widen the sub-bass or kick body
-        // 2-Pole steeper slope (12 dB/oct) prevents 100-180Hz from leaking into widening and causing phase hollowing!
-        const float SIDE_HP_COEF = 0.08f; // ~350Hz
-        p->sideLp += SIDE_HP_COEF * (S - p->sideLp);
-        p->sideLp2 += SIDE_HP_COEF * (p->sideLp - p->sideLp2);
-        float sideLows = p->sideLp2;     // The bass of the Side channel
-        float sideHighs = S - sideLows;  // The treble/mids of the Side channel
+        float guard = (n->corrEnv + 0.5f) / 0.8f;
+        guard = fmaxf(0.0f, fminf(1.0f, guard));
+        float wEff = 1.0f + (w - 1.0f) * guard;
 
-        float effectiveWidth = p->width.next();
-        if (g_isLaptopSpeaker) {
-            effectiveWidth = 1.0f + ((effectiveWidth - 1.0f) * 0.4f);
-        }
+        // ---- 3-band split ----
+        float loL, midL, hiL, loR, midR, hiR;
+        n->xoverL.process(L, loL, midL, hiL);
+        n->xoverR.process(R, loR, midR, hiR);
 
-        float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.1f);
-        
-        // We multiply ONLY the upper frequencies of the Side channel by the width,
-        // and we pass the sideLows through exactly at 1.0x width.
-        // This guarantees pristine original stereo bass while massively widening the highs.
-        float finalS = sideLows + (sideHighs * effectiveWidth);
+        // Per-band width.
+        float wLo  = 1.0f;                            // 20-200 Hz   : mono
+        float wMid = 1.0f + (wEff - 1.0f) * 0.6f;     // 200 Hz-4 kHz: moderate
+        float wHi  = 1.0f + (wEff - 1.0f) * 1.0f;     // 4 kHz+      : full
 
-        pOut[i * 2] = (M * midGain) + finalS;
-        pOut[i * 2 + 1] = (M * midGain) - finalS;
+        auto ms = [](float a, float b, float width, float& oa, float& ob) {
+            float m = (a + b) * 0.5f;
+            float s = (a - b) * 0.5f * width;
+            oa = m + s; ob = m - s;
+        };
+
+        float oLoL, oLoR, oMidL, oMidR, oHiL, oHiR;
+        ms(loL,  loR,  wLo,  oLoL,  oLoR);
+        ms(midL, midR, wMid, oMidL, oMidR);
+        ms(hiL,  hiR,  wHi,  oHiL,  oHiR);
+
+        float wetL = oLoL + oMidL + oHiL;
+        float wetR = oLoR + oMidR + oHiR;
+
+        // Energy compensation
+        float wAvg = (wLo + wMid + wHi) / 3.0f;
+        float comp = 1.0f / sqrtf(1.0f + (wAvg * wAvg - 1.0f) * 0.5f);
+        wetL *= comp; wetR *= comp;
+
+        out[i*2]     = L + (wetL - L) * gate;
+        out[i*2 + 1] = R + (wetR - R) * gate;
     }
 }
 ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
@@ -298,15 +295,11 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
 
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. Isolate the full Bass band up to 180Hz (Sub-bass + Kick Punch + Bass Guitar)
-        float bassBandL, nonBassL, bassBandR, nonBassR;
-        p->crossMidBassL.process(L, bassBandL, nonBassL);
-        p->crossMidBassR.process(R, bassBandR, nonBassR);
-
-        // 2. Isolate the Mids from the Treble (8000Hz LR4 Crossover)
-        float midL, trebleL, midR, trebleR;
-        p->crossTrebleL.process(nonBassL, midL, trebleL);
-        p->crossTrebleR.process(nonBassR, midR, trebleR);
+        // Phase-coherent 3-way Linkwitz-Riley crossover
+        float bassBandL, midL, trebleL;
+        p->xoverL.process(L, bassBandL, midL, trebleL);
+        float bassBandR, midR, trebleR;
+        p->xoverR.process(R, bassBandR, midR, trebleR);
 
         // 3. VOCAL PROCESSING (180Hz - 8kHz)
         // Only apply vocal saturation & upward compression if Remaster is ON or Mid slider is actively tuned
@@ -560,15 +553,11 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float safeBass = (g_bassGain < 0.0f) ? 0.0f : g_bassGain;
         float effectiveGain = 0.35f + (powf(safeBass, 0.75f) * 0.85f);
 
-        // 1. Isolate everything below 180Hz (The entire bass range)
-        float totalBassL, nonBassL, totalBassR, nonBassR;
-        p->crossMidBassL.process(L, totalBassL, nonBassL);
-        p->crossMidBassR.process(R, totalBassR, nonBassR);
-
-        // 2. Split the Bass into Sub-Bass (0-80Hz) and Mid-Bass (80-180Hz)
-        float subL, midBassL, subR, midBassR;
-        p->crossBassL.process(totalBassL, subL, midBassL);
-        p->crossBassR.process(totalBassR, subR, midBassR);
+        // Phase-coherent 3-way split: 0-78Hz (sub), 78-180Hz (mid-bass), 180Hz+ (non-bass)
+        float subL, midBassL, nonBassL;
+        p->xoverL.process(L, subL, midBassL, nonBassL);
+        float subR, midBassR, nonBassR;
+        p->xoverR.process(R, subR, midBassR, nonBassR);
 
         // 3. DUAL-PEAK BI-MODAL ARCHITECTURE (With 4 Strict Anti-Mud Safeguards)
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
@@ -775,6 +764,26 @@ ma_node_vtable g_convolution_vtable = {convolution_process, NULL, 1, 1, 0};
 // ================================================================
 // TRANSPARENT RMS GLUE COMPRESSOR
 // ================================================================
+static float compressBand(MultibandCompressorNode::CompBand& b, float inL, float inR, float& outL, float& outR) {
+    float peak = fmaxf(fabsf(inL), fabsf(inR));
+    if (peak > b.env)
+        b.env += (peak - b.env) * b.attackCoef;
+    else
+        b.env += (peak - b.env) * b.releaseCoef;
+    b.env = dmexFlush(b.env);
+    
+    float envDb = (b.env > 1e-6f) ? 20.0f * log10f(b.env) : -120.0f;
+    float gainDb = 0.0f;
+    if (envDb > b.thresholdDb) {
+        float over = envDb - b.thresholdDb;
+        gainDb = -over * (1.0f - 1.0f / b.ratio);
+    }
+    float linearGain = powf(10.0f, gainDb / 20.0f);
+    outL = inL * linearGain * b.makeupGain;
+    outR = inR * linearGain * b.makeupGain;
+    return linearGain;
+}
+
 static void multiband_compressor_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     MultibandCompressorNode *c = (MultibandCompressorNode *)pNode;
@@ -789,56 +798,41 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    float thresh = c->threshold.next();
-    float makeup = c->makeupGain.next();
+    // The threshold knob from UI shifts all thresholds
+    float globalThresh = c->threshold.next();
+    float globalThreshDb = (globalThresh > 1e-4f) ? 20.0f * log10f(globalThresh) : -80.0f;
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. ISOLATE HIGHS FOR DETECTION (So Subwoofer bass boost doesn't trigger the compressor!)
-        c->lpStateL += 0.015f * (L - c->lpStateL);
-        c->lpStateR += 0.015f * (R - c->lpStateR);
-        float highDetL = L - c->lpStateL;
-        float highDetR = R - c->lpStateR;
-        float maxHighPeak = fmaxf(fabsf(highDetL), fabsf(highDetR));
-
-        if (maxHighPeak > c->envHigh)
-        {
-            c->envHigh = c->envHigh * c->attackCoef + maxHighPeak * (1.0f - c->attackCoef);
-        }
-        else
-        {
-            c->envHigh = c->envHigh * c->releaseCoef + maxHighPeak * (1.0f - c->releaseCoef);
-        }
-
-        // Calculate gain reduction ONLY for the high band
-        float highGain = 1.0f;
-        if (c->envHigh > thresh && thresh > 0.001f)
-        {
-            float over = c->envHigh - thresh;
-            highGain = thresh / (thresh + over * 0.35f); 
-        }
-
-        // 2. DELAY LINE
+        // DELAY LINE (Lookahead)
         float dL = c->dlyL[c->dlyIdx];
         float dR = c->dlyR[c->dlyIdx];
         c->dlyL[c->dlyIdx] = L;
         c->dlyR[c->dlyIdx] = R;
-        c->dlyIdx = (c->dlyIdx + 1) % ((c->delaySamples > 0 && c->delaySamples <= COMP_LOOKAHEAD_SAMPLES) ? c->delaySamples : COMP_LOOKAHEAD_SAMPLES);
+        int dlySize = (int)(0.001f * engine_get_sample_rate());
+        if (dlySize > COMP_LOOKAHEAD_SAMPLES) dlySize = COMP_LOOKAHEAD_SAMPLES;
+        c->dlyIdx = (c->dlyIdx + 1) % dlySize;
 
-        // 3. SPLIT DELAYED SIGNAL INTO LOW AND HIGH (Phase-coherent LR4)
-        float bassL, highL_d, bassR, highR_d;
-        c->crossL.process(dL, bassL, highL_d);
-        c->crossR.process(dR, bassR, highR_d);
+        // Split delayed signal into Low, Mid, High
+        float loL, midL, hiL, loR, midR, hiR;
+        c->xoverL.process(dL, loL, midL, hiL);
+        c->xoverR.process(dR, loR, midR, hiR);
+        
+        // Update threshold based on global threshold
+        c->bandLo.thresholdDb = globalThreshDb + 6.0f;  // Allow more bass before compression
+        c->bandMid.thresholdDb = globalThreshDb + 0.0f;
+        c->bandHi.thresholdDb = globalThreshDb - 2.0f;  // Compress highs earlier
 
-        // Keep legacy states updated in case of external inspections
-        c->delayLpStateL = bassL;
-        c->delayLpStateR = bassR;
+        float outLoL, outLoR, outMidL, outMidR, outHiL, outHiR;
+        compressBand(c->bandLo, loL, loR, outLoL, outLoR);
+        compressBand(c->bandMid, midL, midR, outMidL, outMidR);
+        compressBand(c->bandHi, hiL, hiR, outHiL, outHiR);
 
-        // 4. THE FIX: Apply gain ONLY to highs. Bass bypasses compression entirely!
-        pOut[i * 2] = (bassL + (highL_d * highGain)) * makeup;
-        pOut[i * 2 + 1] = (bassR + (highR_d * highGain)) * makeup;
+        float makeup = c->makeupGain.next();
+        pOut[i * 2] = (outLoL + outMidL + outHiL) * makeup;
+        pOut[i * 2 + 1] = (outLoR + outMidR + outHiR) * makeup;
     }
 }
 ma_node_vtable g_multiband_compressor_vtable = {multiband_compressor_process, NULL, 1, 1, 0};
@@ -1162,12 +1156,11 @@ void dsp_flush_all_state(void)
     memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));
     memset(g_compressorNode.dlyR, 0, sizeof(g_compressorNode.dlyR));
     g_compressorNode.dlyIdx = 0;
-    g_compressorNode.envLow  = 0.0f;
-    g_compressorNode.envHigh = 0.0f;
-    g_compressorNode.lpStateL = 0.0f;
-    g_compressorNode.lpStateR = 0.0f;
-    g_compressorNode.delayLpStateL = 0.0f;
-    g_compressorNode.delayLpStateR = 0.0f;
+    g_compressorNode.bandLo.env = 0.0f;
+    g_compressorNode.bandMid.env = 0.0f;
+    g_compressorNode.bandHi.env = 0.0f;
+    g_compressorNode.xoverL.reset();
+    g_compressorNode.xoverR.reset();
 
     memset(g_limiterNode.dlyL, 0, sizeof(g_limiterNode.dlyL));
     memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
@@ -1205,13 +1198,9 @@ void dsp_flush_all_state(void)
     g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;
     g_spatializerNode.notchTopR1 = g_spatializerNode.notchTopR2 = 0.0f;
 
-    memset(g_widenerNode.delayL, 0, sizeof(g_widenerNode.delayL));
-    memset(g_widenerNode.delayR, 0, sizeof(g_widenerNode.delayR));
-    g_widenerNode.delayIdx = 0;
-    g_widenerNode.lpStateL = 0.0f;
-    g_widenerNode.lpStateR = 0.0f;
-    g_widenerNode.sideLp = 0.0f;
-    g_widenerNode.sideLp2 = 0.0f;
+    g_widenerNode.xoverL.reset();
+    g_widenerNode.xoverR.reset();
+    g_widenerNode.corrEnv = 1.0f;
 
     g_restorationNode.x1L = 0.0f;
     g_restorationNode.x1R = 0.0f;
