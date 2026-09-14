@@ -375,21 +375,28 @@ void comb_init(CombFilter *c, int sz, float fb, float dp)
     c->damp = dp;
     c->store = 0;
 }
-void reverb_init_filters(ReverbNode *r)
+void reverb_init_filters(ReverbNode *r, float sampleRate)
 {
     float fb = r->roomSize, dp = r->damp;
-    comb_init(&r->combL[0], COMB1, fb, dp);
-    comb_init(&r->combL[1], COMB2, fb, dp);
-    comb_init(&r->combL[2], COMB3, fb, dp);
-    comb_init(&r->combL[3], COMB4, fb, dp);
-    comb_init(&r->combR[0], COMB1 + 23, fb, dp);
-    comb_init(&r->combR[1], COMB2 + 23, fb, dp);
-    comb_init(&r->combR[2], COMB3 + 23, fb, dp);
-    comb_init(&r->combR[3], COMB4 + 23, fb, dp);
-    ap_init(&r->apL[0], AP1, 0.5f);
-    ap_init(&r->apL[1], AP2, 0.5f);
-    ap_init(&r->apR[0], AP1 + 11, 0.5f);
-    ap_init(&r->apR[1], AP2 + 11, 0.5f);
+    
+    // Scale indices by sample rate (they were hardcoded for 44.1kHz)
+    float sr_ratio = sampleRate > 0.0f ? (sampleRate / 44100.0f) : 1.0f;
+    auto scale_size = [sr_ratio](int baseSize) -> int {
+        return (int)(baseSize * sr_ratio);
+    };
+
+    comb_init(&r->combL[0], scale_size(COMB1), fb, dp);
+    comb_init(&r->combL[1], scale_size(COMB2), fb, dp);
+    comb_init(&r->combL[2], scale_size(COMB3), fb, dp);
+    comb_init(&r->combL[3], scale_size(COMB4), fb, dp);
+    comb_init(&r->combR[0], scale_size(COMB1 + 23), fb, dp);
+    comb_init(&r->combR[1], scale_size(COMB2 + 23), fb, dp);
+    comb_init(&r->combR[2], scale_size(COMB3 + 23), fb, dp);
+    comb_init(&r->combR[3], scale_size(COMB4 + 23), fb, dp);
+    ap_init(&r->apL[0], scale_size(AP1), 0.5f);
+    ap_init(&r->apL[1], scale_size(AP2), 0.5f);
+    ap_init(&r->apR[0], scale_size(AP1 + 11), 0.5f);
+    ap_init(&r->apR[1], scale_size(AP2 + 11), 0.5f);
 }
 static float comb_tick(CombFilter *c, float in)
 {
@@ -811,7 +818,7 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
         float dR = c->dlyR[c->dlyIdx];
         c->dlyL[c->dlyIdx] = L;
         c->dlyR[c->dlyIdx] = R;
-        c->dlyIdx = (c->dlyIdx + 1) % COMP_LOOKAHEAD_SAMPLES;
+        c->dlyIdx = (c->dlyIdx + 1) % ((c->delaySamples > 0 && c->delaySamples <= COMP_LOOKAHEAD_SAMPLES) ? c->delaySamples : COMP_LOOKAHEAD_SAMPLES);
 
         // 3. SPLIT DELAYED SIGNAL INTO LOW AND HIGH (Phase-coherent LR4)
         float bassL, highL_d, bassR, highR_d;
@@ -927,7 +934,7 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         // 6. Push the CURRENT signal into the delay buffer for the future
         p->dlyL[p->dlyIdx] = L;
         p->dlyR[p->dlyIdx] = R;
-        p->dlyIdx = (p->dlyIdx + 1) % LIMITER_LOOKAHEAD_SAMPLES;
+        p->dlyIdx = (p->dlyIdx + 1) % ((p->delaySamples > 0 && p->delaySamples <= LIMITER_LOOKAHEAD_SAMPLES) ? p->delaySamples : LIMITER_LOOKAHEAD_SAMPLES);
 
         // 7. Apply the smoothed gain envelope to the delayed signal
         float outL = delayedL * p->gainEnv;
