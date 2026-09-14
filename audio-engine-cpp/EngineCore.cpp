@@ -7,6 +7,11 @@
 #include <cmath>
 #include <mutex>
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <xmmintrin.h>
+#include <pmmintrin.h>
+#endif
+
 // Define global variables
 ma_engine g_engine;
 ma_device g_device; // The Locked Physical DAC (Context handled internally now)
@@ -68,6 +73,12 @@ void updateRouting()
 }
 static void manual_data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount)
 {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    // Fix denormals causing CPU spikes in reverb tails
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+    _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#endif
+
     (void)pInput; // We are playing, not recording.
     ma_engine *pEngine = (ma_engine *)pDevice->pUserData;
 

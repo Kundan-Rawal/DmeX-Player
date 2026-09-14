@@ -6,6 +6,12 @@
 #include <cstring>
 #include <cmath>
 #include <mutex>
+#include <cstdlib>
+
+static float safe_stof(const std::string& s) {
+    if (s.empty()) return 0.0f;
+    return std::strtof(s.c_str(), nullptr);
+}
 
 #define MAX_IR_SAMPLES 2048
 
@@ -226,7 +232,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "PAUSE" && g_soundInitialized)
         ma_sound_stop(&g_sound);
     else if (command == "VOLUME" && !args.empty())
-        ma_engine_set_volume(&g_engine, stof(args));
+        ma_engine_set_volume(&g_engine, safe_stof(args));
     else if (command == "SEEK" && g_soundInitialized)
     {
         ma_uint32 target_sr = 44100; // default fallback
@@ -243,7 +249,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
             }
         }
         
-        ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(stof(args) * (float)target_sr));
+        ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(safe_stof(args) * (float)target_sr));
 
         g_subwooferNode.lp1L = g_subwooferNode.lp1R = 0.0f;
         g_subwooferNode.hp1L = g_subwooferNode.hp1R = 0.0f;
@@ -298,39 +304,39 @@ extern "C" void execute_audio_command(const char *cmd_in)
     }
     else if (command == "UPSCALE")
     {
-        float d = stof(args);
+        float d = safe_stof(args);
         g_exciterNode.targetDrive = d * 4.0f;
     }
     else if (command == "RESTORE_DENOISE")
     {
-        g_restorationNode.denoiseIntensity = stof(args);
+        g_restorationNode.denoiseIntensity = safe_stof(args);
     }
     else if (command == "RESTORE_UPSCALE")
     {
-        g_restorationNode.upscaleTarget = stof(args);
+        g_restorationNode.upscaleTarget = safe_stof(args);
     }
     else if (command == "RESTORE_PRESENCE")
     {
-        g_restorationNode.presenceBoost = stof(args);
+        g_restorationNode.presenceBoost = safe_stof(args);
     }
     else if (command == "WIDEN")
     {
-        float w = stof(args);
+        float w = safe_stof(args);
         g_widenerNode.width = w;
         g_isWidenOn = (w > 1.01f);
     }
     else if (command == "3D")
     {
-        float val = stof(args);
+        float val = safe_stof(args);
         g_spatializerNode.spatialIntensity = val * 0.50f;
     }
     else if (command == "BASS")
     {
-        g_bassGain = stof(args);
+        g_bassGain = safe_stof(args);
     }
     else if (command == "TREBLE")
     {
-        g_trebleGain = stof(args);
+        g_trebleGain = safe_stof(args);
     }
     else if (command == "LOAD_IR")
     {
@@ -502,7 +508,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     }
     else if (command == "REVERB")
     {
-        float w = stof(args);
+        float w = safe_stof(args);
         g_reverbNode.wetMix = w;
         g_isReverbOn = (w > 0.005f);
         if (g_isReverbOn)
@@ -510,7 +516,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     }
     else if (command == "CONVOLUTION")
     {
-        float w = stof(args);
+        float w = safe_stof(args);
         g_convolutionNode.wetMix = w;
         g_isConvolutionOn = (w > 0.005f);
         if (g_isConvolutionOn)
@@ -518,7 +524,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     }
     else if (command == "LIMITER")
     {
-        float val = stof(args);
+        float val = safe_stof(args);
         g_limiterNode.boost = 1.0f + (val * 1.2f);
         g_limiterNode.gainEnv = 1.0f;
     }
@@ -579,26 +585,36 @@ extern "C" void get_audio_metrics(float *out_data, float *out_level)
 
 extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, float *rms_out)
 {
-    std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
-    if (g_usingSymphonia && g_symSource.buffer)
+    std::vector<float> slice;
+    uint32_t ch = 2;
+    uint64_t limit = 0;
+
     {
-        uint64_t total = g_symSource.buffer->total_samples;
-        uint32_t ch = g_symSource.buffer->channels;
-        // CRITICAL FIX: Safe exit if buffer states zero channels
-        if (ch == 0)
-            return false;
-
-        float *data = g_symSource.buffer->data;
-        if (total < 4800 * ch)
-            return false;
-
-        double sL2 = 0, sR2 = 0, sLR = 0, pk = 0, zcr = 0;
-        float prev = 0;
-        uint64_t max_samples = 44100 * 10 * ch;
-        uint64_t limit = (total < max_samples) ? total : max_samples;
-        for (uint64_t i = 0; i < limit; i += ch)
+        std::lock_guard<std::mutex> lock(g_audioMutex);
+        if (g_usingSymphonia && g_symSource.buffer)
         {
-            float L = data[i], R = (ch > 1) ? data[i + 1] : data[i];
+            uint64_t total = g_symSource.buffer->total_samples;
+            ch = g_symSource.buffer->channels;
+            if (ch == 0)
+                return false;
+            if (total < 4800 * ch)
+                return false;
+
+            uint64_t max_samples = 44100 * 10 * ch;
+            limit = (total < max_samples) ? total : max_samples;
+            slice.assign(g_symSource.buffer->data, g_symSource.buffer->data + limit);
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    double sL2 = 0, sR2 = 0, sLR = 0, pk = 0, zcr = 0;
+    float prev = 0;
+    for (uint64_t i = 0; i < limit; i += ch)
+    {
+        float L = slice[i], R = (ch > 1) ? slice[i + 1] : slice[i];
             sL2 += L * L;
             sR2 += R * R;
             sLR += L * R;
@@ -610,15 +626,13 @@ extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, floa
                 zcr++;
             prev = m;
         }
-        uint64_t frames = limit / ch;
-        double n = (double)frames, rms = sqrt((sL2 + sR2) / (2 * n)), den = sqrt(sL2 * sR2);
-        *sc_out = (float)((den > 1e-12) ? (sLR / den) : 0.0);
-        *cf_out = (float)((rms > 1e-9) ? (20.0 * log10(pk / rms)) : 0.0);
-        *zcr_out = (float)(zcr / n);
-        *rms_out = (float)rms;
-        return true;
-    }
-    return false;
+    uint64_t frames = limit / ch;
+    double n = (double)frames, rms = sqrt((sL2 + sR2) / (2 * n)), den = sqrt(sL2 * sR2);
+    *sc_out = (float)((den > 1e-12) ? (sLR / den) : 0.0);
+    *cf_out = (float)((rms > 1e-9) ? (20.0 * log10(pk / rms)) : 0.0);
+    *zcr_out = (float)(zcr / n);
+    *rms_out = (float)rms;
+    return true;
 }
 extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
 {
