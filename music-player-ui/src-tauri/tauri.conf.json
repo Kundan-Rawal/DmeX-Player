@@ -29,6 +29,13 @@
   },
   "bundle": {
       "active": true,
+      "macOS": {
+        "entitlements": null,
+        "exceptionDomain": "",
+        "frameworks": [],
+        "providerShortName": null,
+        "signingIdentity": null
+      },
       "targets": "all",
       "icon": [
         "icons/32x32.png",
@@ -43,3 +50,4 @@
     }
     
 }
+
