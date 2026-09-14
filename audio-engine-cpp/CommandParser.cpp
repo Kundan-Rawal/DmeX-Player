@@ -316,6 +316,13 @@ extern "C" void execute_audio_command(const char *cmd_in)
         g_widenerNode.width.set(w);
         g_isWidenOn = (w > 1.01f);
     }
+    else if (command == "DEPTH")
+    {
+        float d = safe_stof(args);
+        if (d < 0.0f) d = 0.0f;
+        if (d > 1.0f) d = 1.0f;
+        g_spatializerNode.depthAmount.set(d);
+    }
     else if (command == "3D")
     {
         float val = safe_stof(args);

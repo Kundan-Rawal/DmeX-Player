@@ -93,12 +93,6 @@ static void manual_data_callback(ma_device *pDevice, void *pOutput, const void *
         memset(pOutput, 0, frameCount * 2 * sizeof(float));
     }
 }
-extern "C" int engine_get_sample_rate()
-{
-    if (!g_engineInitialized) return 48000;
-    return ma_engine_get_sample_rate(&g_engine);
-}
-
 extern "C" void init_audio_engine()
 {
     if (g_engineInitialized)
@@ -115,6 +109,8 @@ extern "C" void init_audio_engine()
         deviceConfig.sampleRate        = 44100; // Force 44.1kHz (bypasses miniaudio's cheap linear resampler)
         deviceConfig.performanceProfile = ma_performance_profile_conservative; // Larger buffer to handle heavy 5.1 DSP math
         deviceConfig.dataCallback      = manual_data_callback;
+        deviceConfig.resampling.algorithm = ma_resample_algorithm_linear;
+        deviceConfig.resampling.linear.lpfOrder = MA_MAX_FILTER_ORDER;
         deviceConfig.pUserData         = &g_engine;
 
         // miniaudio auto-prefers AAudio over OpenSL on Android 8+
@@ -133,7 +129,7 @@ extern "C" void init_audio_engine()
 
         // --- THE HEADLESS ENGINE (identical to Windows) ---
         ma_engine_config engineConfig = ma_engine_config_init();
-        engineConfig.noDevice    = MA_TRUE;
+                engineConfig.noDevice    = MA_TRUE;
         engineConfig.channels    = 2;
         engineConfig.sampleRate  = g_device.sampleRate; // Match engine to DAC
 
@@ -164,6 +160,8 @@ extern "C" void init_audio_engine()
     deviceConfig.wasapi.noDefaultQualitySRC = MA_TRUE;
     deviceConfig.wasapi.noHardwareOffloading = MA_TRUE;
     deviceConfig.sampleRate = 0; // Hardware Native Rate
+    deviceConfig.resampling.algorithm = ma_resample_algorithm_linear;
+    deviceConfig.resampling.linear.lpfOrder = MA_MAX_FILTER_ORDER;
 
     // THE FIX: Explicitly bind the manual callback we just wrote
     deviceConfig.dataCallback = manual_data_callback;
@@ -186,7 +184,7 @@ extern "C" void init_audio_engine()
 
     // --- THE HEADLESS ENGINE ---
     ma_engine_config engineConfig = ma_engine_config_init();
-    engineConfig.noDevice = MA_TRUE; // Disconnect engine from automatic OS routing
+        engineConfig.noDevice = MA_TRUE; // Disconnect engine from automatic OS routing
     engineConfig.channels = 2;
     engineConfig.sampleRate = g_device.sampleRate; // Match engine to DAC
 
@@ -232,12 +230,8 @@ engine_ready:
     
     
     
-    g_audiophileEQNode.crossBassL.init((float)sr, 80.0f);
-    g_audiophileEQNode.crossBassR.init((float)sr, 80.0f);
-    g_audiophileEQNode.crossMidBassL.init((float)sr, 180.0f);
-    g_audiophileEQNode.crossMidBassR.init((float)sr, 180.0f);
-    g_audiophileEQNode.crossTrebleL.init((float)sr, 8000.0f);
-    g_audiophileEQNode.crossTrebleR.init((float)sr, 8000.0f);
+    g_audiophileEQNode.xoverL.init((float)sr, 180.0f, 8000.0f);
+    g_audiophileEQNode.xoverR.init((float)sr, 180.0f, 8000.0f);
     g_audiophileEQNode.presenceL.init((float)sr, 2500.0f, 0.707f, 2.0f);
     g_audiophileEQNode.presenceR.init((float)sr, 2500.0f, 0.707f, 2.0f);
     ma_node_config cEQ = ma_node_config_init();
@@ -253,10 +247,8 @@ engine_ready:
     restCfg.pInputChannels = g_inCh;
     restCfg.pOutputChannels = g_outCh;
     ma_node_init(pg, &restCfg, NULL, &g_restorationNode.baseNode);
-    g_subwooferNode.crossBassL.init((float)sr, 80.0f);
-    g_subwooferNode.crossBassR.init((float)sr, 80.0f);
-    g_subwooferNode.crossMidBassL.init((float)sr, 180.0f);
-    g_subwooferNode.crossMidBassR.init((float)sr, 180.0f);
+    g_subwooferNode.xoverL.init((float)sr, 78.0f, 180.0f);
+    g_subwooferNode.xoverR.init((float)sr, 78.0f, 180.0f);
     g_subwooferNode.sampleRate = (float)sr;
     ma_node_config subCfg = ma_node_config_init();
     subCfg.vtable = &g_subwoofer_vtable;
@@ -273,6 +265,9 @@ engine_ready:
     ma_node_init(pg, &c1, NULL, &g_exciterNode.baseNode);
 
     g_widenerNode.width.init(1.0f);
+    g_widenerNode.xoverL.init((float)sr, 200.0f, 4000.0f);
+    g_widenerNode.xoverR.init((float)sr, 200.0f, 4000.0f);
+    g_widenerNode.corrEnv = 1.0f;
     ma_node_config c2 = ma_node_config_init();
     c2.vtable = &g_widener_vtable;
     c2.pInputChannels = g_inCh;
@@ -281,9 +276,6 @@ engine_ready:
 
     g_spatializerNode.crossSubwooferL.init((float)sr, 180.0f);
     g_spatializerNode.crossSubwooferR.init((float)sr, 180.0f);
-    g_spatializerNode.depthAmount.init(0.0f);
-    g_spatializerNode.bandsMid.init((float)sr);
-    g_spatializerNode.bandsSide.init((float)sr);
     
     // Initialize Decorrelation Allpass filters for Rear
     // Using prime-ish numbers for decorrelation delays to scatter phases completely
@@ -325,14 +317,13 @@ engine_ready:
 
     g_compressorNode.threshold.init(0.251f);
     g_compressorNode.makeupGain.init(1.0f); // Safe headroom for AAudio
-    g_compressorNode.attackCoef = expf(-1.0f / (0.005f * (float)sr));
-    g_compressorNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
-    g_compressorNode.delayLpStateL = 0.0f;
-    g_compressorNode.delayLpStateR = 0.0f;
-    g_compressorNode.crossL.init((float)sr, 150.0f);
-    g_compressorNode.crossR.init((float)sr, 150.0f);
-    g_compressorNode.delaySamples = (int)(0.001f * sr); // 1ms lookahead
-    memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));
+
+    g_compressorNode.xoverL.init((float)sr, 150.0f, 2500.0f);
+    g_compressorNode.xoverR.init((float)sr, 150.0f, 2500.0f);
+    g_compressorNode.bandLo.init((float)sr, 10.0f, 150.0f, 1.0f, 1.0f, 1.0f); // 1.0 ratio = uncompressed bass (MAX THUMP)
+    g_compressorNode.bandMid.init((float)sr, 5.0f, 100.0f, 1.5f, 1.0f, 1.0f);
+    g_compressorNode.bandHi.init((float)sr, 1.0f, 60.0f, 1.3f, 1.0f, 1.0f);
+memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));
     memset(g_compressorNode.dlyR, 0, sizeof(g_compressorNode.dlyR));
     ma_node_config c5 = ma_node_config_init();
     c5.vtable = &g_multiband_compressor_vtable;
@@ -384,10 +375,10 @@ engine_ready:
 
     // THE ONLY WIRING THAT SHOULD EXIST FOR THIS SECTION:
     ma_node_attach_output_bus(&g_convolutionNode, 0, &g_audiophileEQNode, 0);
-    ma_node_attach_output_bus(&g_audiophileEQNode, 0, &g_compressorNode, 0);
-    ma_node_attach_output_bus(&g_compressorNode, 0, &g_subwooferNode, 0);
+    ma_node_attach_output_bus(&g_audiophileEQNode, 0, &g_subwooferNode, 0);
     ma_node_attach_output_bus(&g_subwooferNode, 0, &g_exciterNode, 0);
-    ma_node_attach_output_bus(&g_exciterNode, 0, &g_widenerNode, 0);
+    ma_node_attach_output_bus(&g_exciterNode, 0, &g_compressorNode, 0);
+    ma_node_attach_output_bus(&g_compressorNode, 0, &g_widenerNode, 0);
 
     // --- 8D Amputated. Direct connection to Haas Spatializer ---
     ma_node_attach_output_bus(&g_widenerNode, 0, &g_spatializerNode, 0);
@@ -417,4 +408,7 @@ extern "C" void uninit_audio_engine()
     ma_engine_uninit(&g_engine);
 
     g_engineInitialized = false;
+}extern "C" unsigned int engine_get_sample_rate(void)
+{
+    return (g_device.pContext != nullptr) ? g_device.sampleRate : 0u;
 }
