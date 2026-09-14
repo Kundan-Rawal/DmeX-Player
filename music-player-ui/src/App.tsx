@@ -416,6 +416,7 @@ function App() {
                          if (p) setDetectedProfile(p);
                      }
                      try {
+                         await writeToEngine(`LOAD ${track.path}`);
                          await writeToEngine(`VOLUME ${settings.volume ?? 1.0}`);
                          await writeToEngine(`REMASTER ${settings.isRemastered ? 1 : 0}`);
                          await writeToEngine(`COMPRESS ${settings.isCompressed ? 1 : 0}`);

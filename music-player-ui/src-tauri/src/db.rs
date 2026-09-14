@@ -32,6 +32,14 @@ pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
     // Extract true OS-level file CREATION time (when it was copied to the PC/Phone)
     // If creation time is unavailable (some Linux systems), fallback to modified time.
     let date_added = track.date_added.unwrap_or_else(|| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(m) = std::fs::metadata(&track.path) {
+                return m.ctime() as i64;
+            }
+        }
+        
         std::fs::metadata(&track.path)
             .and_then(|m| m.created().or_else(|_| m.modified()))
             .ok()
