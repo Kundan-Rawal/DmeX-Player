@@ -230,8 +230,8 @@ engine_ready:
     
     
     
-    g_audiophileEQNode.xoverL.init((float)sr, 178.0f, 2031.0f);
-    g_audiophileEQNode.xoverR.init((float)sr, 178.0f, 2031.0f);
+    g_audiophileEQNode.xoverL.init((float)sr, 180.0f, 8000.0f);
+    g_audiophileEQNode.xoverR.init((float)sr, 180.0f, 8000.0f);
     g_audiophileEQNode.presenceL.init((float)sr, 2500.0f, 0.707f, 2.0f);
     g_audiophileEQNode.presenceR.init((float)sr, 2500.0f, 0.707f, 2.0f);
     ma_node_config cEQ = ma_node_config_init();
@@ -318,9 +318,9 @@ engine_ready:
     g_compressorNode.threshold.init(0.251f);
     g_compressorNode.makeupGain.init(1.0f); // Safe headroom for AAudio
 
-    g_compressorNode.xoverL.init((float)sr, 106.0f, 2500.0f);
-    g_compressorNode.xoverR.init((float)sr, 106.0f, 2500.0f);
-    g_compressorNode.bandLo.init((float)sr, 10.0f, 150.0f, 1.67f, 1.0f, 1.0f);
+    g_compressorNode.xoverL.init((float)sr, 150.0f, 2500.0f);
+    g_compressorNode.xoverR.init((float)sr, 150.0f, 2500.0f);
+    g_compressorNode.bandLo.init((float)sr, 10.0f, 150.0f, 1.0f, 1.0f, 1.0f); // 1.0 ratio = uncompressed bass (MAX THUMP)
     g_compressorNode.bandMid.init((float)sr, 5.0f, 100.0f, 1.5f, 1.0f, 1.0f);
     g_compressorNode.bandHi.init((float)sr, 1.0f, 60.0f, 1.3f, 1.0f, 1.0f);
 memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));

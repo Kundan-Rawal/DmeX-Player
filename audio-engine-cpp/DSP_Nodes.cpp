@@ -141,13 +141,16 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         ms(midL, midR, wMid, oMidL, oMidR);
         ms(hiL,  hiR,  wHi,  oHiL,  oHiR);
 
+        // Energy compensation ONLY on the bands that are widened (Mids/Highs)
+        // so we don't accidentally turn down the Sub-Bass volume!
+        float compMid = 1.0f / sqrtf(1.0f + (wMid * wMid - 1.0f) * 0.5f);
+        float compHi = 1.0f / sqrtf(1.0f + (wHi * wHi - 1.0f) * 0.5f);
+        
+        oMidL *= compMid; oMidR *= compMid;
+        oHiL *= compHi; oHiR *= compHi;
+
         float wetL = oLoL + oMidL + oHiL;
         float wetR = oLoR + oMidR + oHiR;
-
-        // Energy compensation
-        float wAvg = (wLo + wMid + wHi) / 3.0f;
-        float comp = 1.0f / sqrtf(1.0f + (wAvg * wAvg - 1.0f) * 0.5f);
-        wetL *= comp; wetR *= comp;
 
         out[i*2]     = L + (wetL - L) * gate;
         out[i*2 + 1] = R + (wetR - R) * gate;
