@@ -29,6 +29,7 @@ export interface DSPSettings {
   drive: number;
   widen: number;
   spatial: number;
+  depth: number;
   reverb: number;
   compress: boolean;
   remaster: boolean;

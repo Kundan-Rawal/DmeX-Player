@@ -577,7 +577,8 @@ function App() {
     setUpscaleDrive(s.drive);
     setWidenWidth(s.widen);
     setSpatialExtra(s.spatial);
-      setDepthAmount(0.0);
+      setDepthAmount(s.depth);
+      await writeToEngine(`DEPTH ${s.depth}`);
     setReverbWet(s.reverb);
     setIsCompressed(s.compress);
     setIsRemastered(s.remaster);
