@@ -262,6 +262,7 @@ engine_ready:
     ma_node_init(pg, &subCfg, NULL, &g_subwooferNode.baseNode);
 
     memset(&g_exciterNode, 0, sizeof(g_exciterNode));
+    g_exciterNode.init((float)sr);
     ma_node_config c1 = ma_node_config_init();
     c1.vtable = &g_exciter_vtable;
     c1.pInputChannels = g_inCh;
@@ -300,7 +301,7 @@ engine_ready:
     g_reverbNode.roomSize = 0.84f;
     g_reverbNode.wetMix = 0.0f;
     g_reverbNode.damp = 0.50f;
-    reverb_init_filters(&g_reverbNode);
+    reverb_init_filters(&g_reverbNode, (float)sr);
     g_reverbNode.hpfL.init((float)sr, 150.0f);
     g_reverbNode.hpfR.init((float)sr, 150.0f);
 
@@ -329,6 +330,7 @@ engine_ready:
     g_compressorNode.delayLpStateR = 0.0f;
     g_compressorNode.crossL.init((float)sr, 150.0f);
     g_compressorNode.crossR.init((float)sr, 150.0f);
+    g_compressorNode.delaySamples = (int)(0.001f * sr); // 1ms lookahead
     memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));
     memset(g_compressorNode.dlyR, 0, sizeof(g_compressorNode.dlyR));
     ma_node_config c5 = ma_node_config_init();
@@ -343,6 +345,7 @@ engine_ready:
     g_limiterNode.peakEnv = 0.0f;
     g_limiterNode.attackCoef = expf(-1.0f / (0.0005f * (float)sr)); // Ultra-fast attack to prevent DAC hard-clipping
     g_limiterNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
+    g_limiterNode.delaySamples = (int)(0.002f * sr); // 2ms lookahead
     memset(g_limiterNode.dlyL, 0, sizeof(g_limiterNode.dlyL));
     memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
     ma_node_config c6 = ma_node_config_init();

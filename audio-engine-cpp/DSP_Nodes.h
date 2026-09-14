@@ -168,6 +168,15 @@ struct StudioExciterNode
     ma_node_base baseNode;
     float targetDrive, currentDrive;
     float hpStateL, hpStateR;
+    float hpCoef; // Dynamically calculated HPF coefficient
+
+    void init(float sampleRate) {
+        // Equivalent to HP_COEF = 0.40f at 44100 Hz
+        // alpha = 1.0 - exp(-2 * pi * Fc / Fs) -> Fc ~ 3600 Hz
+        float fc = 3600.0f;
+        float sr = (sampleRate > 0) ? sampleRate : 44100.0f;
+        hpCoef = 1.0f - expf(-2.0f * (float)M_PI * fc / sr);
+    }
 };
 
 #define CROSSFEED_DELAY_SAMPLES 22
@@ -240,8 +249,8 @@ struct AudiophileEQNode
     float dcBlockL, dcBlockR;
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve
 };
-#define MAX_COMB_BUF 1700
-#define MAX_AP_BUF 600
+#define MAX_COMB_BUF 4000
+#define MAX_AP_BUF 1500
 
 struct CombFilter
 {
@@ -292,7 +301,7 @@ struct ConvolutionNode
     BiquadHPF hpfL, hpfR; // <-- ADD THIS
 };
 
-#define COMP_LOOKAHEAD_SAMPLES 44
+#define COMP_LOOKAHEAD_SAMPLES 96
 
 struct MultibandCompressorNode
 {
@@ -308,11 +317,11 @@ struct MultibandCompressorNode
 
     float dlyL[COMP_LOOKAHEAD_SAMPLES];
     float dlyR[COMP_LOOKAHEAD_SAMPLES];
-    int dlyIdx;
+    int dlyIdx, delaySamples;
     LinkwitzRiley4 crossL, crossR; // Phase-coherent 150Hz crossover
 };
 
-#define LIMITER_LOOKAHEAD_SAMPLES 88
+#define LIMITER_LOOKAHEAD_SAMPLES 192
 
 struct LimiterNode
 {
@@ -323,13 +332,13 @@ struct LimiterNode
 
     float dlyL[LIMITER_LOOKAHEAD_SAMPLES];
     float dlyR[LIMITER_LOOKAHEAD_SAMPLES];
-    int dlyIdx;
+    int dlyIdx, delaySamples;
     
     // High-Pass Sidechain state to prevent Bass from ducking Vocals/Treble
     float scLpL, scLpR;
 };
 
-void reverb_init_filters(ReverbNode *r);
+void reverb_init_filters(ReverbNode *r, float sampleRate);
 
 extern ma_node_vtable g_exciter_vtable;
 extern ma_node_vtable g_widener_vtable;

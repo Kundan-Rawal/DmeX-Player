@@ -541,6 +541,8 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         // warm tactile foundation (0.35 effective gain = ~1.75 dB sub boost & warm saturation) 
         // so bass is never missing or thin on standard playback!
         // We apply a rapid-ramp power curve (powf) so the bass slider is highly responsive even at 30-40%!
+        // USER FIX: Restored the baseline tactile foundation so that the bass is NOT zero at slider=0.
+        // This gives the exact 'bit available' bass you requested, and restores the heavy bass feel at 25% slider!
         float safeBass = (g_bassGain < 0.0f) ? 0.0f : g_bassGain;
         float effectiveGain = 0.35f + (powf(safeBass, 0.75f) * 0.85f);
 
