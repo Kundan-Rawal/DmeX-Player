@@ -69,6 +69,7 @@ struct Halfband2x {
     }
 
     inline void up(float x, float* out2) {
+        if (zUp.size() == 0 || taps == 0 || h.size() == 0) { out2[0] = x; out2[1] = x; return; }
         zUp[idxUp] = x;
         int centre = taps / 2;
         int ic = idxUp - centre; if (ic < 0) ic += taps;
@@ -85,6 +86,7 @@ struct Halfband2x {
     }
 
     inline float down(const float* in2) {
+        if (zDown.size() == 0 || taps == 0 || h.size() == 0) return in2[0];
         float acc = 0.0f;
         for (int k = 0; k < 2; ++k) {
             zDown[idxDown] = in2[k];
