@@ -1171,7 +1171,7 @@ void dsp_flush_all_state(void)
         g_convolutionNode.lpStateR = 0.0f;
     }
 
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 4; ++i) {
         memset(g_reverbNode.combL[i].buf, 0, sizeof(g_reverbNode.combL[i].buf));
         g_reverbNode.combL[i].idx = 0;
         g_reverbNode.combL[i].store = 0;
@@ -1179,7 +1179,7 @@ void dsp_flush_all_state(void)
         g_reverbNode.combR[i].idx = 0;
         g_reverbNode.combR[i].store = 0;
     }
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 2; ++i) {
         memset(g_reverbNode.apL[i].buf, 0, sizeof(g_reverbNode.apL[i].buf));
         g_reverbNode.apL[i].idx = 0;
         memset(g_reverbNode.apR[i].buf, 0, sizeof(g_reverbNode.apR[i].buf));
