@@ -203,7 +203,7 @@ struct StereoWidenerNode
     float sideLp, sideLp2;
 };
 
-#define MAX_AP_BUF 600
+#define MAX_AP_BUF 1500
 
 struct AllPassFilter
 {
@@ -258,7 +258,6 @@ struct AudiophileEQNode
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve
 };
 #define MAX_COMB_BUF 4000
-#define MAX_AP_BUF 1500
 
 struct CombFilter
 {

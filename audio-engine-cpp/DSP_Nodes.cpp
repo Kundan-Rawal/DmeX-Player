@@ -863,8 +863,9 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         // THE LOUDNESS WAR CLIPPER (Android Speakers Only)
         for (ma_uint32 i = 0; i < fc; ++i)
         {
-            float L = pIn[i * 2] * p->boost;
-            float R = pIn[i * 2 + 1] * p->boost;
+            float b = p->boost.next();
+            float L = pIn[i * 2] * b;
+            float R = pIn[i * 2 + 1] * b;
 
             auto clip = [](float x)
             {
