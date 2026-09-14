@@ -132,9 +132,9 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
         float sideLows = p->sideLp2;     // The bass of the Side channel
         float sideHighs = S - sideLows;  // The treble/mids of the Side channel
 
-        float effectiveWidth = p->width;
+        float effectiveWidth = p->width.next();
         if (g_isLaptopSpeaker) {
-            effectiveWidth = 1.0f + ((p->width - 1.0f) * 0.4f);
+            effectiveWidth = 1.0f + ((effectiveWidth - 1.0f) * 0.4f);
         }
 
         float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.1f);
@@ -161,7 +161,7 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    float intensity = p->spatialIntensity;
+    float intensity = p->spatialIntensity.next();
 
     if (intensity < 0.001f)
     {
@@ -262,16 +262,16 @@ ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0}
 static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     AudiophileEQNode *p = (AudiophileEQNode *)pNode;
-    float tb = p->targetBass.load(std::memory_order_relaxed);
-    float tm = p->targetMid.load(std::memory_order_relaxed);
-    float th = p->targetHigh.load(std::memory_order_relaxed);
+    float tb = p->targetBass.next();
+    float tm = p->targetMid.next();
+    float th = p->targetHigh.next();
 
     if (!g_isRemasterOn && fabsf(g_trebleGain) < 0.001f && 
         (!g_isFIRModeOn || (fabsf(tb - 1.0f) < 0.005f && fabsf(tm - 1.0f) < 0.005f && fabsf(th - 1.0f) < 0.005f)))
     {
-        p->currentBass = 1.0f;
-        p->currentMid = 1.0f;
-        p->currentHigh = 1.0f;
+        
+        
+        
         memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
         *pFrameCountOut = *pFrameCountIn;
         return;
@@ -282,12 +282,11 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    const float SMOOTH_COEF = 0.002f;
     for (ma_uint32 i = 0; i < fc; ++i)
     {
-        p->currentBass += SMOOTH_COEF * (tb - p->currentBass);
-        p->currentMid += SMOOTH_COEF * (tm - p->currentMid);
-        p->currentHigh += SMOOTH_COEF * (th - p->currentHigh);
+        
+        
+        
 
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
@@ -303,7 +302,7 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
 
         // 3. VOCAL PROCESSING (180Hz - 8kHz)
         // Only apply vocal saturation & upward compression if Remaster is ON or Mid slider is actively tuned
-        if (g_isRemasterOn || fabsf(p->currentMid - 1.0f) > 0.01f)
+        if (g_isRemasterOn || fabsf(tm - 1.0f) > 0.01f)
         {
 #ifndef __ANDROID__
             // A. Psychoacoustic Vocal Exciter (Harmonic Bite)
@@ -335,9 +334,9 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         }
 
         // 4. Absolute Gains
-        float gBass = p->currentBass;
-        float gMid = p->currentMid;
-        float gTreble = p->currentHigh + g_trebleGain;
+        float gBass = tb;
+        float gMid = tm;
+        float gTreble = th + g_trebleGain;
 
         // 5. Parallel Summation
         // Because LR4 crossovers sum perfectly flat, re-combining these bands 
@@ -377,7 +376,7 @@ void comb_init(CombFilter *c, int sz, float fb, float dp)
 }
 void reverb_init_filters(ReverbNode *r, float sampleRate)
 {
-    float fb = r->roomSize, dp = r->damp;
+    float fb = r->roomSize.peek(), dp = r->damp.peek();
     
     // Scale indices by sample rate (they were hardcoded for 44.1kHz)
     float sr_ratio = sampleRate > 0.0f ? (sampleRate / 44100.0f) : 1.0f;
@@ -419,7 +418,7 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
-    float dry = 1.0f - r->wetMix;
+    float dry = 1.0f - r->wetMix.next();
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float iL = pIn[i * 2], iR = pIn[i * 2 + 1];
@@ -450,8 +449,8 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         // Only apply the wet/dry crossfade to the mids and highs (>180 Hz).
         float bassL = iL - hpL;
         float bassR = iR - hpR;
-        pOut[i * 2] = bassL + (hpL * dry + oL * r->wetMix);
-        pOut[i * 2 + 1] = bassR + (hpR * dry + oR * r->wetMix);
+        pOut[i * 2] = bassL + (hpL * dry + oL * r->wetMix.next());
+        pOut[i * 2 + 1] = bassR + (hpR * dry + oR * r->wetMix.next());
     }
 }
 ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
@@ -697,8 +696,8 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
         return;
     }
 
-    const float dry = 1.0f - p->wetMix;
-    const float wet = p->wetMix;
+    const float dry = 1.0f - p->wetMix.next();
+    const float wet = p->wetMix.next();
     const float HP_COEF = 0.011f;
     const float LP_COEF = 0.92f;
 
@@ -714,7 +713,7 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
         float feedL = (hpL * 0.80f) + (inL * 0.20f);
         float feedR = (hpR * 0.80f) + (inR * 0.20f);
 
-        if (p->wetMix < 0.99f)
+        if (p->wetMix.next() < 0.99f)
         {
             float tempL = feedL;
             feedL += feedR * 0.30f;
@@ -782,8 +781,8 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    float thresh = c->threshold.load(std::memory_order_relaxed);
-    float makeup = c->makeupGain.load(std::memory_order_relaxed);
+    float thresh = c->threshold.next();
+    float makeup = c->makeupGain.next();
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
@@ -851,7 +850,8 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     *pFrameCountOut = fc;
 
     // Hard ceiling for the safety clipper
-    float thresh = (p->boost > 1.01f) ? 0.92f : 0.999f;
+    float b = p->boost.next();
+        float thresh = (b > 1.01f) ? 0.92f : 0.999f;
 
 #ifdef __ANDROID__
     if (g_isAndroidSpeaker)
@@ -886,8 +886,8 @@ static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     {
         // 1. Read raw input and apply the user's boost
         float multiplier = g_isLaptopSpeaker ? 1.3f : 1.0f; // Give laptop speakers a reasonable boost without squashing the limiter
-        float L = pIn[i * 2] * p->boost * multiplier;
-        float R = pIn[i * 2 + 1] * p->boost * multiplier;
+        float L = pIn[i * 2] * b * multiplier;
+        float R = pIn[i * 2 + 1] * b * multiplier;
 
         // 2. High-Pass Sidechain Peak Detection
         // We use a gentle 1-pole high-pass (subtracting a low-pass) for the envelope detector.
@@ -1135,3 +1135,97 @@ static void audio_restoration_process(ma_node *pNode, const float **ppFramesIn, 
     }
 }
 ma_node_vtable g_restoration_vtable = {audio_restoration_process, NULL, 1, 1, 0};
+extern ConvolutionNode g_convolutionNode;
+extern ReverbNode g_reverbNode;
+extern MultibandCompressorNode g_compressorNode;
+extern LimiterNode g_limiterNode;
+extern StudioExciterNode g_exciterNode;
+extern AudiophileEQNode g_audiophileEQNode;
+extern SubwooferNode g_subwooferNode;
+extern PsychoacousticNode g_spatializerNode;
+extern AudioRestorationNode g_restorationNode;
+extern StereoWidenerNode g_widenerNode;
+extern std::mutex g_irMutex;
+extern std::atomic<float> g_audioLevel;
+
+void dsp_flush_all_state(void)
+{
+    {
+        std::lock_guard<std::mutex> lk(g_irMutex);
+        if (g_convolutionNode.historyL)
+            memset(g_convolutionNode.historyL, 0, sizeof(float) * g_convolutionNode.irLength);
+        if (g_convolutionNode.historyR)
+            memset(g_convolutionNode.historyR, 0, sizeof(float) * g_convolutionNode.irLength);
+        g_convolutionNode.historyIdx = 0;
+        g_convolutionNode.hpStateL = 0.0f;
+        g_convolutionNode.hpStateR = 0.0f;
+        g_convolutionNode.lpStateL = 0.0f;
+        g_convolutionNode.lpStateR = 0.0f;
+    }
+
+    memset(g_reverbNode.combL, 0, sizeof(g_reverbNode.combL));
+    memset(g_reverbNode.combR, 0, sizeof(g_reverbNode.combR));
+    memset(g_reverbNode.apL,   0, sizeof(g_reverbNode.apL));
+    memset(g_reverbNode.apR,   0, sizeof(g_reverbNode.apR));
+
+    memset(g_compressorNode.dlyL, 0, sizeof(g_compressorNode.dlyL));
+    memset(g_compressorNode.dlyR, 0, sizeof(g_compressorNode.dlyR));
+    g_compressorNode.dlyIdx = 0;
+    g_compressorNode.envLow  = 0.0f;
+    g_compressorNode.envHigh = 0.0f;
+    g_compressorNode.lpStateL = 0.0f;
+    g_compressorNode.lpStateR = 0.0f;
+    g_compressorNode.delayLpStateL = 0.0f;
+    g_compressorNode.delayLpStateR = 0.0f;
+
+    memset(g_limiterNode.dlyL, 0, sizeof(g_limiterNode.dlyL));
+    memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
+    g_limiterNode.dlyIdx = 0;
+    g_limiterNode.gainEnv = 1.0f;
+    g_limiterNode.peakEnv = 0.0f;
+    g_limiterNode.scLpL = 0.0f;
+    g_limiterNode.scLpR = 0.0f;
+
+    g_exciterNode.hpStateL = 0.0f;
+    g_exciterNode.hpStateR = 0.0f;
+
+    
+    
+    
+    g_audiophileEQNode.envUpwardL = 0.0f;
+    g_audiophileEQNode.envUpwardR = 0.0f;
+    g_audiophileEQNode.dcBlockL = 0.0f;
+    g_audiophileEQNode.dcBlockR = 0.0f;
+    g_audiophileEQNode.env = 0.0f;
+
+    g_subwooferNode.hp1L = 0.0f; g_subwooferNode.hp1R = 0.0f;
+    g_subwooferNode.lp1L = 0.0f; g_subwooferNode.lp1R = 0.0f;
+    g_subwooferNode.env30_60 = 0.0f;
+    g_subwooferNode.env60_90 = 0.0f;
+    g_subwooferNode.env90_130 = 0.0f;
+
+    memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
+    g_spatializerNode.centerIdx = 0;
+    for(int i = 0; i < 3; ++i) {
+        memset(g_spatializerNode.rearApL[i].buf, 0, sizeof(g_spatializerNode.rearApL[i].buf));
+        memset(g_spatializerNode.rearApR[i].buf, 0, sizeof(g_spatializerNode.rearApR[i].buf));
+    }
+    g_spatializerNode.rearLpL = g_spatializerNode.rearLpR = 0.0f;
+    g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;
+    g_spatializerNode.notchTopR1 = g_spatializerNode.notchTopR2 = 0.0f;
+
+    memset(g_widenerNode.delayL, 0, sizeof(g_widenerNode.delayL));
+    memset(g_widenerNode.delayR, 0, sizeof(g_widenerNode.delayR));
+    g_widenerNode.delayIdx = 0;
+    g_widenerNode.lpStateL = 0.0f;
+    g_widenerNode.lpStateR = 0.0f;
+    g_widenerNode.sideLp = 0.0f;
+    g_widenerNode.sideLp2 = 0.0f;
+
+    g_restorationNode.x1L = 0.0f;
+    g_restorationNode.x1R = 0.0f;
+    g_restorationNode.prevTrebleL = 0.0f;
+    g_restorationNode.prevTrebleR = 0.0f;
+
+    g_audioLevel.store(0.0f, std::memory_order_relaxed);
+}

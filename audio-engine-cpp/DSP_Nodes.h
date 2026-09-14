@@ -4,6 +4,7 @@
 #include <atomic>
 #include <vector>
 #include <cmath>
+#include "SmoothedParam.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -184,7 +185,7 @@ struct StudioExciterNode
 struct StereoWidenerNode
 {
     ma_node_base baseNode;
-    float width;
+    SmoothedParam width;
     
     // Crossfeed states
     float delayL[CROSSFEED_DELAY_SAMPLES];
@@ -230,14 +231,13 @@ struct PsychoacousticNode
     float notchTopL1, notchTopL2;
     float notchTopR1, notchTopR2;
 
-    float spatialIntensity;
+    SmoothedParam spatialIntensity;
 };
 
 struct AudiophileEQNode
 {
     ma_node_base baseNode;
-    std::atomic<float> targetBass, targetMid, targetHigh;
-    float currentBass, currentMid, currentHigh;
+    SmoothedParam targetBass, targetMid, targetHigh;
     
     LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
     LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
@@ -266,7 +266,7 @@ struct ReverbNode
     ma_node_base baseNode;
     CombFilter combL[4], combR[4];
     AllPassFilter apL[2], apR[2];
-    float roomSize, wetMix, damp;
+    SmoothedParam roomSize, wetMix, damp;
     BiquadHPF hpfL, hpfR; // <-- ADD THIS
 };
 
@@ -295,7 +295,7 @@ struct ConvolutionNode
     int irLength;
     float *historyL, *historyR;
     int historyIdx;
-    float wetMix;
+    SmoothedParam wetMix;
     float hpStateL, hpStateR;
     float lpStateL, lpStateR;
     BiquadHPF hpfL, hpfR; // <-- ADD THIS
@@ -306,8 +306,8 @@ struct ConvolutionNode
 struct MultibandCompressorNode
 {
     ma_node_base baseNode;
-    std::atomic<float> threshold;
-    std::atomic<float> makeupGain;
+    SmoothedParam threshold;
+    SmoothedParam makeupGain;
     float envLow, envHigh;
     float attackCoef, releaseCoef;
     float lpStateL, lpStateR;
@@ -326,7 +326,8 @@ struct MultibandCompressorNode
 struct LimiterNode
 {
     ma_node_base baseNode;
-    float boost, gainEnv;
+    SmoothedParam boost;
+    float gainEnv;
     float attackCoef, releaseCoef;
     float peakEnv; // Anti-motorboating envelope peak follower
 
@@ -382,3 +383,5 @@ struct AudioRestorationNode
 };
 
 extern ma_node_vtable g_restoration_vtable;
+
+void dsp_flush_all_state(void);

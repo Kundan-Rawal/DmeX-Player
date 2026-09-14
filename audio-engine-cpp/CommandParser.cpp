@@ -179,7 +179,8 @@ extern "C" void execute_audio_command(const char *cmd_in)
                     std::lock_guard<std::mutex> lk(g_pathMutex);
                     g_lastLoadedPath = args;
                 }
-                updateRouting(); // <--- ONLY NEEDED ON LOAD NOW
+                updateRouting();
+                dsp_flush_all_state();
             }
             else
             {
@@ -205,7 +206,8 @@ extern "C" void execute_audio_command(const char *cmd_in)
                     std::lock_guard<std::mutex> lk(g_pathMutex);
                     g_lastLoadedPath = args;
                 }
-                updateRouting(); // <--- ONLY NEEDED ON LOAD NOW
+                updateRouting();
+                dsp_flush_all_state();
             }
         }
     }
@@ -225,6 +227,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
                 }
             }
             g_soundInitialized = false;
+            dsp_flush_all_state();
         }
     }
     else if (command == "PLAY" && g_soundInitialized)
@@ -250,34 +253,22 @@ extern "C" void execute_audio_command(const char *cmd_in)
         }
         
         ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(safe_stof(args) * (float)target_sr));
-
-        g_subwooferNode.lp1L = g_subwooferNode.lp1R = 0.0f;
-        g_subwooferNode.hp1L = g_subwooferNode.hp1R = 0.0f;
-
-        memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
-        for (int i = 0; i < 3; ++i) {
-            memset(g_spatializerNode.rearApL[i].buf, 0, sizeof(g_spatializerNode.rearApL[i].buf));
-            memset(g_spatializerNode.rearApR[i].buf, 0, sizeof(g_spatializerNode.rearApR[i].buf));
-        }
-        
-        g_spatializerNode.rearLpL = g_spatializerNode.rearLpR = 0.0f;
-        g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;
-        g_spatializerNode.notchTopR1 = g_spatializerNode.notchTopR2 = 0.0f;
+        dsp_flush_all_state();
     }
     else if (command == "REMASTER")
     {
         g_isRemasterOn = (stoi(args) == 1);
         if (g_isRemasterOn)
         {
-            g_audiophileEQNode.targetBass.store(1.6f, std::memory_order_relaxed);
-            g_audiophileEQNode.targetMid.store(0.7f, std::memory_order_relaxed);
-            g_audiophileEQNode.targetHigh.store(1.4f, std::memory_order_relaxed);
+            g_audiophileEQNode.targetBass.set(1.6f);
+            g_audiophileEQNode.targetMid.set(0.7f);
+            g_audiophileEQNode.targetHigh.set(1.4f);
         }
         else if (!g_isFIRModeOn)
         {
-            g_audiophileEQNode.targetBass.store(1.0f, std::memory_order_relaxed);
-            g_audiophileEQNode.targetMid.store(1.0f, std::memory_order_relaxed);
-            g_audiophileEQNode.targetHigh.store(1.0f, std::memory_order_relaxed);
+            g_audiophileEQNode.targetBass.set(1.0f);
+            g_audiophileEQNode.targetMid.set(1.0f);
+            g_audiophileEQNode.targetHigh.set(1.0f);
         }
     }
     else if (command == "FIRMODE")
@@ -293,9 +284,9 @@ extern "C" void execute_audio_command(const char *cmd_in)
                                             : v; };
         if (g_isFIRModeOn)
         {
-            g_audiophileEQNode.targetBass.store(clamp(b), std::memory_order_relaxed);
-            g_audiophileEQNode.targetMid.store(clamp(m), std::memory_order_relaxed);
-            g_audiophileEQNode.targetHigh.store(clamp(h), std::memory_order_relaxed);
+            g_audiophileEQNode.targetBass.set(clamp(b));
+            g_audiophileEQNode.targetMid.set(clamp(m));
+            g_audiophileEQNode.targetHigh.set(clamp(h));
         }
     }
     else if (command == "COMPRESS")
@@ -322,13 +313,13 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "WIDEN")
     {
         float w = safe_stof(args);
-        g_widenerNode.width = w;
+        g_widenerNode.width.set(w);
         g_isWidenOn = (w > 1.01f);
     }
     else if (command == "3D")
     {
         float val = safe_stof(args);
-        g_spatializerNode.spatialIntensity = val * 0.50f;
+        g_spatializerNode.spatialIntensity.set(val * 0.50f);
     }
     else if (command == "BASS")
     {
@@ -368,7 +359,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
             g_convolutionNode.historyIdx = 0;
             g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
             g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
-            g_convolutionNode.wetMix = 0.0f;
+            g_convolutionNode.wetMix.set(0.0f);
             g_isConvolutionOn = false;
         }
 
@@ -443,7 +434,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
             g_convolutionNode.historyIdx = 0;
             g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
             g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
-            g_convolutionNode.wetMix = 0.0f;
+            g_convolutionNode.wetMix.set(0.0f);
             g_isConvolutionOn = false;
         }
 
@@ -509,7 +500,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "REVERB")
     {
         float w = safe_stof(args);
-        g_reverbNode.wetMix = w;
+        g_reverbNode.wetMix.set(w);
         g_isReverbOn = (w > 0.005f);
         if (g_isReverbOn)
             g_isConvolutionOn = false;
@@ -517,7 +508,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "CONVOLUTION")
     {
         float w = safe_stof(args);
-        g_convolutionNode.wetMix = w;
+        g_convolutionNode.wetMix.set(w);
         g_isConvolutionOn = (w > 0.005f);
         if (g_isConvolutionOn)
             g_isReverbOn = false;
@@ -525,7 +516,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "LIMITER")
     {
         float val = safe_stof(args);
-        g_limiterNode.boost = 1.0f + (val * 1.2f);
+        g_limiterNode.boost.set(1.0f + (val * 1.2f));
         g_limiterNode.gainEnv = 1.0f;
     }
     // Add this inside your if/else if chain block

@@ -221,12 +221,12 @@ engine_ready:
     ma_node_attach_output_bus(&g_midNode, 0, &g_trebleNode, 0);
 
     memset(&g_audiophileEQNode, 0, sizeof(g_audiophileEQNode));
-    g_audiophileEQNode.targetBass.store(1.0f, std::memory_order_relaxed);
-    g_audiophileEQNode.targetMid.store(1.0f, std::memory_order_relaxed);
-    g_audiophileEQNode.targetHigh.store(1.0f, std::memory_order_relaxed);
-    g_audiophileEQNode.currentBass = 1.0f;
-    g_audiophileEQNode.currentMid = 1.0f;
-    g_audiophileEQNode.currentHigh = 1.0f;
+    g_audiophileEQNode.targetBass.init(1.0f);
+    g_audiophileEQNode.targetMid.init(1.0f);
+    g_audiophileEQNode.targetHigh.init(1.0f);
+    
+    
+    
     g_audiophileEQNode.crossBassL.init((float)sr, 80.0f);
     g_audiophileEQNode.crossBassR.init((float)sr, 80.0f);
     g_audiophileEQNode.crossMidBassL.init((float)sr, 180.0f);
@@ -270,7 +270,7 @@ engine_ready:
     ma_node_init(pg, &c1, NULL, &g_exciterNode.baseNode);
 
     memset(&g_widenerNode, 0, sizeof(g_widenerNode));
-    g_widenerNode.width = 1.0f;
+    g_widenerNode.width.init(1.0f);
     ma_node_config c2 = ma_node_config_init();
     c2.vtable = &g_widener_vtable;
     c2.pInputChannels = g_inCh;
@@ -298,9 +298,9 @@ engine_ready:
     ma_node_init(pg, &c3, NULL, &g_spatializerNode.baseNode);
 
     memset(&g_reverbNode, 0, sizeof(g_reverbNode));
-    g_reverbNode.roomSize = 0.84f;
-    g_reverbNode.wetMix = 0.0f;
-    g_reverbNode.damp = 0.50f;
+    g_reverbNode.roomSize.init(0.84f);
+    g_reverbNode.wetMix.init(0.0f);
+    g_reverbNode.damp.init(0.50f);
     reverb_init_filters(&g_reverbNode, (float)sr);
     g_reverbNode.hpfL.init((float)sr, 150.0f);
     g_reverbNode.hpfR.init((float)sr, 150.0f);
@@ -322,8 +322,8 @@ engine_ready:
     ma_node_init(pg, &cConv, NULL, &g_convolutionNode.baseNode);
 
     memset(&g_compressorNode, 0, sizeof(g_compressorNode));
-    g_compressorNode.threshold.store(0.251f, std::memory_order_relaxed);
-    g_compressorNode.makeupGain.store(1.0f, std::memory_order_relaxed); // Safe headroom for AAudio
+    g_compressorNode.threshold.init(0.251f);
+    g_compressorNode.makeupGain.init(1.0f); // Safe headroom for AAudio
     g_compressorNode.attackCoef = expf(-1.0f / (0.005f * (float)sr));
     g_compressorNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
     g_compressorNode.delayLpStateL = 0.0f;
@@ -340,7 +340,7 @@ engine_ready:
     ma_node_init(pg, &c5, NULL, &g_compressorNode.baseNode);
 
     memset(&g_limiterNode, 0, sizeof(g_limiterNode));
-    g_limiterNode.boost = 1.0f;
+    g_limiterNode.boost.init(1.0f);
     g_limiterNode.gainEnv = 1.0f;
     g_limiterNode.peakEnv = 0.0f;
     g_limiterNode.attackCoef = expf(-1.0f / (0.0005f * (float)sr)); // Ultra-fast attack to prevent DAC hard-clipping
