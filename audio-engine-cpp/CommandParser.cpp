@@ -296,7 +296,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     else if (command == "UPSCALE")
     {
         float d = safe_stof(args);
-        g_exciterNode.targetDrive = d * 4.0f;
+        g_exciterNode.drive.set(d * 4.0f);
     }
     else if (command == "RESTORE_DENOISE")
     {

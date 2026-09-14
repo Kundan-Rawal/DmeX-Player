@@ -44,39 +44,47 @@ static float ap_tick(AllPassFilter *a, float in)
 // ================================================================
 // STUDIO AURAL EXCITER
 // ================================================================
-static void exciter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+static void exciter_process(ma_node* pNode, const float** ppIn, ma_uint32* pFrameCountIn,
+                            float** ppOut, ma_uint32* pFrameCountOut)
 {
-    if (!g_isUpscaleOn)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
-    StudioExciterNode *p = (StudioExciterNode *)pNode;
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
+    StudioExciterNode* n = (StudioExciterNode*)pNode;
+    const float* in  = ppIn[0];
+    float*       out = ppOut[0];
+    ma_uint32    N   = *pFrameCountOut = *pFrameCountIn;
 
-    const float SMOOTH_COEF = 0.002f;
-    const float HP_COEF = 0.40f;
+    if (!g_isUpscaleOn) { memcpy(out, in, sizeof(float) * N * 2); return; }
 
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        p->currentDrive += SMOOTH_COEF * (p->targetDrive - p->currentDrive);
-        float L = pIn[i * 2], R = pIn[i * 2 + 1];
+    for (ma_uint32 i = 0; i < N; ++i) {
+        float drive = n->drive.next();
 
-        p->hpStateL += HP_COEF * (L - p->hpStateL);
-        p->hpStateR += HP_COEF * (R - p->hpStateR);
-        float highL = L - p->hpStateL, highR = R - p->hpStateR;
+        float L = in[i*2], R = in[i*2 + 1];
 
-        float satL = highL * p->currentDrive;
-        float satR = highR * p->currentDrive;
-        satL = satL / (1.0f + fabsf(satL));
-        satR = satR / (1.0f + fabsf(satR));
+        n->hpStateL += (L - n->hpStateL) * n->hpCoef;
+        n->hpStateR += (R - n->hpStateR) * n->hpCoef;
+        float hpL = L - n->hpStateL;
+        float hpR = R - n->hpStateR;
 
-        pOut[i * 2] = L + (satL * 0.05f);
-        pOut[i * 2 + 1] = R + (satR * 0.05f);
+        float up[8];
+        n->os.upsample(hpL, hpR, up);
+        for (int k = 0; k < 4; ++k) {
+            float a = up[k*2], b = up[k*2 + 1];
+            up[k*2]     = a / (1.0f + fabsf(a * drive));
+            up[k*2 + 1] = b / (1.0f + fabsf(b * drive));
+        }
+        float satL, satR;
+        n->os.downsample(up, &satL, &satR);
+
+        n->dryDelayL[n->dryIdx] = L;
+        n->dryDelayR[n->dryIdx] = R;
+        int rd = n->dryIdx - n->dryDelay; if (rd < 0) rd += 32;
+        float dL = n->dryDelayL[rd], dR = n->dryDelayR[rd];
+        if (++n->dryIdx >= 32) n->dryIdx = 0;
+
+        float wetL = dL + satL * 0.05f;
+        float wetR = dR + satR * 0.05f;
+
+        out[i*2]     = wetL;
+        out[i*2 + 1] = wetR;
     }
 }
 ma_node_vtable g_exciter_vtable = {exciter_process, NULL, 1, 1, 0};

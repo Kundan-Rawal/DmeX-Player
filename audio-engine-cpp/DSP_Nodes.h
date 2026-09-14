@@ -164,19 +164,27 @@ struct DynamicSpatializerNode
 
 extern ma_node_vtable g_dynamic_spatializer_vtable;
 
+#include "Oversampler.h"
+
 struct StudioExciterNode
 {
     ma_node_base baseNode;
-    float targetDrive, currentDrive;
+    SmoothedParam drive;
     float hpStateL, hpStateR;
     float hpCoef; // Dynamically calculated HPF coefficient
 
+    Oversampler4x os;
+    float dryDelayL[32], dryDelayR[32];
+    int dryIdx = 0, dryDelay = 0;
+
     void init(float sampleRate) {
-        // Equivalent to HP_COEF = 0.40f at 44100 Hz
-        // alpha = 1.0 - exp(-2 * pi * Fc / Fs) -> Fc ~ 3600 Hz
-        float fc = 3600.0f;
+        os.init();
+        dryDelay = (int)(os.latencySamples() + 0.5f);
+        memset(dryDelayL, 0, sizeof(dryDelayL));
+        memset(dryDelayR, 0, sizeof(dryDelayR));
+        dryIdx = 0;
         float sr = (sampleRate > 0) ? sampleRate : 44100.0f;
-        hpCoef = 1.0f - expf(-2.0f * (float)M_PI * fc / sr);
+        hpCoef = 1.0f - std::exp(-2.0f * 3.14159265f * 3600.0f / sr);
     }
 };
 

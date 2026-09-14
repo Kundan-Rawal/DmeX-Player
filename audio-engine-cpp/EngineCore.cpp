@@ -220,7 +220,6 @@ engine_ready:
     ma_node_attach_output_bus(&g_bassNode, 0, &g_midNode, 0);
     ma_node_attach_output_bus(&g_midNode, 0, &g_trebleNode, 0);
 
-    memset(&g_audiophileEQNode, 0, sizeof(g_audiophileEQNode));
     g_audiophileEQNode.targetBass.init(1.0f);
     g_audiophileEQNode.targetMid.init(1.0f);
     g_audiophileEQNode.targetHigh.init(1.0f);
@@ -242,14 +241,12 @@ engine_ready:
     ma_node_init(pg, &cEQ, NULL, &g_audiophileEQNode.baseNode);
 
 
-    memset(&g_restorationNode, 0, sizeof(g_restorationNode));
     g_restorationNode.init((float)sr);
     ma_node_config restCfg = ma_node_config_init();
     restCfg.vtable = &g_restoration_vtable;
     restCfg.pInputChannels = g_inCh;
     restCfg.pOutputChannels = g_outCh;
     ma_node_init(pg, &restCfg, NULL, &g_restorationNode.baseNode);
-    memset(&g_subwooferNode, 0, sizeof(g_subwooferNode));
     g_subwooferNode.crossBassL.init((float)sr, 80.0f);
     g_subwooferNode.crossBassR.init((float)sr, 80.0f);
     g_subwooferNode.crossMidBassL.init((float)sr, 180.0f);
@@ -261,7 +258,7 @@ engine_ready:
     subCfg.pOutputChannels = g_outCh;
     ma_node_init(pg, &subCfg, NULL, &g_subwooferNode.baseNode);
 
-    memset(&g_exciterNode, 0, sizeof(g_exciterNode));
+    g_exciterNode.hpStateL = 0; g_exciterNode.hpStateR = 0; g_exciterNode.os.reset();
     g_exciterNode.init((float)sr);
     ma_node_config c1 = ma_node_config_init();
     c1.vtable = &g_exciter_vtable;
@@ -269,7 +266,6 @@ engine_ready:
     c1.pOutputChannels = g_outCh;
     ma_node_init(pg, &c1, NULL, &g_exciterNode.baseNode);
 
-    memset(&g_widenerNode, 0, sizeof(g_widenerNode));
     g_widenerNode.width.init(1.0f);
     ma_node_config c2 = ma_node_config_init();
     c2.vtable = &g_widener_vtable;
@@ -277,7 +273,6 @@ engine_ready:
     c2.pOutputChannels = g_outCh;
     ma_node_init(pg, &c2, NULL, &g_widenerNode.baseNode);
 
-    memset(&g_spatializerNode, 0, sizeof(g_spatializerNode));
     g_spatializerNode.crossSubwooferL.init((float)sr, 180.0f);
     g_spatializerNode.crossSubwooferR.init((float)sr, 180.0f);
     
@@ -297,7 +292,6 @@ engine_ready:
     c3.pOutputChannels = g_outCh;
     ma_node_init(pg, &c3, NULL, &g_spatializerNode.baseNode);
 
-    memset(&g_reverbNode, 0, sizeof(g_reverbNode));
     g_reverbNode.roomSize.init(0.84f);
     g_reverbNode.wetMix.init(0.0f);
     g_reverbNode.damp.init(0.50f);
@@ -311,7 +305,6 @@ engine_ready:
     cRev.pOutputChannels = g_outCh;
     ma_node_init(pg, &cRev, NULL, &g_reverbNode.baseNode);
 
-    memset(&g_convolutionNode, 0, sizeof(g_convolutionNode));
     g_convolutionNode.hpfL.init((float)sr, 150.0f);
     g_convolutionNode.hpfR.init((float)sr, 150.0f);
 
@@ -321,7 +314,6 @@ engine_ready:
     cConv.pOutputChannels = g_outCh;
     ma_node_init(pg, &cConv, NULL, &g_convolutionNode.baseNode);
 
-    memset(&g_compressorNode, 0, sizeof(g_compressorNode));
     g_compressorNode.threshold.init(0.251f);
     g_compressorNode.makeupGain.init(1.0f); // Safe headroom for AAudio
     g_compressorNode.attackCoef = expf(-1.0f / (0.005f * (float)sr));
@@ -339,7 +331,6 @@ engine_ready:
     c5.pOutputChannels = g_outCh;
     ma_node_init(pg, &c5, NULL, &g_compressorNode.baseNode);
 
-    memset(&g_limiterNode, 0, sizeof(g_limiterNode));
     g_limiterNode.boost.init(1.0f);
     g_limiterNode.gainEnv = 1.0f;
     g_limiterNode.peakEnv = 0.0f;
@@ -354,7 +345,6 @@ engine_ready:
     c6.pOutputChannels = g_outCh;
     ma_node_init(pg, &c6, NULL, &g_limiterNode.baseNode);
 
-    memset(&g_meterNode, 0, sizeof(g_meterNode));
     g_meterNode.crossLowL.init(sr, 250.0f);
     g_meterNode.crossLowR.init(sr, 250.0f);
     g_meterNode.crossHighL.init(sr, 4000.0f);
@@ -366,7 +356,6 @@ engine_ready:
     ma_node_init(pg, &cMeter, NULL, &g_meterNode.baseNode);
 
     // Init the 8D Spatializer (Dormant but memory allocated)
-    memset(&g_8DNode, 0, sizeof(g_8DNode));
     g_8DNode.crossLowL.init(sr, 250.0f);
     g_8DNode.crossLowR.init(sr, 250.0f);
     g_8DNode.crossHighL.init(sr, 4000.0f);
