@@ -228,7 +228,7 @@ fn nuke_artist_cache(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn audio_metrics() -> Vec<f32> {
-    let mut data = vec![0.0f32; 10]; 
+    let mut data = vec![0.0f32; 11]; 
     let mut level: f32 = 0.0;
     
     unsafe {
@@ -243,7 +243,7 @@ fn audio_metrics() -> Vec<f32> {
 
     vec![
         data[0], data[1], data[2], data[3], data[4], data[5], 
-        data[6], data[7], data[8], data[9], level, finished
+        data[6], data[7], data[8], data[9], data[10], level, finished
     ]
 }
 

@@ -336,6 +336,7 @@ struct LimiterNode
     ma_node_base baseNode;
     SmoothedParam boost;
     float gainEnv;
+    float gainSmooth; // T11.3 smoothed envelope
     float attackCoef, releaseCoef;
     float peakEnv; // Anti-motorboating envelope peak follower
 
@@ -345,6 +346,9 @@ struct LimiterNode
     
     // High-Pass Sidechain state to prevent Bass from ducking Vocals/Treble
     float scLpL, scLpR;
+
+    Oversampler4x osDetect;
+    float sr;
 };
 
 void reverb_init_filters(ReverbNode *r, float sampleRate);

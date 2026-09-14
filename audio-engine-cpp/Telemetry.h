@@ -8,6 +8,7 @@ extern std::atomic<float> g_audioLevel;
 extern std::atomic<float> g_bLvl, g_bPan;
 extern std::atomic<float> g_mLvl, g_mPan, g_mPhase;
 extern std::atomic<float> g_tLvl, g_tPan, g_tPhase;
+extern std::atomic<float> g_limiterGR;
 
 struct MeterNode {
     ma_node_base baseNode;

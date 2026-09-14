@@ -7,6 +7,7 @@ std::atomic<float> g_audioLevel{0.0f};
 std::atomic<float> g_bLvl{0.0f}, g_bPan{0.0f};
 std::atomic<float> g_mLvl{0.0f}, g_mPan{0.0f}, g_mPhase{1.0f};
 std::atomic<float> g_tLvl{0.0f}, g_tPan{0.0f}, g_tPhase{1.0f};
+std::atomic<float> g_limiterGR{1.0f};
 
 static void meter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
