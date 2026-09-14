@@ -338,9 +338,12 @@ engine_ready:
     g_limiterNode.attackCoef = expf(-1.0f / (0.0005f * (float)sr)); // Ultra-fast attack to prevent DAC hard-clipping
     g_limiterNode.releaseCoef = expf(-1.0f / (0.150f * (float)sr));
     g_limiterNode.delaySamples = (int)(0.002f * sr); // 2ms lookahead
+    if (g_limiterNode.delaySamples >= LIMITER_LOOKAHEAD_SAMPLES) {
+        g_limiterNode.delaySamples = LIMITER_LOOKAHEAD_SAMPLES - 1;
+    }
     memset(g_limiterNode.dlyL, 0, sizeof(g_limiterNode.dlyL));
     memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
-    g_limiterNode.osDetect.init(sr);
+    g_limiterNode.osDetect.init();
     g_limiterNode.sr = sr;
     ma_node_config c6 = ma_node_config_init();
     c6.vtable = &g_limiter_vtable;
