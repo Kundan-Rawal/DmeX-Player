@@ -324,6 +324,10 @@ struct ConvolutionNode
 
     SmoothedParam wetMix;
     BiquadHPF hpfL, hpfR;
+    float hpStateL = 0.0f;
+    float hpStateR = 0.0f;
+    float lpStateL = 0.0f;
+    float lpStateR = 0.0f;
     float bassStateL = 0.0f;
     float bassStateR = 0.0f;
 };

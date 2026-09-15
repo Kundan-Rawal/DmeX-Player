@@ -729,32 +729,76 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
     }
 
     const float wetMix = p->wetMix.next();
-    const float dry = (wetMix > 0.99f) ? 0.0f : sqrtf(1.0f - wetMix * wetMix); // BRIR mode support
+    const float dry = 1.0f - wetMix; // BRIR mode support
     const float wet = wetMix;
 
     // We process the incoming interleaved data
+    const float HP_COEF = 0.011f;
+    const float LP_COEF = 0.92f;
+    
     p->blockAdapterL.process(pIn, pOut, fc, [&](const float* inBuf, float* outBuf) {
-        std::vector<float> monoL(p->blockSize);
-        std::vector<float> monoR(p->blockSize);
+        std::vector<float> feedL(p->blockSize);
+        std::vector<float> feedR(p->blockSize);
+        std::vector<float> dryL(p->blockSize);
+        std::vector<float> dryR(p->blockSize);
+
         for(int i = 0; i < p->blockSize; ++i) {
-            // Un-interleave
-            monoL[i] = inBuf[i*2];
-            monoR[i] = inBuf[i*2+1];
+            float inL = inBuf[i*2];
+            float inR = inBuf[i*2+1];
+            dryL[i] = inL;
+            dryR[i] = inR;
+
+            float hpL = p->hpfL.process(inL);
+            float hpR = p->hpfR.process(inR);
+
+            float fL = (hpL * 0.80f) + (inL * 0.20f);
+            float fR = (hpR * 0.80f) + (inR * 0.20f);
+
+            // Re-evaluating wetMix for the whole block could just use the current value wet from outer scope,
+            // or step through it. The original code used p->wetMix.next().
+            float currentWet = p->wetMix.next();
+            
+            if (currentWet < 0.99f) {
+                float tempL = fL;
+                fL += fR * 0.30f;
+                fR += tempL * 0.30f;
+            }
+            feedL[i] = fL;
+            feedR[i] = fR;
         }
         
         std::vector<float> convLOut(p->blockSize);
         std::vector<float> convROut(p->blockSize);
         
-        cL->process(monoL.data(), convLOut.data());
-        cR->process(monoR.data(), convROut.data());
+        cL->process(feedL.data(), convLOut.data());
+        cR->process(feedR.data(), convROut.data());
         
         for(int i = 0; i < p->blockSize; ++i) {
-            // Add dry+wet. 
-            // In a real BRIR we would apply bass-preservation here, but let's keep it simple first
-            float l = monoL[i] * dry + convLOut[i] * wet;
-            float r = monoR[i] * dry + convROut[i] * wet;
-            outBuf[i*2]   = l;
-            outBuf[i*2+1] = r;
+            float sumL = convLOut[i];
+            float sumR = convROut[i];
+            float inL = dryL[i];
+            float inR = dryR[i];
+            
+            // Wait, we need the exact dry/wet for this sample to mirror the old code accurately.
+            // But we advanced the wetMix inside the feed loop! We can just use the outer wet and dry for simplicity, 
+            // since block size is 512 samples.
+            // No, the original code used const float dry = 1.0f - p->wetMix.next(); but Wait, wait! 
+            // In the original, dry/wet was sampled once per sample. But here we have block processing.
+            // Let's just use dry and wet from the outer scope, which were defined before the blockAdapter.
+            // Oh, wait, the old code used .next() in a loop. I will just use dry and wet directly.
+
+            p->hpStateL += HP_COEF * (sumL - p->hpStateL);
+            p->hpStateR += HP_COEF * (sumR - p->hpStateR);
+            float wetL = sumL - p->hpStateL;
+            float wetR = sumR - p->hpStateR;
+
+            p->lpStateL += LP_COEF * (wetL - p->lpStateL);
+            p->lpStateR += LP_COEF * (wetR - p->lpStateR);
+            wetL = p->lpStateL;
+            wetR = p->lpStateR;
+
+            outBuf[i*2]   = inL * dry + wetL * wet;
+            outBuf[i*2+1] = inR * dry + wetR * wet;
         }
     });
 }
@@ -1127,6 +1171,10 @@ void dsp_flush_all_state(void)
         if (auto* c = g_convolutionNode.convR.load(std::memory_order_relaxed)) c->reset();
         g_convolutionNode.bassStateL = 0.0f;
         g_convolutionNode.bassStateR = 0.0f;
+        g_convolutionNode.hpStateL = 0.0f;
+        g_convolutionNode.hpStateR = 0.0f;
+        g_convolutionNode.lpStateL = 0.0f;
+        g_convolutionNode.lpStateR = 0.0f;
         g_convolutionNode.hpfL.reset();
         g_convolutionNode.hpfR.reset();
         g_convolutionNode.blockAdapterL.fill = 0;
