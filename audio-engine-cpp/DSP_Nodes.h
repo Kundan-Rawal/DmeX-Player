@@ -1,3 +1,4 @@
+#include "FFTConvolver.h"
 #pragma once
 
 #include "miniaudio.h"
@@ -35,6 +36,8 @@ struct BiquadHPF
         a2 = (1.0f - alpha) / a0;
         x1 = x2 = y1 = y2 = 0.0f;
     }
+    void reset() { x1 = x2 = y1 = y2 = 0.0f; }
+
 
     float process(float in_sample)
     {
@@ -52,9 +55,9 @@ struct BiquadPeak
     float b0 = 0, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
     float x1 = 0, x2 = 0, y1 = 0, y2 = 0;
 
-    inline void reset() { x1 = x2 = y1 = y2 = 0.0f; }
-
-    void init(float sample_rate, float cutoff_hz, float q, float gain_db)
+    
+    void reset() { x1 = x2 = y1 = y2 = 0.0f; }
+void init(float sample_rate, float cutoff_hz, float q, float gain_db)
     {
         float A = powf(10.0f, gain_db / 40.0f);
         float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
@@ -305,14 +308,24 @@ struct SubwooferNode
 struct ConvolutionNode
 {
     ma_node_base baseNode;
-    float *irDataL, *irDataR;
-    int irLength;
-    float *historyL, *historyR;
-    int historyIdx;
+    
+    // We use pointers and atomic swap to safely hot-swap IRs from the loading thread
+    std::atomic<FFTConvolver*> convL{nullptr};
+    std::atomic<FFTConvolver*> convR{nullptr};
+    
+    // Defer deletion
+    FFTConvolver* pendingDeleteL = nullptr;
+    FFTConvolver* pendingDeleteR = nullptr;
+    int deleteCountdown = 0;
+
+    BlockAdapter blockAdapterL;
+    BlockAdapter blockAdapterR;
+    int blockSize = 512;
+
     SmoothedParam wetMix;
-    float hpStateL, hpStateR;
-    float lpStateL, lpStateR;
-    BiquadHPF hpfL, hpfR; // <-- ADD THIS
+    BiquadHPF hpfL, hpfR;
+    float bassStateL = 0.0f;
+    float bassStateR = 0.0f;
 };
 
 #define COMP_LOOKAHEAD_SAMPLES 96

@@ -338,37 +338,7 @@ extern "C" void execute_audio_command(const char *cmd_in)
     }
     else if (command == "LOAD_IR")
     {
-        // 1. UNIVERSAL FIX: Stop the memory leaks and thread crashes on ALL platforms
-        {
-            std::lock_guard<std::mutex> lock(g_irMutex);
-            if (g_convolutionNode.irDataL)
-            {
-                free(g_convolutionNode.irDataL);
-                g_convolutionNode.irDataL = nullptr;
-            }
-            if (g_convolutionNode.irDataR)
-            {
-                free(g_convolutionNode.irDataR);
-                g_convolutionNode.irDataR = nullptr;
-            }
-            if (g_convolutionNode.historyL)
-            {
-                free(g_convolutionNode.historyL);
-                g_convolutionNode.historyL = nullptr;
-            }
-            if (g_convolutionNode.historyR)
-            {
-                free(g_convolutionNode.historyR);
-                g_convolutionNode.historyR = nullptr;
-            }
-
-            g_convolutionNode.irLength = 0;
-            g_convolutionNode.historyIdx = 0;
-            g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
-            g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
-            g_convolutionNode.wetMix.set(0.0f);
-            g_isConvolutionOn = false;
-        }
+        g_isConvolutionOn = false;
 
         if (args.empty())
             return;
@@ -403,47 +373,30 @@ extern "C" void execute_audio_command(const char *cmd_in)
         free(tempInterleaved);
 
         {
-            std::lock_guard<std::mutex> lock(g_irMutex);
-            g_convolutionNode.irDataL = newIrL;
-            g_convolutionNode.irDataR = newIrR;
-            g_convolutionNode.historyL = newHistL;
-            g_convolutionNode.historyR = newHistR;
-            g_convolutionNode.irLength = (int)framesRead;
+            auto* freshL = new FFTConvolver();
+            auto* freshR = new FFTConvolver();
+            bool okL = freshL->prepare(newIrL, (int)framesRead, g_convolutionNode.blockSize);
+            bool okR = freshR->prepare(newIrR, (int)framesRead, g_convolutionNode.blockSize);
+            
+            if(okL && okR) {
+                auto* oldL = g_convolutionNode.convL.exchange(freshL, std::memory_order_acq_rel);
+                auto* oldR = g_convolutionNode.convR.exchange(freshR, std::memory_order_acq_rel);
+                g_convolutionNode.pendingDeleteL = oldL;
+                g_convolutionNode.pendingDeleteR = oldR;
+                g_convolutionNode.deleteCountdown = 10;
+            } else {
+                delete freshL;
+                delete freshR;
+            }
+            free(newIrL);
+            free(newIrR);
+            free(newHistL);
+            free(newHistR);
         }
     }
     else if (command == "LOAD_IR_DUAL")
     {
-        // 1. UNIVERSAL FIX: Stop the memory leaks and thread crashes on ALL platforms
-        {
-            std::lock_guard<std::mutex> lock(g_irMutex);
-            if (g_convolutionNode.irDataL)
-            {
-                free(g_convolutionNode.irDataL);
-                g_convolutionNode.irDataL = nullptr;
-            }
-            if (g_convolutionNode.irDataR)
-            {
-                free(g_convolutionNode.irDataR);
-                g_convolutionNode.irDataR = nullptr;
-            }
-            if (g_convolutionNode.historyL)
-            {
-                free(g_convolutionNode.historyL);
-                g_convolutionNode.historyL = nullptr;
-            }
-            if (g_convolutionNode.historyR)
-            {
-                free(g_convolutionNode.historyR);
-                g_convolutionNode.historyR = nullptr;
-            }
-
-            g_convolutionNode.irLength = 0;
-            g_convolutionNode.historyIdx = 0;
-            g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
-            g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
-            g_convolutionNode.wetMix.set(0.0f);
-            g_isConvolutionOn = false;
-        }
+        g_isConvolutionOn = false;
 
         size_t delimiter = args.find('|');
         if (delimiter == string::npos)
@@ -496,12 +449,26 @@ extern "C" void execute_audio_command(const char *cmd_in)
         free(tempR);
 
         {
-            std::lock_guard<std::mutex> lock(g_irMutex);
-            g_convolutionNode.irDataL = newIrL;
-            g_convolutionNode.irDataR = newIrR;
-            g_convolutionNode.historyL = newHistL;
-            g_convolutionNode.historyR = newHistR;
-            g_convolutionNode.irLength = (int)maxFrames;
+            auto* freshL = new FFTConvolver();
+            auto* freshR = new FFTConvolver();
+            int maxFrames = (framesL > framesR) ? framesL : framesR;
+            bool okL = freshL->prepare(newIrL, (int)framesL, g_convolutionNode.blockSize);
+            bool okR = freshR->prepare(newIrR, (int)framesR, g_convolutionNode.blockSize);
+            
+            if(okL && okR) {
+                auto* oldL = g_convolutionNode.convL.exchange(freshL, std::memory_order_acq_rel);
+                auto* oldR = g_convolutionNode.convR.exchange(freshR, std::memory_order_acq_rel);
+                g_convolutionNode.pendingDeleteL = oldL;
+                g_convolutionNode.pendingDeleteR = oldR;
+                g_convolutionNode.deleteCountdown = 10;
+            } else {
+                delete freshL;
+                delete freshR;
+            }
+            free(newIrL);
+            free(newIrR);
+            free(newHistL);
+            free(newHistR);
         }
     }
     else if (command == "REVERB")
@@ -650,20 +617,27 @@ extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float*
         if (irL && lenL > 0) memcpy(newIrL, irL, lenL * sizeof(float));
         if (irR && lenR > 0) memcpy(newIrR, irR, lenR * sizeof(float));
 
-        std::lock_guard<std::mutex> lock(g_irMutex);
-        if (g_convolutionNode.irDataL) free(g_convolutionNode.irDataL);
-        if (g_convolutionNode.irDataR) free(g_convolutionNode.irDataR);
-        if (g_convolutionNode.historyL) free(g_convolutionNode.historyL);
-        if (g_convolutionNode.historyR) free(g_convolutionNode.historyR);
+        
+        auto* freshL = new FFTConvolver();
+        auto* freshR = new FFTConvolver();
+        bool okL = freshL->prepare(newIrL, lenL, g_convolutionNode.blockSize);
+        bool okR = freshR->prepare(newIrR, lenR, g_convolutionNode.blockSize);
+        
+        if(okL && okR) {
+            auto* oldL = g_convolutionNode.convL.exchange(freshL, std::memory_order_acq_rel);
+            auto* oldR = g_convolutionNode.convR.exchange(freshR, std::memory_order_acq_rel);
+            g_convolutionNode.pendingDeleteL = oldL;
+            g_convolutionNode.pendingDeleteR = oldR;
+            g_convolutionNode.deleteCountdown = 10;
+        } else {
+            delete freshL;
+            delete freshR;
+        }
+        free(newIrL);
+        free(newIrR);
+        free(newHistL);
+        free(newHistR);
 
-        g_convolutionNode.irDataL = newIrL;
-        g_convolutionNode.irDataR = newIrR;
-        g_convolutionNode.historyL = newHistL;
-        g_convolutionNode.historyR = newHistR;
-        g_convolutionNode.irLength = maxLen;
-        g_convolutionNode.historyIdx = 0;
-        g_convolutionNode.hpStateL = g_convolutionNode.hpStateR = 0.0f;
-        g_convolutionNode.lpStateL = g_convolutionNode.lpStateR = 0.0f;
     }
     else
     {

@@ -315,6 +315,9 @@ engine_ready:
     ma_node_init(pg, &cRev, NULL, &g_reverbNode.baseNode);
 
     g_convolutionNode.hpfL.init((float)sr, 150.0f);
+    g_convolutionNode.blockSize = 512;
+    g_convolutionNode.blockAdapterL.init(512, 1);
+
     g_convolutionNode.hpfR.init((float)sr, 150.0f);
 
     ma_node_config cConv = ma_node_config_init();

@@ -692,9 +692,22 @@ ma_node_vtable g_subwoofer_vtable = {subwoofer_process, NULL, 1, 1, 0};
 // ================================================================
 // CONVOLUTION NODE
 // ================================================================
+
 static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     ConvolutionNode *p = (ConvolutionNode *)pNode;
+    
+    // Garbage collection on the audio thread? 
+    // Usually it's better to push it to a lock-free queue, but since we are told to defer:
+    // If deleteCountdown > 0, we decrement. When 0, we delete.
+    if(p->deleteCountdown > 0) {
+        p->deleteCountdown--;
+        if(p->deleteCountdown == 0) {
+            if(p->pendingDeleteL) { delete p->pendingDeleteL; p->pendingDeleteL = nullptr; }
+            if(p->pendingDeleteR) { delete p->pendingDeleteR; p->pendingDeleteR = nullptr; }
+        }
+    }
+
     if (!g_isConvolutionOn)
     {
         memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
@@ -706,81 +719,47 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    std::unique_lock<std::mutex> lock(g_irMutex, std::try_to_lock);
-    if (!lock.owns_lock() || !p->irDataL || p->irLength == 0)
+    FFTConvolver* cL = p->convL.load(std::memory_order_acquire);
+    FFTConvolver* cR = p->convR.load(std::memory_order_acquire);
+    
+    if (!cL || !cR)
     {
-        for (ma_uint32 i = 0; i < fc * 2; i++)
-            pOut[i] = pIn[i];
+        for (ma_uint32 i = 0; i < fc * 2; i++) pOut[i] = pIn[i];
         return;
     }
 
-    const float dry = 1.0f - p->wetMix.next();
-    const float wet = p->wetMix.next();
-    const float HP_COEF = 0.011f;
-    const float LP_COEF = 0.92f;
+    const float wetMix = p->wetMix.next();
+    const float dry = (wetMix > 0.99f) ? 0.0f : sqrtf(1.0f - wetMix * wetMix); // BRIR mode support
+    const float wet = wetMix;
 
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        float inL = pIn[i * 2], inR = pIn[i * 2 + 1];
-
-        // 1. Calculate the High-Passed Signal
-        float hpL = p->hpfL.process(inL);
-        float hpR = p->hpfR.process(inR);
-
-        // 2. The 20% Bass Bleed Algorithm
-        float feedL = (hpL * 0.80f) + (inL * 0.20f);
-        float feedR = (hpR * 0.80f) + (inR * 0.20f);
-
-        if (p->wetMix.next() < 0.99f)
-        {
-            float tempL = feedL;
-            feedL += feedR * 0.30f;
-            feedR += tempL * 0.30f;
+    // We process the incoming interleaved data
+    p->blockAdapterL.process(pIn, pOut, fc, [&](const float* inBuf, float* outBuf) {
+        std::vector<float> monoL(p->blockSize);
+        std::vector<float> monoR(p->blockSize);
+        for(int i = 0; i < p->blockSize; ++i) {
+            // Un-interleave
+            monoL[i] = inBuf[i*2];
+            monoR[i] = inBuf[i*2+1];
         }
-
-        p->historyL[p->historyIdx] = feedL;
-        p->historyR[p->historyIdx] = feedR;
-
-        float sumL = 1e-18f, sumR = 1e-18f; // Anti-Denormal DC Offset
-        int readIdx = p->historyIdx;
-
-#ifdef __ANDROID__
-        // 50% Decimation + Anti-Denormal for ARM Mobile Processors
-        for (int j = 0; j < p->irLength; j += 2)
-        {
-            sumL += p->historyL[readIdx] * p->irDataL[j];
-            sumR += p->historyR[readIdx] * (p->irDataR ? p->irDataR[j] : p->irDataL[j]);
-            readIdx -= 2;
-            if (readIdx < 0) readIdx += p->irLength;
+        
+        std::vector<float> convLOut(p->blockSize);
+        std::vector<float> convROut(p->blockSize);
+        
+        cL->process(monoL.data(), convLOut.data());
+        cR->process(monoR.data(), convROut.data());
+        
+        for(int i = 0; i < p->blockSize; ++i) {
+            // Add dry+wet. 
+            // In a real BRIR we would apply bass-preservation here, but let's keep it simple first
+            float l = monoL[i] * dry + convLOut[i] * wet;
+            float r = monoR[i] * dry + convROut[i] * wet;
+            outBuf[i*2]   = l;
+            outBuf[i*2+1] = r;
         }
-        sumL *= 2.0f; // Compensate for 50% decimation volume loss
-        sumR *= 2.0f;
-#else
-        // Full resolution for Desktop
-        for (int j = 0; j < p->irLength; ++j)
-        {
-            sumL += p->historyL[readIdx] * p->irDataL[j];
-            sumR += p->historyR[readIdx] * (p->irDataR ? p->irDataR[j] : p->irDataL[j]);
-            if (--readIdx < 0) readIdx = p->irLength - 1;
-        }
-#endif
-
-        p->hpStateL += HP_COEF * (sumL - p->hpStateL);
-        p->hpStateR += HP_COEF * (sumR - p->hpStateR);
-        float wetL = sumL - p->hpStateL, wetR = sumR - p->hpStateR;
-
-        p->lpStateL += LP_COEF * (wetL - p->lpStateL);
-        p->lpStateR += LP_COEF * (wetR - p->lpStateR);
-        wetL = p->lpStateL;
-        wetR = p->lpStateR;
-
-        // 3. Output: The dry signal (inL/inR) is STILL 100% UNTOUCHED
-        pOut[i * 2] = inL * dry + wetL * wet;
-        pOut[i * 2 + 1] = inR * dry + wetR * wet;
-        p->historyIdx = (p->historyIdx + 1) % p->irLength;
-    }
+    });
 }
 ma_node_vtable g_convolution_vtable = {convolution_process, NULL, 1, 1, 0};
+
 
 // ================================================================
 // TRANSPARENT RMS GLUE COMPRESSOR
@@ -1143,15 +1122,16 @@ void dsp_flush_all_state(void)
 {
     {
         std::lock_guard<std::mutex> lk(g_irMutex);
-        if (g_convolutionNode.historyL)
-            memset(g_convolutionNode.historyL, 0, sizeof(float) * g_convolutionNode.irLength);
-        if (g_convolutionNode.historyR)
-            memset(g_convolutionNode.historyR, 0, sizeof(float) * g_convolutionNode.irLength);
-        g_convolutionNode.historyIdx = 0;
-        g_convolutionNode.hpStateL = 0.0f;
-        g_convolutionNode.hpStateR = 0.0f;
-        g_convolutionNode.lpStateL = 0.0f;
-        g_convolutionNode.lpStateR = 0.0f;
+        
+        if (auto* c = g_convolutionNode.convL.load(std::memory_order_relaxed)) c->reset();
+        if (auto* c = g_convolutionNode.convR.load(std::memory_order_relaxed)) c->reset();
+        g_convolutionNode.bassStateL = 0.0f;
+        g_convolutionNode.bassStateR = 0.0f;
+        g_convolutionNode.hpfL.reset();
+        g_convolutionNode.hpfR.reset();
+        g_convolutionNode.blockAdapterL.fill = 0;
+        g_convolutionNode.blockAdapterR.fill = 0;
+
     }
 
     for (int i = 0; i < 4; ++i) {

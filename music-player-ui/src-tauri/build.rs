@@ -20,4 +20,12 @@ fn main() {
         .flag_if_supported("-O3") // Ensure optimizations are on for audio!
         .opt_level(3)             // FORCE cargo to compile this at -O3 even during 'npm run tauri dev'
         .compile("audioengine");
+
+    cc::Build::new()
+        .file("../../audio-engine-cpp/pffft.c")
+        .file("../../audio-engine-cpp/pffft_common.c")
+        .flag_if_supported("-O3")
+        .opt_level(3)
+        .compile("pffft");
+
 }
