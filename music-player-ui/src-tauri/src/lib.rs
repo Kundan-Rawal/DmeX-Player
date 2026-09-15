@@ -14,9 +14,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use rusqlite::Connection;
 
-mod db; 
+mod db;
+mod sbr; 
 
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
+
+static DB_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 struct AppState {
     db_conn: Mutex<Connection>,
@@ -122,9 +125,31 @@ pub extern "C" fn rust_decode_file(path: *const c_char) -> *mut RustAudioBuffer 
         }
     }
 
+    
+
     if all_samples.is_empty() { return std::ptr::null_mut(); }
 
+    let mut detected_cutoff = None;
+    if channels == 2 {
+        detected_cutoff = sbr::apply_sbr_offline(&mut all_samples, channels, sample_rate);
+    }
+    
+    // Save to DB if we detected a cutoff
+    if let Some(cutoff) = detected_cutoff {
+        if let Some(db_path) = DB_PATH.get() {
+            if let Ok(conn) = rusqlite::Connection::open(db_path) {
+                let quality = if cutoff >= 19000.0 { "lossless" } else if cutoff > 16500.0 { "lossy_high" } else { "lossy_low" };
+                let _ = conn.execute(
+                    "UPDATE tracks SET detected_cutoff_hz = ?1, source_quality = ?2 WHERE path = ?3",
+                    rusqlite::params![cutoff, quality, path_str]
+                );
+            }
+        }
+    }
+
     let engine_sr = unsafe { engine_get_sample_rate() };
+
+
 
     const MAX_OFFLINE_RESAMPLE_BYTES: usize = 120 * 1024 * 1024;
     let (mut final_samples, final_rate): (Vec<f32>, u32) = if engine_sr > 0 && engine_sr != sample_rate && (all_samples.len() * 4 * 2 <= MAX_OFFLINE_RESAMPLE_BYTES) {
@@ -813,6 +838,7 @@ pub fn run() {
             let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             std::fs::create_dir_all(&app_dir).expect("Failed to create app data directory");
             let db_path = app_dir.join("dmex_library.db");
+            let _ = DB_PATH.set(db_path.clone());
             let conn = rusqlite::Connection::open(&db_path).unwrap();
 
             conn.execute(
@@ -838,6 +864,8 @@ pub fn run() {
 
             // Silent migration for existing users
             let _ = conn.execute("ALTER TABLE tracks ADD COLUMN dateAdded INTEGER DEFAULT 0", []);
+            let _ = conn.execute("ALTER TABLE tracks ADD COLUMN detected_cutoff_hz REAL", []);
+            let _ = conn.execute("ALTER TABLE tracks ADD COLUMN source_quality TEXT", []);
 
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS playlists (

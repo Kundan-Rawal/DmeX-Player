@@ -18,6 +18,8 @@ pub struct Track {
     pub total_seconds_listened: Option<i32>,
     pub thumb: Option<String>,
     pub date_added: Option<i64>,
+    pub detected_cutoff_hz: Option<f32>,
+    pub source_quality: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -54,7 +56,7 @@ pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
             profile, metadataLoaded, genre, isFavorite, playCount, 
             totalSecondsListened, thumb, dateAdded
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(path) DO UPDATE SET
             name = excluded.name,
             artist = excluded.artist,
@@ -80,7 +82,7 @@ pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb, dateAdded 
+        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb, dateAdded, detected_cutoff_hz, source_quality 
          FROM tracks ORDER BY artist, album, name"
     )?;
     
@@ -101,6 +103,8 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             total_seconds_listened: row.get(12).unwrap_or(Some(0)),
             thumb: row.get(13).unwrap_or(None),
             date_added: row.get(14).unwrap_or(Some(0)),
+            detected_cutoff_hz: row.get(15).unwrap_or(None),
+            source_quality: row.get(16).unwrap_or(None),
         })
     })?;
 

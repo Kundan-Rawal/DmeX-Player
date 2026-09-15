@@ -18,6 +18,8 @@ export interface Track {
   totalSecondsListened?: number;
   isFavorite?: boolean;
   dateAdded?: number;
+  detectedCutoffHz?: number;
+  sourceQuality?: string;
 }
 
 export type NavView = 'ALL' | 'FAVORITES' | 'ALBUMS' | 'TOPTRACKS' | 'PLAYLIST_GALLERY' | 'CLOUD_FETCH' | string;
