@@ -252,6 +252,34 @@ struct PsychoacousticNode
     float lastDepth = -1.0f;
 };
 
+struct EqualLoudness {
+    BiquadPeak lowShelf, highShelf;
+    float sr = 48000.0f;
+    float envDb = -20.0f;
+
+    void init(float sampleRate) { sr = sampleRate; update(-20.0f); }
+
+    void update(float currentLufs, float refLufs = -14.0f) {
+        float delta = refLufs - currentLufs;
+        delta = fmaxf(0.0f, fminf(30.0f, delta));
+
+        // Reduced boost to prevent blowing out DmeX's already huge bass
+        float bassBoost   = delta * 0.15f; 
+        float trebleBoost = delta * 0.10f;
+
+        bassBoost   = fminf(bassBoost,   4.0f); // Max +4dB instead of +9dB
+        trebleBoost = fminf(trebleBoost, 3.0f);
+
+        lowShelf .init(sr,   80.0f, 0.7f, bassBoost);
+        highShelf.init(sr, 10000.0f, 0.7f, trebleBoost);
+    }
+
+    inline void process(float& l, float& r) {
+        l = highShelf.process(lowShelf.process(l));
+        r = highShelf.process(lowShelf.process(r));
+    }
+};
+
 struct AudiophileEQNode
 {
     ma_node_base baseNode;
@@ -266,6 +294,7 @@ struct AudiophileEQNode
     
     float dcBlockL, dcBlockR;
     float env; // CRITICAL FIX: Envelope tracker for Fletcher-Munson curve
+    EqualLoudness iso226;
 };
 #define MAX_COMB_BUF 4000
 

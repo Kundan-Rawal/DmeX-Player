@@ -41,6 +41,7 @@ bool g_isConvolutionOn = false;
 bool g_isAndroidSpeaker = false;
 bool g_isLaptopSpeaker = false;
 bool g_is8DModeOn = false;
+bool g_isAdaptiveLoudnessOn = true;
 
 ma_uint32 g_channels = 2;
 ma_uint32 g_inCh[1] = {2};
@@ -240,6 +241,8 @@ engine_ready:
     g_audiophileEQNode.crossTrebleR.init((float)sr, 8000.0f);
     g_audiophileEQNode.presenceL.init((float)sr, 2500.0f, 0.707f, 2.0f);
     g_audiophileEQNode.presenceR.init((float)sr, 2500.0f, 0.707f, 2.0f);
+    g_audiophileEQNode.iso226.init((float)sr);
+    g_audiophileEQNode.env = 0.0398f;
     ma_node_config cEQ = ma_node_config_init();
     cEQ.vtable = &g_audiophile_eq_vtable;
     cEQ.pInputChannels = g_inCh;

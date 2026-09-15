@@ -336,6 +336,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
     {
         g_trebleGain = safe_stof(args);
     }
+    else if (command == "ISO226")
+    {
+        g_isAdaptiveLoudnessOn = (args == "ON");
+    }
     else if (command == "LOAD_IR")
     {
         g_isConvolutionOn = false;
