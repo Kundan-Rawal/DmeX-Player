@@ -316,7 +316,7 @@ engine_ready:
 
     g_convolutionNode.hpfL.init((float)sr, 150.0f);
     g_convolutionNode.blockSize = 512;
-    g_convolutionNode.blockAdapterL.init(512, 1);
+    g_convolutionNode.blockAdapterL.init(512, 2);
 
     g_convolutionNode.hpfR.init((float)sr, 150.0f);
 
