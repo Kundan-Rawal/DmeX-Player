@@ -455,7 +455,6 @@ extern "C" void execute_audio_command(const char *cmd_in)
         {
             auto* freshL = new FFTConvolver();
             auto* freshR = new FFTConvolver();
-            int maxFrames = (framesL > framesR) ? framesL : framesR;
             bool okL = freshL->prepare(newIrL, (int)framesL, g_convolutionNode.blockSize);
             bool okR = freshR->prepare(newIrR, (int)framesR, g_convolutionNode.blockSize);
             
@@ -550,7 +549,6 @@ extern "C" void get_audio_metrics(float *out_data, float *out_level)
     out_data[7] = g_tLvl.load(std::memory_order_relaxed);
     out_data[8] = g_tPan.load(std::memory_order_relaxed);
     out_data[9] = g_tPhase.load(std::memory_order_relaxed);
-    extern std::atomic<float> g_limiterGR;
     out_data[10] = g_limiterGR.load(std::memory_order_relaxed);
     *out_level = g_audioLevel.load(std::memory_order_relaxed);
 }
