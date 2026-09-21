@@ -460,9 +460,9 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         float hpL = r->hpfL.process(iL);
         float hpR = r->hpfR.process(iR);
 
-        // 2. The 20% Bass Bleed Algorithm (80% HPF + 20% RAW)
-        float bleedL = (hpL * 0.80f) + (iL * 0.20f);
-        float bleedR = (hpR * 0.80f) + (iR * 0.20f);
+        // 2. The 10% Bass Bleed Algorithm (90% HPF + 10% RAW) - reduced from 20% to 10% to keep punch tight and intact
+        float bleedL = (hpL * 0.90f) + (iL * 0.10f);
+        float bleedR = (hpR * 0.90f) + (iR * 0.10f);
 
         // 3. Feed the calculated bleed into the reverb combs
         float feed = ((bleedL + bleedR) * 0.5f) * 0.2f + ((bleedL - bleedR) * 0.5f) * 0.8f;
@@ -482,8 +482,10 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         // Only apply the wet/dry crossfade to the mids and highs (>180 Hz).
         float bassL = iL - hpL;
         float bassR = iR - hpR;
-        pOut[i * 2] = bassL + (hpL * dry + oL * r->wetMix.next());
-        pOut[i * 2 + 1] = bassR + (hpR * dry + oR * r->wetMix.next());
+        float curWet = r->wetMix.next();
+        float curDry = 1.0f - curWet;
+        pOut[i * 2] = bassL + (hpL * curDry + oL * curWet);
+        pOut[i * 2 + 1] = bassR + (hpR * curDry + oR * curWet);
     }
 }
 ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
@@ -766,17 +768,17 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
             float hpL = p->hpfL.process(inL);
             float hpR = p->hpfR.process(inR);
 
-            float fL = (hpL * 0.80f) + (inL * 0.20f);
-            float fR = (hpR * 0.80f) + (inR * 0.20f);
+            // 10% Bass Bleed (reduced from 20% down to 10% to keep bass punch solid & dry)
+            float fL = (hpL * 0.90f) + (inL * 0.10f);
+            float fR = (hpR * 0.90f) + (inR * 0.10f);
 
-            // Re-evaluating wetMix for the whole block could just use the current value wet from outer scope,
-            // or step through it. The original code used p->wetMix.next().
             float currentWet = p->wetMix.next();
             
             if (currentWet < 0.99f) {
                 float tempL = fL;
-                fL += fR * 0.30f;
-                fR += tempL * 0.30f;
+                // Reduced cross-bleed from 30% to 10% to keep Left and Right stereo bass distinct without smearing
+                fL += fR * 0.10f;
+                fR += tempL * 0.10f;
             }
             feedL[i] = fL;
             feedR[i] = fR;

@@ -339,7 +339,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
       }
 
       // Activate convolution and update UI state — mirrors the Windows path exactly
-      await p.writeToEngine('CONVOLUTION 0.35');
+      await p.writeToEngine('CONVOLUTION 0.25');
       p.setIsManualOverride(true);
       p.setSmartTaste('QUALITY' as Taste);
     } catch (error) {

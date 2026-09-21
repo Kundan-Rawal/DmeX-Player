@@ -110,7 +110,7 @@ export const DSPStudio = ({
   //         const path = await resolveResource(env.path);
   //         writeToEngine(`LOAD_IR ${path}`);
   //       }
-  //       writeToEngine(`CONVOLUTION 0.35`);
+  //       writeToEngine(`CONVOLUTION 0.25`);
   //       setIsManualOverride(true);
   //       setSmartTaste('QUALITY' as Taste);
   //     } catch (err) {
@@ -171,7 +171,7 @@ export const DSPStudio = ({
                             await writeToEngine(`LOAD_IR ${path}`);
                           }
                           
-                          await writeToEngine(`CONVOLUTION 0.35`);
+                          await writeToEngine(`CONVOLUTION 0.25`);
                           setIsManualOverride(true);
                           setSmartTaste('QUALITY' as Taste);
                         } catch (err) {
