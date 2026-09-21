@@ -42,6 +42,7 @@ bool g_isAndroidSpeaker = false;
 bool g_isLaptopSpeaker = false;
 bool g_is8DModeOn = false;
 bool g_isAdaptiveLoudnessOn = true;
+float g_masterVolume = 1.0f;
 
 ma_uint32 g_channels = 2;
 ma_uint32 g_inCh[1] = {2};

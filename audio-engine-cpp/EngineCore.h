@@ -34,6 +34,7 @@ extern bool g_isAndroidSpeaker;
 extern bool g_isLaptopSpeaker;
 extern bool g_is8DModeOn; // Add to toggles
 extern bool g_isAdaptiveLoudnessOn;
+extern float g_masterVolume;
                           // Add to node instances
 
 // Node Instances

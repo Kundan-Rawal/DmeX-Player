@@ -234,8 +234,11 @@ extern "C" void execute_audio_command(const char *cmd_in)
         ma_sound_start(&g_sound);
     else if (command == "PAUSE" && g_soundInitialized)
         ma_sound_stop(&g_sound);
-    else if (command == "VOLUME" && !args.empty())
-        ma_engine_set_volume(&g_engine, safe_stof(args));
+    else if (command == "VOLUME" && !args.empty()) {
+        float v = safe_stof(args);
+        ma_engine_set_volume(&g_engine, v);
+        g_masterVolume = v;
+    }
     else if (command == "SEEK" && g_soundInitialized)
     {
         ma_uint32 target_sr = 44100; // default fallback

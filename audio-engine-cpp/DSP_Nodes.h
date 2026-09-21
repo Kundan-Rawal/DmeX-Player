@@ -259,16 +259,21 @@ struct EqualLoudness {
 
     void init(float sampleRate) { sr = sampleRate; update(-20.0f); }
 
-    void update(float currentLufs, float refLufs = -14.0f) {
-        float delta = refLufs - currentLufs;
-        delta = fmaxf(0.0f, fminf(30.0f, delta));
+    void update(float currentVolume) {
+        float delta = 0.0f;
+        // Start boosting ONLY when volume slider is below 50%
+        if (currentVolume < 0.5f) {
+            // Delta scales from 0 (at 0.5 vol) to 50 (at 0.0 vol)
+            delta = (0.5f - currentVolume) * 100.0f;
+        }
 
-        // Reduced boost to prevent blowing out DmeX's already huge bass
-        float bassBoost   = delta * 0.15f; 
-        float trebleBoost = delta * 0.10f;
+        // Extremely gentle boost for DmeX's naturally bass-heavy signature
+        float bassBoost   = delta * 0.05f; 
+        float trebleBoost = delta * 0.03f;
 
-        bassBoost   = fminf(bassBoost,   4.0f); // Max +4dB instead of +9dB
-        trebleBoost = fminf(trebleBoost, 3.0f);
+        // Hard cap to prevent any distortion
+        bassBoost   = fminf(bassBoost,   2.5f); // Max +2.5dB
+        trebleBoost = fminf(trebleBoost, 1.5f); // Max +1.5dB
 
         lowShelf .init(sr,   80.0f, 0.7f, bassBoost);
         highShelf.init(sr, 10000.0f, 0.7f, trebleBoost);

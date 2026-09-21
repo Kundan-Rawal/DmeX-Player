@@ -8,7 +8,11 @@
 extern std::atomic<float> g_audioLevel;
 extern float g_bassGain;
 extern float g_trebleGain;
+extern bool g_isAdaptiveLoudnessOn;
+extern float g_masterVolume;
 extern float g_trebleGain;
+extern bool g_isAdaptiveLoudnessOn;
+extern float g_masterVolume;
 extern std::mutex g_irMutex;
 extern bool g_isConvolutionOn;
 extern bool g_isFIRModeOn;
@@ -368,8 +372,19 @@ static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_u
         const float MASTER_GAIN = 1.0f;
 #endif
 
-        pOut[i * 2] = ((bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble)) * MASTER_GAIN;
-        pOut[i * 2 + 1] = ((bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble)) * MASTER_GAIN;
+        float outMixL = (bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble);
+        float outMixR = (bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble);
+
+        if (g_isAdaptiveLoudnessOn) {
+            // Update filter using the master volume
+            if (i == 0) {
+                p->iso226.update(g_masterVolume);
+            }
+            p->iso226.process(outMixL, outMixR);
+        }
+
+        pOut[i * 2] = outMixL * MASTER_GAIN;
+        pOut[i * 2 + 1] = outMixR * MASTER_GAIN;
     }
 }
 ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
