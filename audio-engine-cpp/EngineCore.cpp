@@ -377,11 +377,8 @@ engine_ready:
     cMeter.pOutputChannels = g_outCh;
     ma_node_init(pg, &cMeter, NULL, &g_meterNode.baseNode);
 
-    // Init the 8D Spatializer (Dormant but memory allocated)
-    g_8DNode.crossLowL.init(sr, 250.0f);
-    g_8DNode.crossLowR.init(sr, 250.0f);
-    g_8DNode.crossHighL.init(sr, 4000.0f);
-    g_8DNode.crossHighR.init(sr, 4000.0f);
+    // Init the 9-Speaker Virtual Stage
+    g_8DNode.init((float)sr);
 
     ma_node_config c8D = ma_node_config_init();
     c8D.vtable = &g_dynamic_spatializer_vtable;
@@ -396,9 +393,10 @@ engine_ready:
     ma_node_attach_output_bus(&g_subwooferNode, 0, &g_exciterNode, 0);
     ma_node_attach_output_bus(&g_exciterNode, 0, &g_widenerNode, 0);
 
-    // --- 8D Amputated. Direct connection to Haas Spatializer ---
-    ma_node_attach_output_bus(&g_widenerNode, 0, &g_spatializerNode, 0);
-    // -----------------------------------------------------------
+    // --- 9D Virtual Speaker Stage Connection ---
+    ma_node_attach_output_bus(&g_widenerNode, 0, &g_8DNode.baseNode, 0);
+    ma_node_attach_output_bus(&g_8DNode.baseNode, 0, &g_spatializerNode, 0);
+    // --------------------------------------------
 
     ma_node_attach_output_bus(&g_spatializerNode, 0, &g_reverbNode, 0);
     ma_node_attach_output_bus(&g_reverbNode, 0, &g_limiterNode, 0);

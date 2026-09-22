@@ -993,87 +993,35 @@ ma_node_vtable g_limiter_vtable = {limiter_process, NULL, 1, 1, 0};
 // ================================================================
 static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
-    // 1. THE ACOUSTIC SHIELD: Absolute zero footprint when disabled.
-    if (!g_is8DModeOn)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
-
     DynamicSpatializerNode *p = (DynamicSpatializerNode *)pNode;
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    // LFO Speed: 0.15 Hz (One full circle around the head every 6.6 seconds)
-    float sr = (p->sampleRate > 0) ? p->sampleRate : 48000.0f;
-    float lfoStep = (2.0f * (float)M_PI * 0.15f) / sr;
+    // Real-time thread-safe toggle
+    p->gate.set(g_is8DModeOn);
+
+    // 1. THE ACOUSTIC SHIELD: Absolute bit-identical zero footprint when disabled.
+    if (p->gate.fullyOff())
+    {
+        memcpy(pOut, pIn, fc * 2 * sizeof(float));
+        return;
+    }
 
     for (ma_uint32 i = 0; i < fc; i++)
     {
         float inL = pIn[i * 2];
         float inR = pIn[i * 2 + 1];
 
-        // 2. THE CASCADING CROSSOVER (Shatter the signal into Low, Mid, High)
-        float lowL, midHighL, lowR, midHighR;
-        p->crossLowL.process(inL, lowL, midHighL);
-        p->crossLowR.process(inR, lowR, midHighR);
+        // 2. Render through the 9-Speaker Upmix & Binaural Matrix
+        float spatL = 0.0f, spatR = 0.0f;
+        p->upmixer.process(inL, inR, spatL, spatR);
 
-        float midL, highL, midR, highR;
-        p->crossHighL.process(midHighL, midL, highL);
-        p->crossHighR.process(midHighR, midR, highR);
-
-        // 3. THE SUB-BASS ANCHOR (Locked dead center)
-        float outLowL = lowL;
-        float outLowR = lowR;
-
-        // 4. THE ATMOSPHERIC ROOF (Static extreme Mid/Side widening for Highs)
-        float midSide_M = (highL + highR) * 0.5f;
-        float midSide_S = (highL - highR) * 0.5f;
-        float outHighL = midSide_M + (midSide_S * 1.5f);
-        float outHighR = midSide_M - (midSide_S * 1.5f);
-
-        // 5. THE 3D DRIFTER (Modulate only the Mids)
-        p->lfoPhase += lfoStep;
-        if (p->lfoPhase > 2.0f * (float)M_PI)
-            p->lfoPhase -= 2.0f * (float)M_PI;
-
-        float lfoVal = sinf(p->lfoPhase); // Ranges -1.0 (Left) to +1.0 (Right)
-
-        // Constant Power Panning Law
-        float angle = (lfoVal + 1.0f) * 0.25f * (float)M_PI;
-        float panGainL = cosf(angle);
-        float panGainR = sinf(angle);
-
-        // Mono-sum the mid band before panning it so it acts like a single solid object
-        float monoMid = (midL + midR) * 0.5f;
-        float pannedMidL = monoMid * panGainL;
-        float pannedMidR = monoMid * panGainR;
-
-        // 6. DYNAMIC HAAS DELAY (Psychoacoustic time-shifting)
-        // Delay the opposite ear by up to 12ms to trick the brain's localization
-        p->delayL[p->writeIdx] = pannedMidL;
-        p->delayR[p->writeIdx] = pannedMidR;
-
-        float maxDelaySamples = 12.0f * (sr / 1000.0f); // 12ms
-
-        // If sound is left (lfoVal < 0), delay the Right ear. Vice versa.
-        int delayOffsetL = (lfoVal > 0.0f) ? (int)(lfoVal * maxDelaySamples) : 0;
-        int delayOffsetR = (lfoVal < 0.0f) ? (int)(-lfoVal * maxDelaySamples) : 0;
-
-        int readIdxL = (p->writeIdx - delayOffsetL + HAAS_BUFFER_SIZE) % HAAS_BUFFER_SIZE;
-        int readIdxR = (p->writeIdx - delayOffsetR + HAAS_BUFFER_SIZE) % HAAS_BUFFER_SIZE;
-
-        float haasMidL = p->delayL[readIdxL];
-        float haasMidR = p->delayR[readIdxR];
-
-        p->writeIdx = (p->writeIdx + 1) % HAAS_BUFFER_SIZE;
-
-        // 7. SUMMING MIXER (Reassemble the shattered pieces)
-        pOut[i * 2] = outLowL + haasMidL + outHighL;
-        pOut[i * 2 + 1] = outLowR + haasMidR + outHighR;
+        // 3. Smooth lock-free 25ms crossfade between bypass and 9-speaker field
+        float gate = p->gate.next();
+        pOut[i * 2]     = inL + (spatL - inL) * gate;
+        pOut[i * 2 + 1] = inR + (spatR - inR) * gate;
     }
 }
 
@@ -1175,6 +1123,7 @@ extern AudiophileEQNode g_audiophileEQNode;
 extern SubwooferNode g_subwooferNode;
 extern PsychoacousticNode g_spatializerNode;
 extern AudioRestorationNode g_restorationNode;
+extern DynamicSpatializerNode g_8DNode;
 extern StereoWidenerNode g_widenerNode;
 extern std::mutex g_irMutex;
 extern std::atomic<float> g_audioLevel;

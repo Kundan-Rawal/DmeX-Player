@@ -163,6 +163,14 @@ function App() {
   const [isFIRMode, setIsFIRMode]     = useState(false);
   const [visMode, setVisMode]         = useState<'ORBIT'|'RADAR'>('ORBIT');
   const [speakerMode, setSpeakerMode] = useState<'NONE'|'LOW'|'MED'|'HIGH'>('NONE');
+  const [is9DStageOn, setIs9DStageOn] = useState(() => {
+    return localStorage.getItem('dmex_9d_stage') === 'true';
+  });
+  const is9DStageOnRef = useRef(is9DStageOn);
+  useEffect(() => {
+    is9DStageOnRef.current = is9DStageOn;
+    localStorage.setItem('dmex_9d_stage', is9DStageOn ? 'true' : 'false');
+  }, [is9DStageOn]);
 
   const [isPhoneSpeaker, setIsPhoneSpeaker] = useState(false);
   const isPhoneSpeakerRef = useRef(false);
@@ -920,7 +928,8 @@ function App() {
         writeToEngine(`TREBLE ${trebleLevelRef.current}`),
         writeToEngine(`LIMITER ${speakerModeRef.current==='NONE'?0:speakerModeRef.current==='LOW'?0.3:speakerModeRef.current==='MED'?0.6:1.0}`),
         writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
-        writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`)
+        writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`),
+          writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`)
       ]);
       if(id!==loadIdRef.current) return;
       await writeToEngine(`LOAD ${track.path}`);
@@ -1161,6 +1170,7 @@ function App() {
           restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
           setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
           setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
+            is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
         />
       </div>
     </div>
@@ -1799,6 +1809,7 @@ function App() {
           }}>
             {IS_ANDROID ? (
               <MobileExpandedPlayer 
+                is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
                 isExpanded={isExpanded}
                 trackTitle={trackTitle} trackArtist={trackArtist} albumArt={albumArt}
                 isPlaying={isPlaying} currentTime={currentTime} duration={duration}
@@ -1929,7 +1940,42 @@ function App() {
                           <button className={`glass-boost-btn ${visMode==='RADAR'?'active':''}`} style={visMode==='RADAR'?{background:'rgba(200,34,42,0.25)',borderColor:'var(--theme-color)',color:'var(--theme-color)'}:undefined} onClick={()=>setVisMode('RADAR')}>{IS_ANDROID ? '🎱 8B' : '📡 Spatial'}</button>
                         </div>
                       </div>
-                      <div className="glass-menu-section" style={{marginTop:14}}>
+                      {/* 9D VIRTUAL SPEAKERS (CINEMA STAGE) */}
+                        <div className="glass-menu-section" style={{marginTop:14}}>
+                          <div className="glass-label-row" style={{marginBottom:6}}>
+                            <span>9D Cinema Stage</span>
+                            <span style={{color:is9DStageOn?'#00e5ff':'var(--text-secondary)',fontWeight:600,fontSize:'0.8rem'}}>
+                              {is9DStageOn ? '9.1 Stage ON' : 'Stereo OFF'}
+                            </span>
+                          </div>
+                          <p style={{fontSize:'0.7rem',color:'var(--text-secondary)',margin:'0 0 10px 0',lineHeight:1.4}}>
+                            Intelligent 9-direction speaker separation with front/center vocal anchoring & 360° height ambience.
+                          </p>
+                          <div className="glass-boost-grid">
+                            <button
+                              className={`glass-boost-btn ${!is9DStageOn?'active':''}`}
+                              style={!is9DStageOn?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined}
+                              onClick={async ()=>{
+                                setIs9DStageOn(false);
+                                await writeToEngine('SPEAKER9D OFF');
+                              }}
+                            >
+                              Standard Stereo
+                            </button>
+                            <button
+                              className={`glass-boost-btn ${is9DStageOn?'active':''}`}
+                              style={is9DStageOn?{background:'rgba(0,229,255,0.22)',borderColor:'#00e5ff',color:'#00e5ff'}:undefined}
+                              onClick={async ()=>{
+                                setIs9DStageOn(true);
+                                await writeToEngine('SPEAKER9D ON');
+                              }}
+                            >
+                              9D Cinema Stage
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="glass-menu-section" style={{marginTop:14}}>
                         <div className="glass-label-row" style={{marginBottom:6}}><span>Audiophile EQ</span><span style={{fontSize:'0.72rem',fontWeight:600,color:isFIRMode?'#a5d6a7':'var(--text-secondary)',transition:'color 0.2s'}}>{isFIRMode?'✦ Linear Phase':'Standard IIR'}</span></div>
                         <p style={{fontSize:'0.7rem',color:'var(--text-secondary)',margin:'0 0 10px 0',lineHeight:1.4}}>Zero phase smearing on cymbals & hi-hats. Uses FIR convolution — sounds best on headphones.</p>
                         <div className="glass-boost-grid">
@@ -2050,6 +2096,7 @@ function App() {
                     restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
                     restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
                     setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
+            is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
                   />
                 )}
               </div>

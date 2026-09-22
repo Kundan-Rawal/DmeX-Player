@@ -59,6 +59,8 @@ interface DSPStudioProps {
   setBassLevel: (v: number) => void;
   setTrebleLevel: (v: number) => void;
   writeToEngine: (cmd: string) => Promise<void>;
+  is9DStageOn?: boolean;
+  setIs9DStageOn?: (v: boolean) => void;
 
   // ── ANDROID ESCAPE HATCH ──────────────────────────────────────────────────
   // When provided, DSPStudio delegates ALL acoustic-environment loading to this
@@ -81,7 +83,10 @@ export const DSPStudio = ({
   spatialExtra, setSpatialExtra, depthAmount, setDepthAmount, reverbWet, setReverbWet, 
   restorationDenoise: _restorationDenoise, setRestorationDenoise, restorationUpscale, setRestorationUpscale, restorationPresence: _restorationPresence, setRestorationPresence,
   setIsManualOverride, setSmartTaste, setBassLevel, setTrebleLevel,
-  writeToEngine,  // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
+  writeToEngine,
+  is9DStageOn = false,
+  setIs9DStageOn = () => {},
+  // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
 }: DSPStudioProps) => {
 
   const applyPreset = async (preset:'STUDIO'|'CINEMATIC'|'RELAX') => {
@@ -200,7 +205,39 @@ export const DSPStudio = ({
           <div className="dsp-label-row"><label>3D Depth</label><span className="val-purple">{spatialExtra>0?`+${Math.round(spatialExtra*100)}%`:'Base'}</span></div>
           <input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={spatialExtra} onChange={e=>{const v=parseFloat(e.target.value);setSpatialExtra(v);writeToEngine(`3D ${v}`);}}/>
         </div>
-        <div className="dsp-card" style={disabledStyle}>
+                  <div className="dsp-card" style={disabledStyle}>
+            <div className="dsp-label-row">
+              <label style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                <span style={{color: is9DStageOn ? '#00e5ff' : 'var(--text-secondary)'}}>●</span>
+                9D Virtual Speakers (Cinema Stage)
+              </label>
+              <button 
+                className="dsp-toggle-btn" 
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: '6px',
+                  border: is9DStageOn ? '1px solid #00e5ff' : '1px solid rgba(255,255,255,0.2)',
+                  background: is9DStageOn ? 'rgba(0, 229, 255, 0.2)' : 'transparent',
+                  color: is9DStageOn ? '#00e5ff' : 'var(--text-secondary)',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onClick={async () => {
+                  const next = !is9DStageOn;
+                  setIs9DStageOn(next);
+                  await writeToEngine(`SPEAKER9D ${next ? 'ON' : 'OFF'}`);
+                }}
+              >
+                {is9DStageOn ? 'ON (9.1 Stage)' : 'OFF (Stereo)'}
+              </button>
+            </div>
+            <p style={{fontSize:'0.7rem',color:'var(--text-secondary)',margin:'6px 0 0 0',lineHeight:1.3}}>
+              Intelligent 9-direction speaker separation with front/center vocal anchoring and 360° height ambience.
+            </p>
+          </div>
+<div className="dsp-card" style={disabledStyle}>
           <div className="dsp-label-row"><label>Vocal Frontness (Blauert)</label><span className="val-purple">{depthAmount>0?`+${Math.round(depthAmount*100)}%`:'Off'}</span></div>
           <input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={depthAmount} onChange={e=>{const v=parseFloat(e.target.value);setDepthAmount(v);writeToEngine(`DEPTH ${v}`);}}/>
         </div>

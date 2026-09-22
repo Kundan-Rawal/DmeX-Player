@@ -38,6 +38,7 @@ interface MobileExpandedPlayerProps {
   restorationUpscale: number;  setRestorationUpscale: (v: number) => void;
   restorationPresence: number; setRestorationPresence: (v: number) => void;
   setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
+  is9DStageOn?: boolean; setIs9DStageOn?: (v: boolean) => void;
   isProfileActive: boolean;    setIsProfileActive: (v: boolean) => void;
   isProfileActiveRef: React.MutableRefObject<boolean>;
   applySmartSettings: (profile: AudioProfile, taste: Taste) => Promise<void>;
@@ -431,6 +432,41 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                 </div>
               </div>
 
+              {/* 9D VIRTUAL SPEAKERS (CINEMA STAGE) */}
+              <div className="glass-menu-section" style={{ marginTop: 14 }}>
+                <div className="glass-label-row" style={{ marginBottom: 6 }}>
+                  <span>9D Cinema Stage</span>
+                  <span style={{ color: p.is9DStageOn ? '#00e5ff' : 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>
+                    {p.is9DStageOn ? '9.1 Stage ON' : 'Stereo OFF'}
+                  </span>
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0 0 10px 0', lineHeight: 1.4 }}>
+                  Intelligent 9-direction speaker separation with front/center vocal anchoring & 360° height ambience.
+                </p>
+                <div className="glass-boost-grid">
+                  <button
+                    className={`glass-boost-btn ${!p.is9DStageOn ? 'active' : ''}`}
+                    style={!p.is9DStageOn ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined}
+                    onClick={async () => {
+                      if (p.setIs9DStageOn) p.setIs9DStageOn(false);
+                      await p.writeToEngine('SPEAKER9D OFF');
+                    }}
+                  >
+                    Stereo
+                  </button>
+                  <button
+                    className={`glass-boost-btn ${p.is9DStageOn ? 'active' : ''}`}
+                    style={p.is9DStageOn ? { background: 'rgba(0,229,255,0.22)', borderColor: '#00e5ff', color: '#00e5ff' } : undefined}
+                    onClick={async () => {
+                      if (p.setIs9DStageOn) p.setIs9DStageOn(true);
+                      await p.writeToEngine('SPEAKER9D ON');
+                    }}
+                  >
+                    9D Cinema
+                  </button>
+                </div>
+              </div>
+
               {/* RESTORED: EQ */}
               <div className="glass-menu-section" style={{ marginTop: 14 }}>
                 <div className="glass-label-row" style={{ marginBottom: 6 }}><span>Audiophile EQ</span><span style={{ fontSize: '0.72rem', fontWeight: 600, color: p.isFIRMode ? '#a5d6a7' : 'var(--text-secondary)' }}>{p.isFIRMode ? '✦ Linear Phase' : 'Standard IIR'}</span></div>
@@ -528,6 +564,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   restorationPresence={p.restorationPresence} setRestorationPresence={p.setRestorationPresence}
                   setIsManualOverride={p.setIsManualOverride} setSmartTaste={p.setSmartTaste}
                   setBassLevel={p.setBassLevel} setTrebleLevel={p.setTrebleLevel} writeToEngine={p.writeToEngine}
+                    is9DStageOn={p.is9DStageOn} setIs9DStageOn={p.setIs9DStageOn}
           
                   onEnvSelect={handleAcousticEnvSelect}
                 />

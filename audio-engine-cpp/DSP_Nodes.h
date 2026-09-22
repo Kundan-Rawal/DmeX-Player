@@ -117,6 +117,8 @@ struct BiquadLPF
         x1 = x2 = y1 = y2 = 0;
     }
 
+    void reset() { x1 = x2 = y1 = y2 = 0.0f; }
+
     float process(float in)
     {
         float out = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
@@ -141,6 +143,13 @@ struct LinkwitzRiley4
         hpf2.init(sample_rate, cutoff_hz);
     }
 
+    void reset() {
+        lpf1.reset();
+        lpf2.reset();
+        hpf1.reset();
+        hpf2.reset();
+    }
+
     // Splits a single signal into Low and High with perfect flat-sum phase alignment
     void process(float input, float &outLow, float &outHigh)
     {
@@ -149,24 +158,25 @@ struct LinkwitzRiley4
     }
 };
 
-#define HAAS_BUFFER_SIZE 4096
+#include "NineSpeakerUpmixer.h"
 
 struct DynamicSpatializerNode
 {
     ma_node_base baseNode;
 
-    // Dual Crossover Network (Splits into Low, Mid, High)
-    LinkwitzRiley4 crossLowL, crossLowR;   // 250Hz Crossover
-    LinkwitzRiley4 crossHighL, crossHighR; // 4000Hz Crossover
+    NineSpeakerUpmixer upmixer;
+    SmoothedGate gate;
+    float sampleRate = 48000.0f;
 
-    // LFO State
-    float lfoPhase;
+    void init(float sr) {
+        sampleRate = sr;
+        upmixer.init(sr);
+        gate.init(false, sr, 25.0f); // 25ms smooth click-free crossfade
+    }
 
-    // Haas Delay Lines
-    float delayL[HAAS_BUFFER_SIZE];
-    float delayR[HAAS_BUFFER_SIZE];
-    int writeIdx;
-    float sampleRate;
+    void reset() {
+        upmixer.reset();
+    }
 };
 
 extern ma_node_vtable g_dynamic_spatializer_vtable;

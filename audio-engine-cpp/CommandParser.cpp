@@ -500,10 +500,10 @@ extern "C" void execute_audio_command(const char *cmd_in)
         g_limiterNode.gainEnv = 1.0f;
     }
     // Add this inside your if/else if chain block
-    // else if (command == "TOGGLE_8D")
-    // {
-    //     g_is8DModeOn = (args == "1");
-    // }
+    else if (command == "SPEAKER9D" || command == "TOGGLE_8D")
+    {
+        g_is8DModeOn = (args == "1" || args == "ON");
+    }
     else if (command == "ANDROID_SPEAKER")
     {
         g_isAndroidSpeaker = (stoi(args) == 1);
