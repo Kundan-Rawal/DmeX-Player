@@ -63,6 +63,7 @@ MeterNode g_meterNode;
 SubwooferNode g_subwooferNode;
 DynamicSpatializerNode g_8DNode;
 AudioRestorationNode g_restorationNode;
+HeadphoneCompNode g_headphoneCompNode;
 
 void updateRouting()
 {
@@ -386,6 +387,14 @@ engine_ready:
     c8D.pOutputChannels = g_outCh;
     ma_node_init(pg, &c8D, NULL, &g_8DNode.baseNode);
 
+    // Init Headphone Compensation Node (Harman Target Calibration)
+    g_headphoneCompNode.init((float)sr);
+    ma_node_config cHeadphone = ma_node_config_init();
+    cHeadphone.vtable = &g_headphone_comp_vtable;
+    cHeadphone.pInputChannels = g_inCh;
+    cHeadphone.pOutputChannels = g_outCh;
+    ma_node_init(pg, &cHeadphone, NULL, &g_headphoneCompNode.baseNode);
+
     // THE ONLY WIRING THAT SHOULD EXIST FOR THIS SECTION:
     ma_node_attach_output_bus(&g_convolutionNode, 0, &g_audiophileEQNode, 0);
     ma_node_attach_output_bus(&g_audiophileEQNode, 0, &g_compressorNode, 0);
@@ -399,7 +408,8 @@ engine_ready:
     // --------------------------------------------
 
     ma_node_attach_output_bus(&g_spatializerNode, 0, &g_reverbNode, 0);
-    ma_node_attach_output_bus(&g_reverbNode, 0, &g_limiterNode, 0);
+    ma_node_attach_output_bus(&g_reverbNode, 0, &g_headphoneCompNode.baseNode, 0);
+    ma_node_attach_output_bus(&g_headphoneCompNode.baseNode, 0, &g_limiterNode, 0);
     ma_node_attach_output_bus(&g_limiterNode, 0, &g_meterNode, 0);
     ma_node_attach_output_bus(&g_meterNode, 0, ma_engine_get_endpoint(&g_engine), 0);
 }

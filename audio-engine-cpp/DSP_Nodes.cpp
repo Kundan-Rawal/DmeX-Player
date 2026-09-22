@@ -821,6 +821,80 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
 }
 ma_node_vtable g_convolution_vtable = {convolution_process, NULL, 1, 1, 0};
 
+// ================================================================
+// TASK T22: INVERSE HEADPHONE COMPENSATION (HARMAN TARGET CALIBRATION)
+// ================================================================
+static void headphone_comp_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+{
+    HeadphoneCompNode *p = (HeadphoneCompNode *)pNode;
+    const float *pIn = ppFramesIn[0];
+    float *pOut = ppFramesOut[0];
+    ma_uint32 fc = *pFrameCountIn;
+    *pFrameCountOut = fc;
+
+    // Bit-identical zero-cost bypass when disabled
+    if (p->enabled.fullyOff() || p->convL.load(std::memory_order_relaxed) == nullptr)
+    {
+        memcpy(pOut, pIn, fc * 2 * sizeof(float));
+        return;
+    }
+
+    FFTConvolver *cL = p->convL.load(std::memory_order_relaxed);
+    FFTConvolver *cR = p->convR.load(std::memory_order_relaxed);
+    if (!cL || !cR)
+    {
+        memcpy(pOut, pIn, fc * 2 * sizeof(float));
+        return;
+    }
+
+    p->blockAdapterL.process(pIn, pOut, fc, [&](const float *inBuf, float *outBuf) {
+        float feedL[512];
+        float feedR[512];
+        int bs = p->blockSize;
+        if (bs > 512) bs = 512;
+
+        for (int i = 0; i < bs; ++i)
+        {
+            feedL[i] = inBuf[i * 2];
+            feedR[i] = inBuf[i * 2 + 1];
+        }
+
+        float compL[512];
+        float compR[512];
+
+        cL->process(feedL, compL);
+        cR->process(feedR, compR);
+
+        for (int i = 0; i < bs; ++i)
+        {
+            float dryL = feedL[i];
+            float dryR = feedR[i];
+            float wetL = compL[i];
+            float wetR = compR[i];
+
+            float gate = p->enabled.next();
+            float st   = p->strength.next();
+            float blend = gate * st;
+
+            outBuf[i * 2]     = dryL + (wetL - dryL) * blend;
+            outBuf[i * 2 + 1] = dryR + (wetR - dryR) * blend;
+        }
+    });
+
+    if (p->deleteCountdown > 0)
+    {
+        p->deleteCountdown--;
+        if (p->deleteCountdown == 0)
+        {
+            delete p->pendingDeleteL;
+            delete p->pendingDeleteR;
+            p->pendingDeleteL = nullptr;
+            p->pendingDeleteR = nullptr;
+        }
+    }
+}
+ma_node_vtable g_headphone_comp_vtable = {headphone_comp_process, NULL, 1, 1, 0};
+
 
 // ================================================================
 // TRANSPARENT RMS GLUE COMPRESSOR
@@ -1125,11 +1199,13 @@ extern PsychoacousticNode g_spatializerNode;
 extern AudioRestorationNode g_restorationNode;
 extern DynamicSpatializerNode g_8DNode;
 extern StereoWidenerNode g_widenerNode;
+extern HeadphoneCompNode g_headphoneCompNode;
 extern std::mutex g_irMutex;
 extern std::atomic<float> g_audioLevel;
 
 void dsp_flush_all_state(void)
 {
+    g_headphoneCompNode.reset();
     {
         std::lock_guard<std::mutex> lk(g_irMutex);
         

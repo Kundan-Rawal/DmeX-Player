@@ -2,7 +2,7 @@ import './MobileExpandedPlayer.css';
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import Marquee from 'react-fast-marquee';
-import { DSPStudio, ReverbEnv } from './ExpandedPlayerUI';
+import { DSPStudio, ReverbEnv, HEADPHONE_MODELS } from './ExpandedPlayerUI';
 import { AmbientBackground } from './AmbientBackground';
 import { Taste, LyricLine, IS_ANDROID } from '../../types/index';
 import { AudioProfile } from '../../config/audio';
@@ -40,6 +40,8 @@ interface MobileExpandedPlayerProps {
   setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
   is9DStageOn?: boolean; setIs9DStageOn?: (v: boolean) => void;
   is9DBassRoom?: boolean; setIs9DBassRoom?: (v: boolean) => void;
+  selectedHeadphoneModel?: string; setSelectedHeadphoneModel?: (v: string) => void;
+  onHeadphoneModelSelect?: (modelId: string) => Promise<void>;
   isProfileActive: boolean;    setIsProfileActive: (v: boolean) => void;
   isProfileActiveRef: React.MutableRefObject<boolean>;
   applySmartSettings: (profile: AudioProfile, taste: Taste) => Promise<void>;
@@ -530,6 +532,59 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                 </div>
               </div>
 
+              {/* TASK T22: HEADPHONE CALIBRATION (HARMAN TARGET) */}
+              <div className="glass-menu-section" style={{ marginTop: 14 }}>
+                <div className="glass-label-row" style={{ marginBottom: 6 }}>
+                  <span>Headphone Calibration</span>
+                  <span style={{ color: p.selectedHeadphoneModel && p.selectedHeadphoneModel !== 'NONE' ? '#a5d6a7' : 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>
+                    {p.selectedHeadphoneModel && p.selectedHeadphoneModel !== 'NONE' ? 'Harman Target Active' : 'Bypass'}
+                  </span>
+                </div>
+                <select
+                  className="glass-select"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.08)',
+                    color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    fontSize: '0.8rem',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                  value={p.selectedHeadphoneModel || 'NONE'}
+                  onChange={async e => {
+                    const modelId = e.target.value;
+                    if (p.onHeadphoneModelSelect) {
+                      await p.onHeadphoneModelSelect(modelId);
+                    } else if (p.setSelectedHeadphoneModel) {
+                      p.setSelectedHeadphoneModel(modelId);
+                      const model = HEADPHONE_MODELS.find(m => m.id === modelId);
+                      if (model && model.path) {
+                        try {
+                          const path = await invoke<string>('extract_and_load_ir', { assetPath: model.path });
+                          await p.writeToEngine(`HEADPHONE_CORRECTION ${path}`);
+                        } catch (err) {
+                          console.error('Failed to load headphone correction:', err);
+                        }
+                      } else {
+                        await p.writeToEngine('HEADPHONE_CORRECTION OFF');
+                      }
+                    }
+                  }}
+                >
+                  {HEADPHONE_MODELS.map(m => (
+                    <option key={m.id} value={m.id} style={{ background: '#1c1c1e', color: '#fff' }}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', margin: '6px 0 0 0', lineHeight: 1.35 }}>
+                  {HEADPHONE_MODELS.find(m => m.id === p.selectedHeadphoneModel)?.desc || 'No correction applied. Audio is sent straight to drivers.'}
+                </p>
+              </div>
+
             </div>
           </>
         )}
@@ -608,6 +663,9 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   setBassLevel={p.setBassLevel} setTrebleLevel={p.setTrebleLevel} writeToEngine={p.writeToEngine}
                     is9DStageOn={p.is9DStageOn} setIs9DStageOn={p.setIs9DStageOn}
                     is9DBassRoom={p.is9DBassRoom} setIs9DBassRoom={p.setIs9DBassRoom}
+                    selectedHeadphoneModel={p.selectedHeadphoneModel}
+                    setSelectedHeadphoneModel={p.setSelectedHeadphoneModel}
+                    onHeadphoneModelSelect={p.onHeadphoneModelSelect}
           
                   onEnvSelect={handleAcousticEnvSelect}
                 />

@@ -50,6 +50,7 @@ extern MeterNode g_meterNode;
 extern SubwooferNode g_subwooferNode;
 extern DynamicSpatializerNode g_8DNode;
 extern AudioRestorationNode g_restorationNode;
+extern HeadphoneCompNode g_headphoneCompNode;
 
 // Channel Config
 extern ma_uint32 g_channels;

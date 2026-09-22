@@ -380,6 +380,43 @@ struct ConvolutionNode
     float bassStateR = 0.0f;
 };
 
+// ================================================================
+// TASK T22: INVERSE HEADPHONE COMPENSATION (HARMAN TARGET CALIBRATION)
+// ================================================================
+struct HeadphoneCompNode
+{
+    ma_node_base baseNode;
+
+    std::atomic<FFTConvolver*> convL{nullptr};
+    std::atomic<FFTConvolver*> convR{nullptr};
+
+    FFTConvolver* pendingDeleteL = nullptr;
+    FFTConvolver* pendingDeleteR = nullptr;
+    int deleteCountdown = 0;
+
+    BlockAdapter blockAdapterL;
+    BlockAdapter blockAdapterR;
+    int blockSize = 512;
+
+    SmoothedGate enabled;
+    SmoothedParam strength; // 0.0 to 1.0 (100% Harman calibration)
+
+    void init(float sr = 48000.0f) {
+        blockSize = 512;
+        blockAdapterL.init(512, 2);
+        blockAdapterR.init(512, 2);
+        enabled.init(false, sr, 25.0f);
+        strength.init(1.0f, sr, 25.0f);
+    }
+
+    void reset() {
+        if (auto* c = convL.load(std::memory_order_relaxed)) c->reset();
+        if (auto* c = convR.load(std::memory_order_relaxed)) c->reset();
+        blockAdapterL.fill = 0;
+        blockAdapterR.fill = 0;
+    }
+};
+
 #define COMP_LOOKAHEAD_SAMPLES 96
 
 struct MultibandCompressorNode
@@ -433,6 +470,7 @@ extern ma_node_vtable g_subwoofer_vtable;
 extern ma_node_vtable g_convolution_vtable;
 extern ma_node_vtable g_multiband_compressor_vtable;
 extern ma_node_vtable g_limiter_vtable;
+extern ma_node_vtable g_headphone_comp_vtable;
 struct AudioRestorationNode
 {
     ma_node_base baseNode;

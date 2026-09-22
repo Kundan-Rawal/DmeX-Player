@@ -26,7 +26,7 @@ import { MiniPlayer } from './components/player/MiniPlayer';
 import { AmbientBackground } from './components/player/AmbientBackground';
 import { fetchLyricsOnline } from './services/lyricsFetcher';
 
-import { DSPStudio, ExpandedControls } from './components/player/ExpandedPlayerUI';
+import { DSPStudio, ExpandedControls, HEADPHONE_MODELS } from './components/player/ExpandedPlayerUI';
 import { MobileExpandedPlayer } from './components/player/MobileExpandedPlayer';
 import { BulkScanner } from './components/library/BulkScanner';
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +180,15 @@ function App() {
     is9DBassRoomRef.current = is9DBassRoom;
     localStorage.setItem('dmex_9d_bass_mode', is9DBassRoom ? 'ROOM' : 'STEREO');
   }, [is9DBassRoom]);
+
+  const [selectedHeadphoneModel, setSelectedHeadphoneModel] = useState(() => {
+    return localStorage.getItem('dmex_headphone_model') || 'NONE';
+  });
+  const selectedHeadphoneModelRef = useRef(selectedHeadphoneModel);
+  useEffect(() => {
+    selectedHeadphoneModelRef.current = selectedHeadphoneModel;
+    localStorage.setItem('dmex_headphone_model', selectedHeadphoneModel);
+  }, [selectedHeadphoneModel]);
 
   const [isPhoneSpeaker, setIsPhoneSpeaker] = useState(false);
   const isPhoneSpeakerRef = useRef(false);
@@ -347,6 +356,24 @@ function App() {
   }, []);
 
   
+  const applyHeadphoneCorrection = useCallback(async (modelId: string) => {
+    setSelectedHeadphoneModel(modelId);
+    selectedHeadphoneModelRef.current = modelId;
+    if (!modelId || modelId === 'NONE') {
+      await writeToEngine('HEADPHONE_CORRECTION OFF');
+      return;
+    }
+    const model = HEADPHONE_MODELS.find(m => m.id === modelId);
+    if (model && model.path) {
+      try {
+        const physicalPath = await invoke<string>('extract_and_load_ir', { assetPath: model.path });
+        await writeToEngine(`HEADPHONE_CORRECTION ${physicalPath}`);
+      } catch (err) {
+        console.error('Failed to load Headphone Correction file:', err);
+      }
+    }
+  }, [writeToEngine]);
+
   // 1.1 SETTINGS PERSISTER
   useEffect(() => {
     if (!isBooted) return;
@@ -354,7 +381,7 @@ function App() {
         isDarkMode, bassLevel, trebleLevel, speakerMode,
         isRemastered, isCompressed, upscaleDrive, widenWidth,
         spatialExtra, depthAmount, reverbWet, restorationDenoise, restorationUpscale,
-        restorationPresence, selectedAcousticEnv, smartTaste,
+        restorationPresence, selectedAcousticEnv, selectedHeadphoneModel, smartTaste,
         isManualOverride, visMode, sortMode, volume, isPhoneSpeaker,
         lastTrackPath: currentTrack?.path || null
     };
@@ -363,7 +390,7 @@ function App() {
     isBooted, isDarkMode, bassLevel, trebleLevel, speakerMode,
     isRemastered, isCompressed, upscaleDrive, widenWidth,
     spatialExtra, depthAmount, reverbWet, restorationDenoise, restorationUpscale,
-    restorationPresence, selectedAcousticEnv, smartTaste,
+    restorationPresence, selectedAcousticEnv, selectedHeadphoneModel, smartTaste,
     isManualOverride, visMode, sortMode, volume, isPhoneSpeaker,
     currentTrack
   ]);
@@ -413,6 +440,10 @@ function App() {
           if (settings.restorationPresence !== undefined) setRestorationPresence(settings.restorationPresence);
           
           if (settings.selectedAcousticEnv !== undefined) setSelectedAcousticEnv(settings.selectedAcousticEnv);
+          if (settings.selectedHeadphoneModel !== undefined) {
+              setSelectedHeadphoneModel(settings.selectedHeadphoneModel);
+              selectedHeadphoneModelRef.current = settings.selectedHeadphoneModel;
+          }
           if (settings.smartTaste !== undefined) { setSmartTaste(settings.smartTaste); smartTasteRef.current = settings.smartTaste; }
           if (settings.isManualOverride !== undefined) setIsManualOverride(settings.isManualOverride);
           if (settings.visMode !== undefined) setVisMode(settings.visMode);
@@ -449,6 +480,13 @@ function App() {
                          await writeToEngine(`ANDROID_SPEAKER ${settings.isPhoneSpeaker ? 1 : 0}`);
                          await writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`);
                          await writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`);
+                         if (selectedHeadphoneModelRef.current && selectedHeadphoneModelRef.current !== 'NONE') {
+                             const hm = HEADPHONE_MODELS.find(h => h.id === selectedHeadphoneModelRef.current);
+                             if (hm && hm.path) {
+                                 const p = await invoke<string>('extract_and_load_ir', { assetPath: hm.path });
+                                 await writeToEngine(`HEADPHONE_CORRECTION ${p}`);
+                             }
+                         }
                          await writeToEngine(`LOAD ${track.path}`);
                      } catch (_) {}
                  }
@@ -941,7 +979,19 @@ function App() {
         writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
         writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`),
           writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`),
-          writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`)
+          writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`),
+          (async () => {
+            const hpId = selectedHeadphoneModelRef.current;
+            if (hpId && hpId !== 'NONE') {
+              const hm = HEADPHONE_MODELS.find(h => h.id === hpId);
+              if (hm && hm.path) {
+                try {
+                  const p = await invoke<string>('extract_and_load_ir', { assetPath: hm.path });
+                  await writeToEngine(`HEADPHONE_CORRECTION ${p}`);
+                } catch (_) {}
+              }
+            }
+          })()
       ]);
       if(id!==loadIdRef.current) return;
       await writeToEngine(`LOAD ${track.path}`);
@@ -1184,6 +1234,9 @@ function App() {
           setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
             is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
             is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
+            selectedHeadphoneModel={selectedHeadphoneModel}
+            setSelectedHeadphoneModel={setSelectedHeadphoneModel}
+            onHeadphoneModelSelect={applyHeadphoneCorrection}
         />
       </div>
     </div>
@@ -1824,6 +1877,9 @@ function App() {
               <MobileExpandedPlayer 
                 is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
                 is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
+                selectedHeadphoneModel={selectedHeadphoneModel}
+                setSelectedHeadphoneModel={setSelectedHeadphoneModel}
+                onHeadphoneModelSelect={applyHeadphoneCorrection}
                 isExpanded={isExpanded}
                 trackTitle={trackTitle} trackArtist={trackArtist} albumArt={albumArt}
                 isPlaying={isPlaying} currentTime={currentTime} duration={duration}
@@ -2153,6 +2209,9 @@ function App() {
                     setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
             is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
             is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
+            selectedHeadphoneModel={selectedHeadphoneModel}
+            setSelectedHeadphoneModel={setSelectedHeadphoneModel}
+            onHeadphoneModelSelect={applyHeadphoneCorrection}
                   />
                 )}
               </div>

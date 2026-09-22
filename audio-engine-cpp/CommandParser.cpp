@@ -124,6 +124,84 @@ bool g_usingSymphonia = false;
 // ================================================================
 static std::mutex g_commandMutex;
 
+// ================================================================
+// TASK T22: INVERSE HEADPHONE COMPENSATION (HARMAN TARGET CALIBRATION)
+// ================================================================
+static void load_headphone_correction_file(const string &path)
+{
+    if (path.empty() || path == "OFF" || path == "NONE" || path == "0")
+    {
+        g_headphoneCompNode.enabled.set(false);
+        return;
+    }
+
+    ma_decoder_config dcfg = ma_decoder_config_init(ma_format_f32, 2, 44100);
+    ma_decoder dec;
+    if (ma_decoder_init_file(path.c_str(), &dcfg, &dec) != MA_SUCCESS)
+    {
+        dcfg = ma_decoder_config_init(ma_format_f32, 2, 0);
+        if (ma_decoder_init_file(path.c_str(), &dcfg, &dec) != MA_SUCCESS)
+            return;
+    }
+
+    const int read_samples = MAX_IR_SAMPLES;
+    float *tempInterleaved = (float *)calloc(read_samples * 2, sizeof(float));
+    if (!tempInterleaved)
+    {
+        ma_decoder_uninit(&dec);
+        return;
+    }
+
+    ma_uint64 framesRead = 0;
+    ma_decoder_read_pcm_frames(&dec, tempInterleaved, read_samples, &framesRead);
+    ma_decoder_uninit(&dec);
+
+    if (framesRead == 0)
+    {
+        free(tempInterleaved);
+        return;
+    }
+
+    float *newIrL = (float *)calloc(framesRead, sizeof(float));
+    float *newIrR = (float *)calloc(framesRead, sizeof(float));
+    if (!newIrL || !newIrR)
+    {
+        free(tempInterleaved);
+        if (newIrL) free(newIrL);
+        if (newIrR) free(newIrR);
+        return;
+    }
+
+    for (ma_uint64 i = 0; i < framesRead; i++)
+    {
+        newIrL[i] = tempInterleaved[i * 2];
+        newIrR[i] = tempInterleaved[i * 2 + 1];
+    }
+    free(tempInterleaved);
+
+    auto *freshL = new FFTConvolver();
+    auto *freshR = new FFTConvolver();
+    bool okL = freshL->prepare(newIrL, (int)framesRead, g_headphoneCompNode.blockSize);
+    bool okR = freshR->prepare(newIrR, (int)framesRead, g_headphoneCompNode.blockSize);
+
+    if (okL && okR)
+    {
+        auto *oldL = g_headphoneCompNode.convL.exchange(freshL, std::memory_order_acq_rel);
+        auto *oldR = g_headphoneCompNode.convR.exchange(freshR, std::memory_order_acq_rel);
+        g_headphoneCompNode.pendingDeleteL = oldL;
+        g_headphoneCompNode.pendingDeleteR = oldR;
+        g_headphoneCompNode.deleteCountdown = 10;
+        g_headphoneCompNode.enabled.set(true);
+    }
+    else
+    {
+        delete freshL;
+        delete freshR;
+    }
+    free(newIrL);
+    free(newIrR);
+}
+
 extern "C" void execute_audio_command(const char *cmd_in)
 {
     std::lock_guard<std::mutex> cmdLock(g_commandMutex);
@@ -517,6 +595,17 @@ extern "C" void execute_audio_command(const char *cmd_in)
     {
         g_isLaptopSpeaker = (stoi(args) == 1);
     }
+    else if (command == "HEADPHONE_CORRECTION")
+    {
+        load_headphone_correction_file(args);
+    }
+    else if (command == "HEADPHONE_CORRECTION_STRENGTH")
+    {
+        float val = safe_stof(args);
+        if (val < 0.0f) val = 0.0f;
+        if (val > 1.0f) val = 1.0f;
+        g_headphoneCompNode.strength.set(val);
+    }
 }
 
 extern "C" void get_audio_metrics(float *out_data, float *out_level)
@@ -656,4 +745,48 @@ extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float*
         if (newHistL) free(newHistL);
         if (newHistR) free(newHistR);
     }
+}
+
+extern "C" void load_headphone_comp_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
+{
+    int maxLen = (lenL > lenR) ? lenL : lenR;
+    if (maxLen <= 0)
+    {
+        g_headphoneCompNode.enabled.set(false);
+        return;
+    }
+
+    float* newIrL = (float*)calloc(maxLen, sizeof(float));
+    float* newIrR = (float*)calloc(maxLen, sizeof(float));
+    if (!newIrL || !newIrR)
+    {
+        if (newIrL) free(newIrL);
+        if (newIrR) free(newIrR);
+        return;
+    }
+
+    if (irL && lenL > 0) memcpy(newIrL, irL, lenL * sizeof(float));
+    if (irR && lenR > 0) memcpy(newIrR, irR, lenR * sizeof(float));
+
+    auto* freshL = new FFTConvolver();
+    auto* freshR = new FFTConvolver();
+    bool okL = freshL->prepare(newIrL, maxLen, g_headphoneCompNode.blockSize);
+    bool okR = freshR->prepare(newIrR, maxLen, g_headphoneCompNode.blockSize);
+
+    if (okL && okR)
+    {
+        auto* oldL = g_headphoneCompNode.convL.exchange(freshL, std::memory_order_acq_rel);
+        auto* oldR = g_headphoneCompNode.convR.exchange(freshR, std::memory_order_acq_rel);
+        g_headphoneCompNode.pendingDeleteL = oldL;
+        g_headphoneCompNode.pendingDeleteR = oldR;
+        g_headphoneCompNode.deleteCountdown = 10;
+        g_headphoneCompNode.enabled.set(true);
+    }
+    else
+    {
+        delete freshL;
+        delete freshR;
+    }
+    free(newIrL);
+    free(newIrR);
 }

@@ -679,6 +679,16 @@ async fn extract_and_load_ir(app: tauri::AppHandle, asset_path: String) -> Resul
         "Sony_WH1000XM2R.wav" => include_bytes!("../resources/impulses/Sony_WH1000XM2R.wav"),
         "AKGK701L.wav" => include_bytes!("../resources/impulses/AKGK701L.wav"),
         "AKGK701R.wav" => include_bytes!("../resources/impulses/AKGK701R.wav"),
+        "AppleAirPods_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/AppleAirPods_harman_inv.wav"),
+        "AppleEarPods_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/AppleEarPods_harman_inv.wav"),
+        "Sony_WH1000XM2_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/Sony_WH1000XM2_harman_inv.wav"),
+        "SennheiserHD_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/SennheiserHD_harman_inv.wav"),
+        "AKGK240_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/AKGK240_harman_inv.wav"),
+        "AKGK701_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/AKGK701_harman_inv.wav"),
+        "HyperXCloudalpha_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/HyperXCloudalpha_harman_inv.wav"),
+        "OppoPM3_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/OppoPM3_harman_inv.wav"),
+        "SteelSeriesArctic9X_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/SteelSeriesArctic9X_harman_inv.wav"),
+        "xiaomipiston2_harman_inv.wav" => include_bytes!("../resources/impulses/headphone_comp/xiaomipiston2_harman_inv.wav"),
         _ => return Err(format!("Unknown IR filename: {}", filename)),
     };
 

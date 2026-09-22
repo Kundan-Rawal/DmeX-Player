@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import Marquee from 'react-fast-marquee';
 import { Taste } from '../../types'; 
 import { AudioProfile } from '../../config/audio';
@@ -12,30 +12,36 @@ import { ChillIcon } from './ChillIcon';
 import { invoke } from '@tauri-apps/api/core';
 
 // Exported so MobileExpandedPlayer can type its handler without duplicating the list.
-const REVERB_ENVIRONMENTS = [
+export const ACOUSTIC_ENVIRONMENTS = [
   { id:'NONE', label:'Off', path:'' },
   { id:'DTSXHeadphonewide', label:'DTS:X Headphone Wide', path:'resources/impulses/DTSXHeadphonewide.wav' },
-  { id:'SennheiserHD', label:'Sennheiser HD', path:'resources/impulses/SennheiserHD.wav' },
-  { id:'Head360', label:'Head-360', path:'resources/impulses/Head360.wav' },
+  { id:'Head360', label:'Head-360 Surround', path:'resources/impulses/Head360.wav' },
   { id:'XHRQSurround', label:'XHR-QSurround', path:'resources/impulses/XHRQSurround.wav' },
-  { id:'xiaomipiston2', label:'Xiaomi Piston 2', path:'resources/impulses/xiaomipiston2.wav' },
   { id:'XHRStudioSurround', label:'XHR Studio Surround', path:'resources/impulses/XHRStudioSurround.wav' },
-  { id:'dolbybassboost', label:'Dolby Bass Boost', path:'resources/impulses/dolbybassboost.wav' },
-  { id:'dolbydimension', label:'Dolby Dimension', path:'resources/impulses/dolbydimension.wav' },
-  { id:'OppoPM3', label:'Oppo PM3', path:'resources/impulses/OppoPM3.wav' },
-  { id:'HyperXCloudalpha', label:'HyperX Cloud Alpha', path:'resources/impulses/HyperXCloudalpha.wav' },
-  { id:'AppleEarPods', label:'Apple EarPods', path:'resources/impulses/AppleEarPods.wav' },
-  { id:'AppleAirPods', label:'Apple AirPods', path:'resources/impulses/AppleAirPods.wav' },
-  { id:'AKGK240', label:'AKG K240', path:'resources/impulses/AKGK240.wav' },
-  { id:'SteelSeriesArctic9X', label:'SteelSeries Arctic 9X', path:'resources/impulses/SteelSeriesArctic9X.wav' },
-  { id:'dolbyatmos', label:'Dolby Atmos', path:'resources/impulses/dolbyheadR.wav|resources/impulses/dolbyheadL.wav' },
-  { id:'dolbyvirtualspeaker', label:'Dolby Virtual', path:'resources/impulses/dolbyvirtualspeakerL.wav|resources/impulses/dolbyvirtualspeakerR.wav' },
-  { id:'Sony_WH1000XM2', label:'Sony WH1000XM2L', path:'resources/impulses/Sony_WH1000XM2L.wav|resources/impulses/Sony_WH1000XM2R.wav' },
-  { id:'AKGK701', label:'AKG K701', path:'resources/impulses/AKGK701L.wav|resources/impulses/AKGK701R.wav' },
+  { id:'dolbybassboost', label:'Dolby Bass Boost Room', path:'resources/impulses/dolbybassboost.wav' },
+  { id:'dolbydimension', label:'Dolby Dimension Hall', path:'resources/impulses/dolbydimension.wav' },
+  { id:'dolbyatmos', label:'Dolby Atmos Spatial Stage', path:'resources/impulses/dolbyheadR.wav|resources/impulses/dolbyheadL.wav' },
+  { id:'dolbyvirtualspeaker', label:'Dolby Virtual Speakers', path:'resources/impulses/dolbyvirtualspeakerL.wav|resources/impulses/dolbyvirtualspeakerR.wav' },
 ];
 
-// Convenience type for the env entries — used by the Android handler in MobileExpandedPlayer.
-export type ReverbEnv = typeof REVERB_ENVIRONMENTS[number];
+export const HEADPHONE_MODELS = [
+  { id:'NONE', label:'Bypass (Direct Drivers)', path:'', desc:'No headphone EQ compensation applied' },
+  { id:'AppleAirPods', label:'Apple AirPods', path:'resources/impulses/headphone_comp/AppleAirPods_harman_inv.wav', desc:'Linearizes frequency response to Harman Target curve' },
+  { id:'AppleEarPods', label:'Apple EarPods', path:'resources/impulses/headphone_comp/AppleEarPods_harman_inv.wav', desc:'Linearizes frequency response to Harman Target curve' },
+  { id:'Sony_WH1000XM2', label:'Sony WH-1000XM2 / XM3 / XM4', path:'resources/impulses/headphone_comp/Sony_WH1000XM2_harman_inv.wav', desc:'Flattens muddy 150Hz hump & restores crisp Harman treble air' },
+  { id:'SennheiserHD', label:'Sennheiser HD Series (HD600/650)', path:'resources/impulses/headphone_comp/SennheiserHD_harman_inv.wav', desc:'Harman target bass extension & diffuse-field linearization' },
+  { id:'AKGK240', label:'AKG K240 Studio', path:'resources/impulses/headphone_comp/AKGK240_harman_inv.wav', desc:'Fills sub-bass foundation & smooths upper-mid peak' },
+  { id:'AKGK701', label:'AKG K701 / K702', path:'resources/impulses/headphone_comp/AKGK701_harman_inv.wav', desc:'Tames 2kHz resonance & calibrates to Harman target' },
+  { id:'HyperXCloudalpha', label:'HyperX Cloud Alpha', path:'resources/impulses/headphone_comp/HyperXCloudalpha_harman_inv.wav', desc:'Flattens gaming V-shape to reference Harman target' },
+  { id:'OppoPM3', label:'Oppo PM-3 Planar', path:'resources/impulses/headphone_comp/OppoPM3_harman_inv.wav', desc:'Planar magnetic target curve calibration' },
+  { id:'SteelSeriesArctic9X', label:'SteelSeries Arctis 9X', path:'resources/impulses/headphone_comp/SteelSeriesArctic9X_harman_inv.wav', desc:'Harman reference linearization for Arctis wireless headset' },
+  { id:'xiaomipiston2', label:'Xiaomi Piston 2 IEM', path:'resources/impulses/headphone_comp/xiaomipiston2_harman_inv.wav', desc:'In-ear Harman target response correction' },
+];
+
+// Convenience aliases for backward compatibility
+export const REVERB_ENVIRONMENTS = ACOUSTIC_ENVIRONMENTS;
+export type ReverbEnv = typeof ACOUSTIC_ENVIRONMENTS[number];
+export type HeadphoneModel = typeof HEADPHONE_MODELS[number];
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +69,9 @@ interface DSPStudioProps {
   setIs9DStageOn?: (v: boolean) => void;
   is9DBassRoom?: boolean;
   setIs9DBassRoom?: (v: boolean) => void;
+  selectedHeadphoneModel?: string;
+  setSelectedHeadphoneModel?: (v: string) => void;
+  onHeadphoneModelSelect?: (modelId: string) => Promise<void>;
 
   // ── ANDROID ESCAPE HATCH ──────────────────────────────────────────────────
   // When provided, DSPStudio delegates ALL acoustic-environment loading to this
@@ -90,8 +99,13 @@ export const DSPStudio = ({
   setIs9DStageOn = () => {},
   is9DBassRoom = false,
   setIs9DBassRoom = () => {},
+  selectedHeadphoneModel = 'NONE',
+  setSelectedHeadphoneModel = () => {},
+  onHeadphoneModelSelect,
   // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
 }: DSPStudioProps) => {
+
+  const [isHpDropdownOpen, setIsHpDropdownOpen] = useState(false);
 
   const applyPreset = async (preset:'STUDIO'|'CINEMATIC'|'RELAX') => {
     let pRem=false,pCmp=false,pDrv=0.0,pWid=1.0,p3D=0.0,pDep=0.0,pRvb=0.0,pBas=0.0,pTrb=0.0;
@@ -196,6 +210,58 @@ export const DSPStudio = ({
               </div>
             </>
           )}
+        </div>
+
+        {/* TASK T22: Headphone Calibration (Harman Target Curve) */}
+        <div className="dsp-card" style={{position:'relative'}}>
+          <div className="dsp-label-row">
+            <label style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <span style={{color: selectedHeadphoneModel && selectedHeadphoneModel !== 'NONE' ? '#a5d6a7' : 'var(--text-secondary)'}}>●</span>
+              Headphone Calibration (Harman Target)
+            </label>
+            <span style={{fontSize:'0.75rem',color:selectedHeadphoneModel && selectedHeadphoneModel !== 'NONE' ? '#a5d6a7' : 'var(--text-secondary)',fontWeight:600}}>
+              {selectedHeadphoneModel && selectedHeadphoneModel !== 'NONE' ? 'Calibrated' : 'Bypass'}
+            </span>
+          </div>
+          <div onClick={()=>setIsHpDropdownOpen(!isHpDropdownOpen)} style={{marginTop:'8px',padding:'10px 14px',cursor:'pointer',background:'rgba(255,255,255,0.08)',color:'var(--text-primary)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:'8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span>{HEADPHONE_MODELS.find(h=>h.id===selectedHeadphoneModel)?.label||'Bypass (Direct Drivers)'}</span>
+            <span style={{fontSize:'12px',opacity:0.7}}>▼</span>
+          </div>
+          {isHpDropdownOpen&&(
+            <>
+              <div style={{position:'fixed',inset:0,zIndex:98}} onClick={()=>setIsHpDropdownOpen(false)}/>
+              <div className="glass-options-menu fade-in" style={{position:'absolute',top:'100%',left:0,right:0,zIndex:99,marginTop:'8px',padding:'6px',maxHeight:'260px',overflowY:'auto'}}>
+                {HEADPHONE_MODELS.map(model=>(
+                  <div key={model.id} style={{padding:'10px 12px',borderRadius:'6px',cursor:'pointer',background:selectedHeadphoneModel===model.id?'rgba(255,255,255,0.15)':'transparent',transition:'background 0.2s'}}
+                    onClick={async e => {
+                      e.stopPropagation();
+                      setIsHpDropdownOpen(false);
+                      if (onHeadphoneModelSelect) {
+                        await onHeadphoneModelSelect(model.id);
+                      } else {
+                        if (setSelectedHeadphoneModel) setSelectedHeadphoneModel(model.id);
+                        if (model.path) {
+                          try {
+                            const p = await invoke<string>('extract_and_load_ir', { assetPath: model.path });
+                            await writeToEngine(`HEADPHONE_CORRECTION ${p}`);
+                          } catch (err) {
+                            console.error("Failed to load headphone correction:", err);
+                          }
+                        } else {
+                          await writeToEngine('HEADPHONE_CORRECTION OFF');
+                        }
+                      }
+                    }}>
+                    <div style={{fontWeight:500,fontSize:'0.85rem'}}>{model.label}</div>
+                    <div style={{fontSize:'0.72rem',color:'var(--text-secondary)',marginTop:'2px'}}>{model.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <p style={{fontSize:'0.68rem',color:'var(--text-secondary)',margin:'8px 0 0 0',lineHeight:1.35}}>
+            Flattens headphone frequency response to Harman target curve before spatial 3D & 9D staging.
+          </p>
         </div>
         <div className="dsp-card" style={disabledStyle}>
           <div className="dsp-label-row"><label>Tube Exciter (Air)</label><span style={{color:'#00e676',fontWeight:600}}>{Math.round(upscaleDrive*50)}%</span></div>
