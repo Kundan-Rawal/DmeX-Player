@@ -577,15 +577,15 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        // BASE MODE TACTILE FOUNDATION (Never bypass the subwoofer node!)
-        // Even when the Subwoofer Bass slider is 0.0 (base mode), we provide an always-active 
-        // warm tactile foundation (0.35 effective gain = ~1.75 dB sub boost & warm saturation) 
-        // so bass is never missing or thin on standard playback!
-        // We apply a rapid-ramp power curve (powf) so the bass slider is highly responsive even at 30-40%!
-        // USER FIX: Restored the baseline tactile foundation so that the bass is NOT zero at slider=0.
-        // This gives the exact 'bit available' bass you requested, and restores the heavy bass feel at 25% slider!
+        // BASE MODE TACTILE FOUNDATION & DYNAMIC STEREO BASS SCALING
+        // 1. Responsive dynamic slider curve:
+        //    safeBass = 0.0  -> Clean warm baseline foundation (+1.8 dB sub, +1.2 dB mid)
+        //    safeBass = 0.25 -> Noticeable, tight low-end punch (+3.7 dB sub, +2.6 dB mid)
+        //    safeBass = 0.50 -> Authoritative, heavy club weight (+6.0 dB sub, +4.2 dB mid)
+        //    safeBass = 0.75 (50% UI) -> Visceral, deep room-filling chest thump (+8.5 dB sub, +5.8 dB mid)
+        //    safeBass = 1.50 (100% UI) -> Explosive basshead power (+14.0 dB sub, +9.5 dB mid)
         float safeBass = (g_bassGain < 0.0f) ? 0.0f : g_bassGain;
-        float effectiveGain = 0.35f + (powf(safeBass, 0.75f) * 0.85f);
+        float effectiveGain = 0.35f + (powf(safeBass, 0.85f) * 1.35f);
 
         // 1. Isolate everything below 180Hz (The entire bass range)
         float totalBassL, nonBassL, totalBassR, nonBassR;
@@ -597,7 +597,7 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         p->crossBassL.process(totalBassL, subL, midBassL);
         p->crossBassR.process(totalBassR, subR, midBassR);
 
-        // 3. DUAL-PEAK BI-MODAL ARCHITECTURE (With 4 Strict Anti-Mud Safeguards)
+        // 3. DUAL-PEAK BI-MODAL ARCHITECTURE (With Pure Stereo Anchoring)
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
         if (!p->isHighlightInit)
         {
@@ -634,12 +634,12 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         const float SLEW_COEF = 0.000035f;
         p->currentFreq += SLEW_COEF * (p->targetFreq - p->currentFreq);
 
-        // Safeguard 4: Dynamic Headroom Balancing (Anti-Bloat Ducking)
-        // If both sub-bass and mid-bass are blasting simultaneously, gently scale boosts to share headroom cleanly
+        // Safeguard 4: Dynamic Headroom Balancing (Relaxed to preserve full kick impact)
+        // Gentle headroom sharing without choking dynamic transients
         float totalEnergy = p->env30_60 + p->env90_130;
-        float duckFactor = 1.0f / (1.0f + totalEnergy * 1.5f);
-        float subBoostDb = effectiveGain * 5.0f * (0.7f + 0.3f * duckFactor);
-        float midBoostDb = effectiveGain * 4.0f * (0.7f + 0.3f * duckFactor);
+        float duckFactor = 1.0f / (1.0f + totalEnergy * 0.40f);
+        float subBoostDb = (safeBass * 8.0f + 1.8f) * (0.75f + 0.25f * duckFactor);
+        float midBoostDb = (safeBass * 5.5f + 1.2f) * (0.75f + 0.25f * duckFactor);
 
         // Safeguard 1: Tighter Q = 1.65 creates a natural acoustic valley dip around 65-75Hz!
         p->subPeakL.update_coeffs(sr, 45.0f, 1.65f, subBoostDb);
@@ -647,53 +647,50 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         p->midPeakL.update_coeffs(sr, p->currentFreq, 1.65f, midBoostDb);
         p->midPeakR.update_coeffs(sr, p->currentFreq, 1.65f, midBoostDb);
 
-        // Apply Bi-Modal peaks independently to their corresponding bands
+        // Apply Bi-Modal peaks independently to their corresponding bands in pure stereo
         float highlightedSubL = p->subPeakL.process(subL);
         float highlightedSubR = p->subPeakR.process(subR);
         float highlightedMidL = p->midPeakL.process(midBassL);
         float highlightedMidR = p->midPeakR.process(midBassR);
 
-        float drive = effectiveGain * 1.2f;
-        
-        // Clean analog tanh soft saturation wave-shaper for Sub-Bass only
-        // Smooth hyperbolic tangent: never flat-tops or generates square-wave harmonics that rattle IEM drivers!
-        auto saturate = [](float x) {
-            return tanhf(x * 0.90f);
+        // 4. Pure Stereo Sub-Bass Body & Resonance (The acoustic warmth previously given by reverb bleed)
+        // Left and Right channels are processed strictly independently — ZERO bleed into 3D stage or opposite ear.
+        float subDrive = 1.0f + (safeBass * 0.70f);
+        auto warmSub = [](float x) {
+            float ax = fabsf(x);
+            if (ax <= 0.85f) return x; // 100% linear, transparent reproduction for normal dynamic peaks
+            float over = ax - 0.85f;
+            float sat = 0.85f + 0.45f * tanhf(over / 0.45f); // Smooth analog saturation up to 1.30
+            return (x > 0) ? sat : -sat;
         };
 
-        // Deep Sub-Bass (0-80Hz) multiplier for massive thump without digital clipping overload
-#ifdef __ANDROID__
-        // Restored to a natural, punchy 1.6x so bass sits perfectly in its place without feeling forced
-        float subMult = 1.6f; 
-        float midMult = 0.85f; // Balanced low-mid support
-#else
-        float subMult = 1.45f; // Sane, studio-grade multiplier for high-end IEMs & headphones (e.g. Realme Buds 2 Pro)
-        float midMult = 0.85f;
-#endif
+        float processedSubL = warmSub(highlightedSubL * subDrive);
+        float processedSubR = warmSub(highlightedSubR * subDrive);
 
-        float processedSubL = saturate(highlightedSubL * drive * subMult);
-        float processedSubR = saturate(highlightedSubR * drive * subMult);
+        // Safeguard 3: Mid-Bass (80-180Hz) gets clean linear multiplication (ZERO distortion, tight kick punch)
+        float midPunchGain = 1.0f + (safeBass * 0.60f);
+        float processedMidBassL = highlightedMidL * midPunchGain;
+        float processedMidBassR = highlightedMidR * midPunchGain;
 
-        // Safeguard 3: Mid-Bass (80-180Hz) gets clean linear multiplication (ZERO distortion)
-        float processedMidBassL = highlightedMidL * drive * midMult;
-        float processedMidBassR = highlightedMidR * drive * midMult;
-
-        // Anti-Rattle Diaphragm Protection: Smoothly bound the combined low-frequency energy to ~0.75 max
-        // so IEM driver diaphragms never hit maximum physical excursion when bass and vocals play together!
+        // Combined low-frequency energy (Sub + Mid-Bass)
         float combinedBassL = processedSubL + processedMidBassL;
         float combinedBassR = processedSubR + processedMidBassR;
-        auto protectExcursion = [](float b) {
+
+        // Transparent High-Headroom Soft Ceiling:
+        // Allows transients to peak naturally up to 1.25 with zero compression,
+        // while gently rounding extreme overloads (>1.25) before the master limiter.
+        auto softCeiling = [](float b) {
             float ab = fabsf(b);
-            if (ab <= 0.60f) return b;
-            float over = ab - 0.60f;
-            float lim = 0.60f + 0.15f * tanhf(over / 0.15f);
+            if (ab <= 1.25f) return b;
+            float over = ab - 1.25f;
+            float lim = 1.25f + 0.35f * tanhf(over / 0.35f);
             return (b > 0) ? lim : -lim;
         };
 
         // Sum the Sub, Mid-Bass, and the completely untouched non-bass signal (>180Hz)
-        // This guarantees absolute zero phase smearing in the midrange while providing huge, wide bass without rattling.
-        pOut[i * 2] = nonBassL + protectExcursion(combinedBassL);
-        pOut[i * 2 + 1] = nonBassR + protectExcursion(combinedBassR);
+        // This guarantees absolute zero phase smearing in the midrange while providing massive, deep, punchy stereo bass.
+        pOut[i * 2]     = nonBassL + softCeiling(combinedBassL);
+        pOut[i * 2 + 1] = nonBassR + softCeiling(combinedBassR);
     }
 
 }
