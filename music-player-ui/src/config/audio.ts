@@ -42,10 +42,10 @@ export function applyTaste(base:DSPSettings, taste:Taste): DSPSettings {
     s.remaster = base.remaster;
   } else if (taste==='IMMERSIVE') {
     s.drive = Math.min(2.0, base.drive + 0.15); 
-    s.widen = Math.min(1.35, base.widen + 0.15); 
+    s.widen = Math.min(1.45, base.widen + 0.18); 
     s.spatial = Math.max(0.25, base.spatial + 0.15); 
     s.depth = Math.max(0.35, base.depth + 0.20);
-    s.reverb = Math.min(0.08, Math.max(0.04, base.reverb + 0.02));   
+    s.reverb = Math.min(0.12, Math.max(0.06, base.reverb + 0.04));   
     s.compress = true;
     s.remaster = base.remaster;
   } else if (taste==='CHILL') {

@@ -460,9 +460,9 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         float hpL = r->hpfL.process(iL);
         float hpR = r->hpfR.process(iR);
 
-        // 2. The 10% Bass Bleed Algorithm (90% HPF + 10% RAW) - reduced from 20% to 10% to keep punch tight and intact
-        float bleedL = (hpL * 0.90f) + (iL * 0.10f);
-        float bleedR = (hpR * 0.90f) + (iR * 0.10f);
+        // 2. The 15% Bass Bleed Algorithm (85% HPF + 15% RAW) - gently reduced from 20% to keep low-end body full & punchy
+        float bleedL = (hpL * 0.85f) + (iL * 0.15f);
+        float bleedR = (hpR * 0.85f) + (iR * 0.15f);
 
         // 3. Feed the calculated bleed into the reverb combs
         float feed = ((bleedL + bleedR) * 0.5f) * 0.2f + ((bleedL - bleedR) * 0.5f) * 0.8f;
@@ -768,17 +768,17 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
             float hpL = p->hpfL.process(inL);
             float hpR = p->hpfR.process(inR);
 
-            // 10% Bass Bleed (reduced from 20% down to 10% to keep bass punch solid & dry)
-            float fL = (hpL * 0.90f) + (inL * 0.10f);
-            float fR = (hpR * 0.90f) + (inR * 0.10f);
+            // 15% Bass Bleed (gently dialed back from 20% to preserve full low-end body & punch)
+            float fL = (hpL * 0.85f) + (inL * 0.15f);
+            float fR = (hpR * 0.85f) + (inR * 0.15f);
 
             float currentWet = p->wetMix.next();
             
             if (currentWet < 0.99f) {
                 float tempL = fL;
-                // Reduced cross-bleed from 30% to 10% to keep Left and Right stereo bass distinct without smearing
-                fL += fR * 0.10f;
-                fR += tempL * 0.10f;
+                // Balanced 20% cross-bleed
+                fL += fR * 0.20f;
+                fR += tempL * 0.20f;
             }
             feedL[i] = fL;
             feedR[i] = fR;
