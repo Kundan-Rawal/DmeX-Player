@@ -2225,9 +2225,11 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "crossbeam-channel",
+ "num-complex",
  "reqwest 0.12.28",
  "rubato",
  "rusqlite",
+ "rustfft",
  "serde",
  "serde_json",
  "symphonia",

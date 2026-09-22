@@ -174,6 +174,10 @@ struct DynamicSpatializerNode
         gate.init(false, sr, 25.0f); // 25ms smooth click-free crossfade
     }
 
+    void setBass3D(bool roomBass) {
+        upmixer.setBass3D(roomBass);
+    }
+
     void reset() {
         upmixer.reset();
     }

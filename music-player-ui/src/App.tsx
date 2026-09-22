@@ -172,6 +172,15 @@ function App() {
     localStorage.setItem('dmex_9d_stage', is9DStageOn ? 'true' : 'false');
   }, [is9DStageOn]);
 
+  const [is9DBassRoom, setIs9DBassRoom] = useState(() => {
+    return localStorage.getItem('dmex_9d_bass_mode') === 'ROOM';
+  });
+  const is9DBassRoomRef = useRef(is9DBassRoom);
+  useEffect(() => {
+    is9DBassRoomRef.current = is9DBassRoom;
+    localStorage.setItem('dmex_9d_bass_mode', is9DBassRoom ? 'ROOM' : 'STEREO');
+  }, [is9DBassRoom]);
+
   const [isPhoneSpeaker, setIsPhoneSpeaker] = useState(false);
   const isPhoneSpeakerRef = useRef(false);
   useEffect(() => { isPhoneSpeakerRef.current = isPhoneSpeaker; }, [isPhoneSpeaker]);
@@ -929,7 +938,8 @@ function App() {
         writeToEngine(`LIMITER ${speakerModeRef.current==='NONE'?0:speakerModeRef.current==='LOW'?0.3:speakerModeRef.current==='MED'?0.6:1.0}`),
         writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
         writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`),
-          writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`)
+          writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`),
+          writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`)
       ]);
       if(id!==loadIdRef.current) return;
       await writeToEngine(`LOAD ${track.path}`);
@@ -1171,6 +1181,7 @@ function App() {
           setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
           setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
             is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
+            is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
         />
       </div>
     </div>
@@ -1810,6 +1821,7 @@ function App() {
             {IS_ANDROID ? (
               <MobileExpandedPlayer 
                 is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
+                is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
                 isExpanded={isExpanded}
                 trackTitle={trackTitle} trackArtist={trackArtist} albumArt={albumArt}
                 isPlaying={isPlaying} currentTime={currentTime} duration={duration}
@@ -1973,6 +1985,47 @@ function App() {
                               9D Cinema Stage
                             </button>
                           </div>
+
+                          {/* 9D Bass Routing Mode Selector */}
+                          {is9DStageOn && (
+                            <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+                              <div className="glass-label-row" style={{marginBottom:6}}>
+                                <span style={{fontSize:'0.75rem',fontWeight:600}}>9D Bass Routing</span>
+                                <span style={{fontSize:'0.72rem',color:is9DBassRoom?'#ff79c6':'#50fa7b',fontWeight:600}}>
+                                  {is9DBassRoom ? '3D Room Bass' : 'Direct Stereo Bass'}
+                                </span>
+                              </div>
+                              <div className="glass-boost-grid" style={{marginBottom:6}}>
+                                <button
+                                  className={`glass-boost-btn ${!is9DBassRoom?'active':''}`}
+                                  title="Direct Stereo Bass (Punch Focus): Sub-bass (<180Hz) stays anchored in dry, fast stereo for maximum kick-drum punch, raw transient speed, and visceral weight."
+                                  style={!is9DBassRoom?{background:'rgba(80,250,123,0.2)',borderColor:'#50fa7b',color:'#50fa7b'}:undefined}
+                                  onClick={async ()=>{
+                                    setIs9DBassRoom(false);
+                                    await writeToEngine('SPEAKER9D_BASS STEREO');
+                                  }}
+                                >
+                                  ⚡ Direct Bass (Punch)
+                                </button>
+                                <button
+                                  className={`glass-boost-btn ${is9DBassRoom?'active':''}`}
+                                  title="Full 3D Room Bass (Spatial Immersion): Low-end enters the 9.1 virtual speaker array with physical front-stage room projection, creating a cohesive concert hall atmosphere."
+                                  style={is9DBassRoom?{background:'rgba(255,121,198,0.22)',borderColor:'#ff79c6',color:'#ff79c6'}:undefined}
+                                  onClick={async ()=>{
+                                    setIs9DBassRoom(true);
+                                    await writeToEngine('SPEAKER9D_BASS ROOM');
+                                  }}
+                                >
+                                  🌐 3D Room Bass (Immersive)
+                                </button>
+                              </div>
+                              <p style={{fontSize:'0.68rem',color:'var(--text-secondary)',margin:0,lineHeight:1.35}}>
+                                {!is9DBassRoom 
+                                  ? "• Direct Stereo Bass: Sub-bass (<180Hz) is kept dry & centered in stereo for fast, high-impact kick punch." 
+                                  : "• 3D Room Bass: Full low-end enters the 9 virtual speakers, externalizing the bass into the 3D room."}
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         <div className="glass-menu-section" style={{marginTop:14}}>
@@ -2097,6 +2150,7 @@ function App() {
                     restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
                     setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
             is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
+            is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
                   />
                 )}
               </div>

@@ -61,6 +61,8 @@ interface DSPStudioProps {
   writeToEngine: (cmd: string) => Promise<void>;
   is9DStageOn?: boolean;
   setIs9DStageOn?: (v: boolean) => void;
+  is9DBassRoom?: boolean;
+  setIs9DBassRoom?: (v: boolean) => void;
 
   // ── ANDROID ESCAPE HATCH ──────────────────────────────────────────────────
   // When provided, DSPStudio delegates ALL acoustic-environment loading to this
@@ -86,6 +88,8 @@ export const DSPStudio = ({
   writeToEngine,
   is9DStageOn = false,
   setIs9DStageOn = () => {},
+  is9DBassRoom = false,
+  setIs9DBassRoom = () => {},
   // <-- injected by MobileExpandedPlayer on Android; undefined on Windows
 }: DSPStudioProps) => {
 
@@ -205,7 +209,7 @@ export const DSPStudio = ({
           <div className="dsp-label-row"><label>3D Depth</label><span className="val-purple">{spatialExtra>0?`+${Math.round(spatialExtra*100)}%`:'Base'}</span></div>
           <input type="range" className="dsp-slider spatial" min="0" max="1" step="0.05" value={spatialExtra} onChange={e=>{const v=parseFloat(e.target.value);setSpatialExtra(v);writeToEngine(`3D ${v}`);}}/>
         </div>
-                  <div className="dsp-card" style={disabledStyle}>
+          <div className="dsp-card" style={disabledStyle}>
             <div className="dsp-label-row">
               <label style={{display:'flex',alignItems:'center',gap:'6px'}}>
                 <span style={{color: is9DStageOn ? '#00e5ff' : 'var(--text-secondary)'}}>●</span>
@@ -236,6 +240,69 @@ export const DSPStudio = ({
             <p style={{fontSize:'0.7rem',color:'var(--text-secondary)',margin:'6px 0 0 0',lineHeight:1.3}}>
               Intelligent 9-direction speaker separation with front/center vocal anchoring and 360° height ambience.
             </p>
+
+            {/* Sub-selector for Dual Bass Modes in 9D */}
+            {is9DStageOn && (
+              <div style={{marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)'}}>
+                <div className="dsp-label-row" style={{marginBottom: '6px'}}>
+                  <label style={{fontSize: '0.75rem', fontWeight: 600}}>9D Bass Spatial Routing</label>
+                  <span style={{fontSize: '0.72rem', color: is9DBassRoom ? '#ff79c6' : '#50fa7b', fontWeight: 600}}>
+                    {is9DBassRoom ? '3D Room Bass' : 'Direct Stereo Bass'}
+                  </span>
+                </div>
+                <div style={{display: 'flex', gap: '8px', marginBottom: '6px'}}>
+                  <button
+                    className="dsp-toggle-btn"
+                    title="Direct Stereo Bass (Punch Focus): Sub-bass (<180Hz) stays anchored in dry, fast stereo for maximum kick-drum punch, raw transient impact, and visceral weight."
+                    style={{
+                      flex: 1,
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      border: !is9DBassRoom ? '1px solid #50fa7b' : '1px solid rgba(255,255,255,0.15)',
+                      background: !is9DBassRoom ? 'rgba(80, 250, 123, 0.2)' : 'rgba(255,255,255,0.05)',
+                      color: !is9DBassRoom ? '#50fa7b' : 'var(--text-secondary)',
+                      fontWeight: 600,
+                      fontSize: '0.72rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    onClick={async () => {
+                      if (setIs9DBassRoom) setIs9DBassRoom(false);
+                      await writeToEngine('SPEAKER9D_BASS STEREO');
+                    }}
+                  >
+                    ⚡ Direct Bass (Punch)
+                  </button>
+                  <button
+                    className="dsp-toggle-btn"
+                    title="Full 3D Room Bass (Spatial Immersion): The entire low-end enters the 9.1 virtual speaker array with physical front-stage room projection, creating a cohesive concert hall atmosphere."
+                    style={{
+                      flex: 1,
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      border: is9DBassRoom ? '1px solid #ff79c6' : '1px solid rgba(255,255,255,0.15)',
+                      background: is9DBassRoom ? 'rgba(255, 121, 198, 0.2)' : 'rgba(255,255,255,0.05)',
+                      color: is9DBassRoom ? '#ff79c6' : 'var(--text-secondary)',
+                      fontWeight: 600,
+                      fontSize: '0.72rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    onClick={async () => {
+                      if (setIs9DBassRoom) setIs9DBassRoom(true);
+                      await writeToEngine('SPEAKER9D_BASS ROOM');
+                    }}
+                  >
+                    🌐 3D Room Bass (Immersive)
+                  </button>
+                </div>
+                <p style={{fontSize: '0.68rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.35}}>
+                  {!is9DBassRoom 
+                    ? "⚡ Direct Stereo: Sub-bass (<180Hz) bypasses 3D processing to deliver dry, explosive punch and tight kick transients." 
+                    : "🌐 3D Room Bass: Low-end is spatialized into the 9.1 room array, externalizing the bass into the virtual cinema acoustics."}
+                </p>
+              </div>
+            )}
           </div>
 <div className="dsp-card" style={disabledStyle}>
           <div className="dsp-label-row"><label>Vocal Frontness (Blauert)</label><span className="val-purple">{depthAmount>0?`+${Math.round(depthAmount*100)}%`:'Off'}</span></div>

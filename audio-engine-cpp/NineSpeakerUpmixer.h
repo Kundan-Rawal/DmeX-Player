@@ -49,7 +49,7 @@ struct VirtualSpeakerChannel {
         } else if (fabsf(azDeg) >= 120.0f) {
             // Rear Left / Rear Right (±135°)
             presenceEQ.init(sr, 7000.0f, 1.3f, -2.5f); // Rear pinna notch
-            airEQ.init(sr, 11000.0f, 1.1f, +1.5f);      // Rear ambient air
+            airEQ.init(sr, 11000.0f, 1.1f, +1.5f);      // Rear diffuse air
         } else {
             // Side Left / Side Right (±90°)
             presenceEQ.init(sr, 3800.0f, 1.0f, +1.0f);
@@ -71,7 +71,7 @@ struct VirtualSpeakerChannel {
         } else {
             // Near ear receives direct, punchy, unattenuated sound
             gainNear = 1.0f;
-            // Far ear is strongly shadowed and attenuated (down to 0.15 at 90°)
+            // Far ear is strongly shadowed and attenuated (down to 0.14 at 90°)
             // This prevents comb filtering between ears, making each speaker position distinct and pop out!
             gainFar = 0.40f * (1.0f - 0.65f * sinf(absAz));
             if (gainFar < 0.14f) gainFar = 0.14f;
@@ -127,6 +127,7 @@ class NineSpeakerUpmixer {
 public:
     VirtualSpeakerChannel speakers[9];
     LinkwitzRiley4 crossBassL, crossBassR;
+    SmoothedParam bass3DAmount;
     float corrEnv = 0.5f;
     float corrCoef = 0.002f;
     float sr = 48000.0f;
@@ -137,6 +138,9 @@ public:
         // Crossover to preserve punchy stereo bass (< 180 Hz)
         crossBassL.init(sr, 180.0f);
         crossBassR.init(sr, 180.0f);
+
+        // Smooth crossfade between Direct Stereo Bass (0.0f) and Full 3D Room Bass (1.0f)
+        bass3DAmount.init(0.0f, sr, 25.0f);
 
         corrCoef = tauCoef(35.0f, sr); // 35ms correlation tracking
         corrEnv = 0.5f;
@@ -164,6 +168,10 @@ public:
         reset();
     }
 
+    void setBass3D(bool roomBass) {
+        bass3DAmount.set(roomBass ? 1.0f : 0.0f);
+    }
+
     void reset() {
         crossBassL.reset();
         crossBassR.reset();
@@ -175,14 +183,18 @@ public:
 
     // Processes one stereo frame. Real-time safe: zero allocations, zero locks.
     inline void process(float inL, float inR, float& outL, float& outR) {
-        // 0. Extract Bass (<180Hz) to keep it 100% dry, punchy & in true stereo
+        // 0. Low/High Band Split (< 180Hz)
         float bassL = 0.0f, nonBassL = 0.0f;
         float bassR = 0.0f, nonBassR = 0.0f;
         crossBassL.process(inL, bassL, nonBassL);
         crossBassR.process(inR, bassR, nonBassR);
 
-        float L = nonBassL;
-        float R = nonBassR;
+        // Smoothly blend how much bass enters the 9-speaker matrix
+        // b3D = 0.0 -> Direct Stereo Bass (Punch Mode)
+        // b3D = 1.0 -> Full 3D Room Bass (Spatial Immersion Mode)
+        float b3D = bass3DAmount.next();
+        float L = nonBassL + (bassL * b3D);
+        float R = nonBassR + (bassR * b3D);
 
         // 1. Mid / Side Separation
         float mid  = (L + R) * 0.5f;
@@ -225,8 +237,8 @@ public:
         binL *= NORM_GAIN;
         binR *= NORM_GAIN;
 
-        // 5. Recombine with pristine, un-smeared stereo bass
-        outL = bassL + binL;
-        outR = bassR + binR;
+        // 5. Recombine: direct punchy bass (when b3D < 1) + 3D binaural room output
+        outL = (bassL * (1.0f - b3D)) + binL;
+        outR = (bassR * (1.0f - b3D)) + binR;
     }
 };

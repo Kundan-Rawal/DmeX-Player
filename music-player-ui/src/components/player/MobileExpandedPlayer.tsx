@@ -39,6 +39,7 @@ interface MobileExpandedPlayerProps {
   restorationPresence: number; setRestorationPresence: (v: number) => void;
   setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
   is9DStageOn?: boolean; setIs9DStageOn?: (v: boolean) => void;
+  is9DBassRoom?: boolean; setIs9DBassRoom?: (v: boolean) => void;
   isProfileActive: boolean;    setIsProfileActive: (v: boolean) => void;
   isProfileActiveRef: React.MutableRefObject<boolean>;
   applySmartSettings: (profile: AudioProfile, taste: Taste) => Promise<void>;
@@ -465,6 +466,47 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                     9D Cinema
                   </button>
                 </div>
+
+                {/* Dual Bass Selector for 9D */}
+                {p.is9DStageOn && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div className="glass-label-row" style={{ marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>9D Bass Routing</span>
+                      <span style={{ fontSize: '0.72rem', color: p.is9DBassRoom ? '#ff79c6' : '#50fa7b', fontWeight: 600 }}>
+                        {p.is9DBassRoom ? '3D Room Bass' : 'Direct Stereo Bass'}
+                      </span>
+                    </div>
+                    <div className="glass-boost-grid" style={{ marginBottom: 6 }}>
+                      <button
+                        className={`glass-boost-btn ${!p.is9DBassRoom ? 'active' : ''}`}
+                        title="Direct Stereo Bass (Punch Focus): Sub-bass (<180Hz) stays anchored in dry, fast stereo for maximum kick-drum punch, raw transient impact, and visceral weight."
+                        style={!p.is9DBassRoom ? { background: 'rgba(80,250,123,0.2)', borderColor: '#50fa7b', color: '#50fa7b' } : undefined}
+                        onClick={async () => {
+                          if (p.setIs9DBassRoom) p.setIs9DBassRoom(false);
+                          await p.writeToEngine('SPEAKER9D_BASS STEREO');
+                        }}
+                      >
+                        ⚡ Direct Bass (Punch)
+                      </button>
+                      <button
+                        className={`glass-boost-btn ${p.is9DBassRoom ? 'active' : ''}`}
+                        title="Full 3D Room Bass (Spatial Immersion): Low-end enters the 9.1 virtual speaker array with physical front-stage room projection, creating a cohesive concert hall atmosphere."
+                        style={p.is9DBassRoom ? { background: 'rgba(255,121,198,0.22)', borderColor: '#ff79c6', color: '#ff79c6' } : undefined}
+                        onClick={async () => {
+                          if (p.setIs9DBassRoom) p.setIs9DBassRoom(true);
+                          await p.writeToEngine('SPEAKER9D_BASS ROOM');
+                        }}
+                      >
+                        🌐 3D Room Bass (Immersive)
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.35 }}>
+                      {!p.is9DBassRoom 
+                        ? "• Direct Stereo Bass: Sub-bass (<180Hz) is kept dry & centered in stereo for fast, high-impact kick punch." 
+                        : "• 3D Room Bass: Full low-end enters the 9 virtual speakers, externalizing the bass into the 3D room."}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* RESTORED: EQ */}
@@ -565,6 +607,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   setIsManualOverride={p.setIsManualOverride} setSmartTaste={p.setSmartTaste}
                   setBassLevel={p.setBassLevel} setTrebleLevel={p.setTrebleLevel} writeToEngine={p.writeToEngine}
                     is9DStageOn={p.is9DStageOn} setIs9DStageOn={p.setIs9DStageOn}
+                    is9DBassRoom={p.is9DBassRoom} setIs9DBassRoom={p.setIs9DBassRoom}
           
                   onEnvSelect={handleAcousticEnvSelect}
                 />

@@ -504,6 +504,11 @@ extern "C" void execute_audio_command(const char *cmd_in)
     {
         g_is8DModeOn = (args == "1" || args == "ON");
     }
+    else if (command == "SPEAKER9D_BASS")
+    {
+        bool isRoom = (args == "ROOM" || args == "1" || args == "ON");
+        g_8DNode.setBass3D(isRoom);
+    }
     else if (command == "ANDROID_SPEAKER")
     {
         g_isAndroidSpeaker = (stoi(args) == 1);
