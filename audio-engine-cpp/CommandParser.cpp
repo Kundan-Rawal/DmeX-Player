@@ -502,11 +502,11 @@ extern "C" void execute_audio_command(const char *cmd_in)
     // Add this inside your if/else if chain block
     else if (command == "SPEAKER9D" || command == "TOGGLE_8D")
     {
-        g_is8DModeOn = (args == "1" || args == "ON");
+        g_is8DModeOn = (args.find("1") != string::npos || args.find("ON") != string::npos || args.find("on") != string::npos);
     }
     else if (command == "SPEAKER9D_BASS")
     {
-        bool isRoom = (args == "ROOM" || args == "1" || args == "ON");
+        bool isRoom = (args.find("ROOM") != string::npos || args.find("room") != string::npos || args.find("1") != string::npos || args.find("ON") != string::npos);
         g_8DNode.setBass3D(isRoom);
     }
     else if (command == "ANDROID_SPEAKER")

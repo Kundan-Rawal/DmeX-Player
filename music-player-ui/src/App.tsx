@@ -447,6 +447,8 @@ function App() {
                          await writeToEngine(`TREBLE ${settings.trebleLevel ?? 0.0}`);
                          await writeToEngine(`LIMITER ${settings.speakerMode==='NONE'?0:settings.speakerMode==='LOW'?0.3:settings.speakerMode==='MED'?0.6:1.0}`);
                          await writeToEngine(`ANDROID_SPEAKER ${settings.isPhoneSpeaker ? 1 : 0}`);
+                         await writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`);
+                         await writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`);
                          await writeToEngine(`LOAD ${track.path}`);
                      } catch (_) {}
                  }
