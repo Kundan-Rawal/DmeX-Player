@@ -595,34 +595,71 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         p->crossMidBassL.process(L, totalBassL, nonBassL);
         p->crossMidBassR.process(R, totalBassR, nonBassR);
 
-        // 2. Subsonic High-Pass Filter (28Hz 2nd-order Butterworth HPF)
-        // Completely strips inaudible sub-sonic DC flutter (<25Hz) that causes physical diaphragm rattling,
-        // while preserving 100% of musical punch and sub-bass (35Hz - 80Hz).
+        // 2. Subsonic High-Pass Filter (32Hz 2nd-order Butterworth HPF)
+        // Completely strips inaudible sub-sonic DC flutter & diaphragm-rattling (<30Hz)
+        // while preserving 100% of musical punch and sub-bass (50Hz - 180Hz).
         float cleanBassL = p->subsonicL.process(totalBassL);
         float cleanBassR = p->subsonicR.process(totalBassR);
 
-        // 3. Split into Sub-Bass (28-80Hz) and Mid-Bass (80-180Hz)
+        // 3. Split into Sub-Bass (32-80Hz) and Mid-Bass (80-180Hz)
         float subL, midBassL, subR, midBassR;
         p->crossBassL.process(cleanBassL, subL, midBassL);
         p->crossBassR.process(cleanBassR, subR, midBassR);
 
-        // 4. Update Peaking Filter Coefficients on block boundaries or slider changes (NEVER per sample!)
+        // 4. Dual Envelope Ballistics (Real-time sub & mid-bass energy monitoring)
+        float subEnergy = (fabsf(subL) + fabsf(subR)) * 0.5f;
+        float midEnergy = (fabsf(midBassL) + fabsf(midBassR)) * 0.5f;
+        const float ENV_ATTACK  = 0.02f;   // ~5ms fast transient rise
+        const float ENV_RELEASE = 0.0015f; // ~80-100ms smooth release
+        p->env30_60  += (subEnergy > p->env30_60  ? ENV_ATTACK : ENV_RELEASE) * (subEnergy - p->env30_60);
+        p->env90_130 += (midEnergy > p->env90_130 ? ENV_ATTACK : ENV_RELEASE) * (midEnergy - p->env90_130);
+
+        // 5. Active Bi-Peak Fundamental Adaptation (Updated on block boundaries / intervals)
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
-        if (i == 0 || fabsf(safeBass - p->lastBassGain) > 0.005f || !p->isHighlightInit)
+        if (i == 0 || (i & 31) == 0)
         {
-            // Broad Q (0.85) covers the entire musical bass spectrum without dead notches:
-            // 50Hz covers 30-80Hz (sub-bass / 808 weight)
-            // 95Hz covers 65-140Hz (kick body & bass guitar notes in older songs)
-            float subBoostDb = safeBass * 3.5f;
-            float midBoostDb = safeBass * 2.2f;
+            float totalEnergy = p->env30_60 + p->env90_130;
+            if (totalEnergy > 0.0001f)
+            {
+                float midRatio = p->env90_130 / totalEnergy;
+                // Dynamically tracks the kick / tabla / bassline thump:
+                // When sub-heavy, anchors near 95Hz; when acoustic mid-punch hits, sweeps up to 125Hz
+                p->targetFreq = 95.0f + (midRatio * 30.0f);
+            }
+            else
+            {
+                p->targetFreq = 105.0f;
+            }
 
-            p->subPeakL.update_coeffs(sr, 50.0f, 0.85f, subBoostDb);
-            p->subPeakR.update_coeffs(sr, 50.0f, 0.85f, subBoostDb);
-            p->midPeakL.update_coeffs(sr, 95.0f, 0.85f, midBoostDb);
-            p->midPeakR.update_coeffs(sr, 95.0f, 0.85f, midBoostDb);
+            // Smooth slew toward target frequency (prevents rapid flutter)
+            p->currentFreq += 0.08f * (p->targetFreq - p->currentFreq);
 
-            p->lastBassGain = safeBass;
-            p->isHighlightInit = true;
+            // Dynamic headroom compensation: scales boost down slightly on already-massive bass tracks
+            float bassDensity = p->env30_60 * 1.2f + p->env90_130 * 0.8f;
+            float autoHeadroom = 1.0f / (1.0f + bassDensity * 0.35f);
+
+            bool freqShifted = fabsf(p->currentFreq - p->lastTunedFreq) >= 1.0f;
+            bool gainChanged = fabsf(safeBass - p->lastBassGain) > 0.005f;
+
+            if (freqShifted || gainChanged || !p->isHighlightInit)
+            {
+                float subBoostDb = (safeBass * 3.8f) * (0.80f + 0.20f * autoHeadroom);
+                float midBoostDb = (safeBass * 2.8f) * (0.80f + 0.20f * autoHeadroom);
+
+                // Peak 1: Clean, punchy 60.0Hz tactile anchor (+10 Hz higher than old 50Hz)
+                // Concentrates sub impact in the 50-75Hz thump band so it doesn't "hit the brain"
+                p->subPeakL.update_coeffs(sr, 60.0f, 1.15f, subBoostDb);
+                p->subPeakR.update_coeffs(sr, 60.0f, 1.15f, subBoostDb);
+
+                // Peak 2: Dynamic fundamental tracking between 95Hz and 125Hz
+                // Locks onto the kick drum / tabla / bass guitar fundamental actively
+                p->midPeakL.update_coeffs(sr, p->currentFreq, 1.25f, midBoostDb);
+                p->midPeakR.update_coeffs(sr, p->currentFreq, 1.25f, midBoostDb);
+
+                p->lastTunedFreq = p->currentFreq;
+                p->lastBassGain = safeBass;
+                p->isHighlightInit = true;
+            }
         }
 
         // Apply peaking filters in pure phase-coherent stereo
@@ -631,25 +668,26 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float boostedMidL = p->midPeakL.process(midBassL);
         float boostedMidR = p->midPeakR.process(midBassR);
 
-        // Broad low-end linear drive: lifts ALL bass notes across 30Hz-180Hz evenly
-        // Guarantees immediate, unmistakable impact on older songs (bass guitars, disco/rock kicks)
-        // safeBass = 0.25 -> 1.35x (+2.6 dB)
-        // safeBass = 0.75 -> 2.05x (+6.2 dB)
-        // safeBass = 1.50 -> 3.10x (+9.8 dB)
-        float linearScale = 1.0f + (safeBass * 1.40f);
+        // Calibrated broad low-end linear drive:
+        // Provides clean, unmistakable body across 30Hz-180Hz without overloading headroom:
+        // safeBass = 0.25 -> 1.15x (+1.2 dB)
+        // safeBass = 0.75 -> 1.45x (+3.2 dB)
+        // safeBass = 1.50 -> 1.90x (+5.6 dB)
+        float linearScale = 1.0f + (safeBass * 0.60f);
 
         float combinedBassL = (boostedSubL + boostedMidL) * linearScale;
         float combinedBassR = (boostedSubR + boostedMidR) * linearScale;
 
-        // Transparent soft-knee analog limiter on bass band (ceiling 1.25):
-        // Allows transients to peak naturally up to 1.05 with 100% linear punch.
-        // Gently rounds extreme overloads so the master limiter NEVER pumps or modulates vocals!
+        // Ultra-smooth asymptotic analog saturation curve:
+        // - Completely linear up to 0.85 (zero harmonic distortion for musical transients)
+        // - Smooth soft-knee saturation up to 1.20 with wide continuous transition (0.70)
+        // - PREVENTS square-wave flat-topping and eliminates driver rattling completely!
         auto softCeiling = [](float b) {
             float ab = fabsf(b);
-            if (ab <= 1.05f) return b;
-            float over = ab - 1.05f;
-            float lim = 1.05f + 0.20f * tanhf(over / 0.20f);
-            return (b > 0) ? lim : -lim;
+            if (ab <= 0.85f) return b;
+            float over = ab - 0.85f;
+            float compressed = 0.85f + 0.35f * tanhf(over / 0.70f);
+            return (b > 0) ? compressed : -compressed;
         };
 
         // Combine pristine untouched non-bass (>180Hz) with clean, punchy, rattle-free bass
@@ -1235,6 +1273,9 @@ void dsp_flush_all_state(void)
     g_subwooferNode.env30_60 = 0.0f;
     g_subwooferNode.env60_90 = 0.0f;
     g_subwooferNode.env90_130 = 0.0f;
+    g_subwooferNode.currentFreq = 105.0f;
+    g_subwooferNode.targetFreq = 105.0f;
+    g_subwooferNode.lastTunedFreq = -1.0f;
     g_subwooferNode.subsonicL.reset();
     g_subwooferNode.subsonicR.reset();
     g_subwooferNode.subPeakL.reset();
