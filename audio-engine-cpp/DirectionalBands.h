@@ -26,14 +26,14 @@ struct DirectionalBands {
         float b_gain = 0.0f;
         
         if (frontness > 0.0f) {
-            f_gain = 8.0f * frontness * depth;
-            b_gain = -4.0f * frontness * depth;
+            f_gain = 2.5f * frontness * depth;
+            b_gain = -1.5f * frontness * depth;
         } else {
-            b_gain = 8.0f * (-frontness) * depth;
-            f_gain = -4.0f * (-frontness) * depth;
+            b_gain = 2.5f * (-frontness) * depth;
+            f_gain = -1.5f * (-frontness) * depth;
         }
 
-        float u_gain = 5.0f * elevation * depth;
+        float u_gain = 2.0f * elevation * depth;
 
         front1.init(sr, 450.0f, 1.0f, f_gain);
         front2.init(sr, 3500.0f, 1.4f, f_gain);

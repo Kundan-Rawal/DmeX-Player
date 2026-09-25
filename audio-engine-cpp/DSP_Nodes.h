@@ -350,7 +350,9 @@ struct SubwooferNode
     float currentFreq = 95.0f, targetFreq = 95.0f;
     BiquadPeak subPeakL, subPeakR; // Peak 1: Permanent 45Hz tactile anchor
     BiquadPeak midPeakL, midPeakR; // Peak 2: Dynamic 85-115Hz acoustic fundamental anchor
+    BiquadHPF subsonicL, subsonicR; // Sub-sonic filter (28Hz) to prevent physical driver rattling
     bool isHighlightInit = false;
+    float lastBassGain = -1.0f;
     float sampleRate = 44100.0f;
 };
 struct ConvolutionNode

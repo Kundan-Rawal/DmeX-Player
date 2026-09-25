@@ -175,7 +175,8 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
 
     float intensity = p->spatialIntensity.next();
 
-    if (intensity < 0.001f)
+    // Fix double-spatializer conflict: if 9D mode is ON, or spatial intensity is 0, BYPASS!
+    if (g_is8DModeOn || intensity < 0.001f)
     {
         memcpy(ppFramesOut[0], ppFramesIn[0], fc * 2 * sizeof(float));
         return;
@@ -501,6 +502,13 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
+    // Bit-exact zero-cost transparent bypass when bass boost is 0
+    if (g_bassGain < 0.001f)
+    {
+        memcpy(pOut, pIn, fc * 2 * sizeof(float));
+        return;
+    }
+
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
@@ -577,118 +585,70 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
             continue;
         }
 
-        // BASE MODE TACTILE FOUNDATION & CONTINUOUS HIGH-PUNCH STEREO BASS SCALING
-        // Delivers clear, punchy, and powerful bass throughout the entire slider:
-        // safeBass = 0.00 -> Clean uncolored baseline (+1.8 dB sub, +1.2 dB mid)
-        // safeBass = 0.25 -> Solid, punchy, tight thump (+4.5 dB sub, +3.0 dB mid)
-        // safeBass = 0.50 -> Heavy, chest-thumping club drive (+7.3 dB sub, +5.0 dB mid)
-        // safeBass = 0.75 (50% UI) -> Deep, vibrating physical subwoofer presence (+10.0 dB sub, +6.8 dB mid)
-        // safeBass = 1.50 (100% UI) -> Explosive basshead authority (+18.3 dB sub, +12.4 dB mid)
-        float safeBass = (g_bassGain < 0.0f) ? 0.0f : g_bassGain;
+        // ==========================================
+        // AUDIOPHILE STEREO BASS ENGINE (Clean, Punchy, Zero Rattling)
+        // ==========================================
+        float safeBass = (g_bassGain < 0.0f) ? 0.0f : ((g_bassGain > 1.5f) ? 1.5f : g_bassGain);
 
-        // 1. Isolate everything below 180Hz (The entire bass range)
+        // 1. Isolate the entire bass range below 180Hz
         float totalBassL, nonBassL, totalBassR, nonBassR;
         p->crossMidBassL.process(L, totalBassL, nonBassL);
         p->crossMidBassR.process(R, totalBassR, nonBassR);
 
-        // 2. Split the Bass into Sub-Bass (0-80Hz) and Mid-Bass (80-180Hz)
-        float subL, midBassL, subR, midBassR;
-        p->crossBassL.process(totalBassL, subL, midBassL);
-        p->crossBassR.process(totalBassR, subR, midBassR);
+        // 2. Subsonic High-Pass Filter (28Hz 2nd-order Butterworth HPF)
+        // Completely strips inaudible sub-sonic DC flutter (<25Hz) that causes physical diaphragm rattling,
+        // while preserving 100% of musical punch and sub-bass (35Hz - 80Hz).
+        float cleanBassL = p->subsonicL.process(totalBassL);
+        float cleanBassR = p->subsonicR.process(totalBassR);
 
-        // 3. DUAL-PEAK BI-MODAL ARCHITECTURE (Broad Sub Anchor & Fundamental Tracking)
+        // 3. Split into Sub-Bass (28-80Hz) and Mid-Bass (80-180Hz)
+        float subL, midBassL, subR, midBassR;
+        p->crossBassL.process(cleanBassL, subL, midBassL);
+        p->crossBassR.process(cleanBassR, subR, midBassR);
+
+        // 4. Update Peaking Filter Coefficients on block boundaries or slider changes (NEVER per sample!)
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
-        if (!p->isHighlightInit)
+        if (i == 0 || fabsf(safeBass - p->lastBassGain) > 0.005f || !p->isHighlightInit)
         {
-            p->subPeakL.init(sr, 50.0f, 1.20f, 0.0f); // Peak 1: Tight 50Hz deep chest-thump anchor (covers 30-75Hz)
-            p->subPeakR.init(sr, 50.0f, 1.20f, 0.0f);
-            p->midPeakL.init(sr, 95.0f, 1.45f, 0.0f); // Peak 2: Dynamic fundamental tracking (85-115Hz kick body)
-            p->midPeakR.init(sr, 95.0f, 1.45f, 0.0f);
+            // Calibrated boost curve:
+            // safeBass = 0.00 -> 0.0 dB (flat transparent)
+            // safeBass = 0.375 (25% UI) -> +1.9 dB sub, +1.0 dB mid
+            // safeBass = 0.75  (50% UI) -> +3.8 dB sub, +2.0 dB mid
+            // safeBass = 1.50 (100% UI) -> +7.5 dB sub, +4.0 dB mid (immense authority without driver rattling)
+            float subBoostDb = safeBass * 5.0f;
+            float midBoostDb = safeBass * 2.7f;
+
+            p->subPeakL.update_coeffs(sr, 48.0f, 1.15f, subBoostDb);
+            p->subPeakR.update_coeffs(sr, 48.0f, 1.15f, subBoostDb);
+            p->midPeakL.update_coeffs(sr, 92.0f, 1.30f, midBoostDb);
+            p->midPeakR.update_coeffs(sr, 92.0f, 1.30f, midBoostDb);
+
+            p->lastBassGain = safeBass;
             p->isHighlightInit = true;
         }
 
-        const float ENV_ATTACK = 0.005f;
-        const float ENV_RELEASE = 0.0002f;
-        float subEnergy = fabsf(subL) + fabsf(subR);
-        float midEnergy = fabsf(midBassL) + fabsf(midBassR);
+        // Apply peaking filters in pure phase-coherent stereo
+        float boostedSubL = p->subPeakL.process(subL);
+        float boostedSubR = p->subPeakR.process(subR);
+        float boostedMidL = p->midPeakL.process(midBassL);
+        float boostedMidR = p->midPeakR.process(midBassR);
 
-        p->env30_60 = (subEnergy > p->env30_60) ? (p->env30_60 + ENV_ATTACK * (subEnergy - p->env30_60))
-                                                : (p->env30_60 + ENV_RELEASE * (subEnergy - p->env30_60));
-        p->env90_130 = (midEnergy > p->env90_130) ? (p->env90_130 + ENV_ATTACK * (midEnergy - p->env90_130))
-                                                  : (p->env90_130 + ENV_RELEASE * (midEnergy - p->env90_130));
+        // Combined low-frequency energy in pure stereo
+        float combinedBassL = boostedSubL + boostedMidL;
+        float combinedBassR = boostedSubR + boostedMidR;
 
-        // Safeguard 2: Brickwall Psychoacoustic Ceiling (85Hz - 115Hz for Peak 2)
-        // Peak 1 stays anchored at 50Hz for tactile sub-bass weight.
-        // Peak 2 tracks Tabla/kick fundamental without ever bleeding above 125Hz into vocals!
-        float target = 95.0f;
-        if (p->env90_130 > 0.0001f)
-        {
-            target = 85.0f + 30.0f * (p->env90_130 / (p->env30_60 + p->env90_130 + 0.0001f));
-        }
-        if (target < 85.0f) target = 85.0f;
-        if (target > 115.0f) target = 115.0f;
-        p->targetFreq = target;
-
-        // One-Pole Ballistic Flywheel Slewing (~600ms time constant) ensures non-abrupt frequency shifting
-        const float SLEW_COEF = 0.000035f;
-        p->currentFreq += SLEW_COEF * (p->targetFreq - p->currentFreq);
-
-        // Safeguard 4: Dynamic Headroom Balancing (Gentle headroom sharing without choking dynamic transients)
-        float totalEnergy = p->env30_60 + p->env90_130;
-        float duckFactor = 1.0f / (1.0f + totalEnergy * 0.20f);
-
-        // Continuous Authoritative EQ Scaling throughout the slider
-        float subBoostDb = (safeBass * 11.0f + 1.8f) * (0.85f + 0.15f * duckFactor);
-        float midBoostDb = (safeBass * 7.5f + 1.2f) * (0.85f + 0.15f * duckFactor);
-
-        p->subPeakL.update_coeffs(sr, 50.0f, 1.20f, subBoostDb);
-        p->subPeakR.update_coeffs(sr, 50.0f, 1.20f, subBoostDb);
-        p->midPeakL.update_coeffs(sr, p->currentFreq, 1.45f, midBoostDb);
-        p->midPeakR.update_coeffs(sr, p->currentFreq, 1.45f, midBoostDb);
-
-        // Apply Bi-Modal peaks independently in pure stereo
-        float highlightedSubL = p->subPeakL.process(subL);
-        float highlightedSubR = p->subPeakR.process(subR);
-        float highlightedMidL = p->midPeakL.process(midBassL);
-        float highlightedMidR = p->midPeakR.process(midBassR);
-
-        // 4. Stereo Sub-Bass Drive & Mid-Bass Punch (Clean linear scaling without muddy harmonic distortion)
-        // Left and Right channels are processed strictly independently — ZERO bleed into 3D stage or opposite ear.
-        float subDrive = 1.0f + (safeBass * 0.90f);
-        float midPunchGain = 1.0f + (safeBass * 0.70f);
-
-        auto warmSub = [](float x) {
-            float ax = fabsf(x);
-            if (ax <= 1.0f) return x; // 100% linear, transparent reproduction up to full scale
-            float over = ax - 1.0f;
-            float sat = 1.0f + 0.50f * tanhf(over / 0.50f); // Smooth analog curve up to 1.50
-            return (x > 0) ? sat : -sat;
-        };
-
-        float processedSubL = warmSub(highlightedSubL * subDrive);
-        float processedSubR = warmSub(highlightedSubR * subDrive);
-
-        // Safeguard 3: Mid-Bass (80-180Hz) gets clean linear kick punch snap
-        float processedMidBassL = highlightedMidL * midPunchGain;
-        float processedMidBassR = highlightedMidR * midPunchGain;
-
-        // Combined low-frequency energy (Sub + Mid-Bass) in pure stereo
-        float combinedBassL = processedSubL + processedMidBassL;
-        float combinedBassR = processedSubR + processedMidBassR;
-
-        // Transparent High-Headroom Soft Ceiling:
-        // Allows transients to peak naturally up to 1.40 with zero compression,
-        // while gently rounding extreme overloads (>1.40) before the master limiter.
+        // Transparent soft-knee analog limiter on bass band (ceiling 0.95):
+        // Allows transients to peak naturally up to 0.88 with 100% linear transparency.
+        // Gently rounds extreme overloads so the master limiter NEVER pumps or modulates vocals!
         auto softCeiling = [](float b) {
             float ab = fabsf(b);
-            if (ab <= 1.40f) return b;
-            float over = ab - 1.40f;
-            float lim = 1.40f + 0.35f * tanhf(over / 0.35f);
+            if (ab <= 0.88f) return b;
+            float over = ab - 0.88f;
+            float lim = 0.88f + 0.08f * tanhf(over / 0.08f);
             return (b > 0) ? lim : -lim;
         };
 
-        // Sum the Sub, Mid-Bass, and the completely untouched non-bass signal (>180Hz)
-        // This guarantees absolute zero phase smearing in the midrange while delivering strong, punchy stereo bass.
+        // Combine pristine untouched non-bass (>180Hz) with clean, punchy, rattle-free bass
         pOut[i * 2]     = nonBassL + softCeiling(combinedBassL);
         pOut[i * 2 + 1] = nonBassR + softCeiling(combinedBassR);
     }
@@ -1271,6 +1231,14 @@ void dsp_flush_all_state(void)
     g_subwooferNode.env30_60 = 0.0f;
     g_subwooferNode.env60_90 = 0.0f;
     g_subwooferNode.env90_130 = 0.0f;
+    g_subwooferNode.subsonicL.reset();
+    g_subwooferNode.subsonicR.reset();
+    g_subwooferNode.subPeakL.reset();
+    g_subwooferNode.subPeakR.reset();
+    g_subwooferNode.midPeakL.reset();
+    g_subwooferNode.midPeakR.reset();
+    g_subwooferNode.lastBassGain = -1.0f;
+    g_subwooferNode.isHighlightInit = false;
 
     memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
     g_spatializerNode.centerIdx = 0;

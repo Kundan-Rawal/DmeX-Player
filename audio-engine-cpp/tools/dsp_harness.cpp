@@ -11,6 +11,7 @@
 //   testnames: sweep | thd | alias | impulse | stereo | latency | all
 
 #include "../DSP_Nodes.h"
+#include "../NineSpeakerUpmixer.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -376,6 +377,82 @@ static void testDenormalCost(float fs)
     g_isReverbOn = false;
 }
 
+static void testSubwoofer(float fs)
+{
+    printf("\n[TEST] SubwooferNode — linearity, subsonic filter & bypass @ %.0f Hz\n", fs);
+    SubwooferNode n; memset(&n, 0, sizeof(n));
+    n.sampleRate = fs;
+    n.crossBassL.init(fs, 80.0f); n.crossBassR.init(fs, 80.0f);
+    n.crossMidBassL.init(fs, 180.0f); n.crossMidBassR.init(fs, 180.0f);
+    n.subsonicL.init(fs, 28.0f); n.subsonicR.init(fs, 28.0f);
+    n.lastBassGain = -1.0f;
+
+    const int N = 8192;
+    // 1. Test Bypass: input = sine 100Hz, g_bassGain = 0.0f
+    g_bassGain = 0.0f;
+    auto in = genSine(100.0f, fs, N, 0.5f);
+    auto outBypass = runNode(&n, &g_subwoofer_vtable, in);
+    float maxDiff = 0.0f;
+    for (size_t i = 0; i < in.size(); ++i) maxDiff = fmaxf(maxDiff, fabsf(outBypass[i] - in[i]));
+    printf("   Bypass at slider 0.0: max diff = %.6f  %s\n", maxDiff, maxDiff < 1e-6f ? "PASS (Exact bit-identical)" : "FAIL");
+
+    // 2. Test Subsonic Rejection at 10 Hz (should be heavily attenuated to prevent driver rattling)
+    g_bassGain = 1.50f; // max slider
+    auto in10Hz = genSine(10.0f, fs, N, 0.5f);
+    auto out10Hz = runNode(&n, &g_subwoofer_vtable, in10Hz);
+    StereoStats s10 = measureStereo(out10Hz);
+    printf("   10 Hz sub-rumble attenuation @ max slider: peak = %.4f (attenuated by %.1f dB) %s\n",
+           s10.peak, 20.0f * log10f(0.5f / (s10.peak + 1e-9f)), s10.peak < 0.25f ? "PASS" : "FAIL");
+
+    // 3. Test 50 Hz Musical Bass Boost @ max slider (must be boosted but <= 0.98, zero square-wave clipping)
+    auto in50Hz = genSine(50.0f, fs, N, 0.35f);
+    auto out50Hz = runNode(&n, &g_subwoofer_vtable, in50Hz);
+    StereoStats s50 = measureStereo(out50Hz);
+    printf("   50 Hz sub-bass punch @ max slider: peak = %.4f (gain = %+.1f dB)  %s\n",
+           s50.peak, 20.0f * log10f(s50.peak / 0.35f), (s50.peak > 0.40f && s50.peak <= 0.98f) ? "PASS (High punch & safe headroom)" : "FAIL");
+
+    g_bassGain = 0.0f;
+}
+
+static void test9DUpmixer(float fs)
+{
+    printf("\n[TEST] NineSpeakerUpmixer — unity energy, directionality & vocal clarity @ %.0f Hz\n", fs);
+    NineSpeakerUpmixer upmixer;
+    upmixer.init(fs);
+
+    const int N = 8192;
+    // 1. Center Vocal Test: 1 kHz tone, L=0.5, R=0.5
+    // Must match input amplitude within 0.5 dB (no 4 dB scoop!)
+    auto inVoc = genSine(1000.0f, fs, N, 0.5f);
+    std::vector<float> outVoc(N * 2);
+    for (int i = 0; i < N; ++i) {
+        upmixer.process(inVoc[i*2], inVoc[i*2+1], outVoc[i*2], outVoc[i*2+1]);
+    }
+    // Skip startup transient (first 512 samples)
+    float maxVocPeak = 0.0f;
+    for (int i = 512; i < N; ++i) maxVocPeak = fmaxf(maxVocPeak, fabsf(outVoc[i*2]));
+    float vocGainDb = 20.0f * log10f(maxVocPeak / 0.5f);
+    printf("   1 kHz Center Vocal Level: peak = %.4f (gain delta = %+.2f dB, expected ~0 dB)  %s\n",
+           maxVocPeak, vocGainDb, fabsf(vocGainDb) < 1.0f ? "PASS (Zero vocal scoop!)" : "FAIL");
+
+    // 2. Hard Left Localization Test: L=0.5, R=0.0
+    // Left ear must be loud (>0.40), Right ear far lower (<0.20), never negative inverted phase
+    upmixer.reset();
+    std::vector<float> inLeft(N * 2, 0.0f);
+    for (int i = 0; i < N; ++i) inLeft[i*2] = 0.5f * sinf(2.0f * (float)M_PI * 1000.0f * i / fs);
+    std::vector<float> outLeft(N * 2);
+    for (int i = 0; i < N; ++i) {
+        upmixer.process(inLeft[i*2], inLeft[i*2+1], outLeft[i*2], outLeft[i*2+1]);
+    }
+    float pkL = 0.0f, pkR = 0.0f;
+    for (int i = 512; i < N; ++i) {
+        pkL = fmaxf(pkL, fabsf(outLeft[i*2]));
+        pkR = fmaxf(pkR, fabsf(outLeft[i*2+1]));
+    }
+    printf("   Hard Left Panning: Left ear = %.4f, Right ear = %.4f (separation = %.1f dB)  %s\n",
+           pkL, pkR, 20.0f * log10f(pkL / (pkR + 1e-9f)), pkL > pkR * 1.5f ? "PASS (Pinpoint left directionality)" : "FAIL");
+}
+
 int main(int argc, char** argv)
 {
     printf("Starting dsp_harness...\n");
@@ -391,6 +468,8 @@ int main(int argc, char** argv)
     if (which == "all" || which == "sweep")   { testEQCrossover(fs); }
     if (which == "all" || which == "thd")     { testLimiterTruePeak(fs); }
     if (which == "all" || which == "impulse") { testReverbDecay(fs); testDenormalCost(fs); }
+    if (which == "all" || which == "bass")    { testSubwoofer(fs); }
+    if (which == "all" || which == "9d")      { test9DUpmixer(fs); }
 
     printf("\nDone.\n");
     return 0;

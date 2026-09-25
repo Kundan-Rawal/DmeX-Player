@@ -262,6 +262,10 @@ engine_ready:
     g_subwooferNode.crossBassR.init((float)sr, 80.0f);
     g_subwooferNode.crossMidBassL.init((float)sr, 180.0f);
     g_subwooferNode.crossMidBassR.init((float)sr, 180.0f);
+    g_subwooferNode.subsonicL.init((float)sr, 28.0f);
+    g_subwooferNode.subsonicR.init((float)sr, 28.0f);
+    g_subwooferNode.lastBassGain = -1.0f;
+    g_subwooferNode.isHighlightInit = false;
     g_subwooferNode.sampleRate = (float)sr;
     ma_node_config subCfg = ma_node_config_init();
     subCfg.vtable = &g_subwoofer_vtable;
