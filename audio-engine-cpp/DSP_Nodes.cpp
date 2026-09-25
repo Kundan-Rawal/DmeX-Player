@@ -610,18 +610,16 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
         if (i == 0 || fabsf(safeBass - p->lastBassGain) > 0.005f || !p->isHighlightInit)
         {
-            // Calibrated boost curve:
-            // safeBass = 0.00 -> 0.0 dB (flat transparent)
-            // safeBass = 0.375 (25% UI) -> +1.9 dB sub, +1.0 dB mid
-            // safeBass = 0.75  (50% UI) -> +3.8 dB sub, +2.0 dB mid
-            // safeBass = 1.50 (100% UI) -> +7.5 dB sub, +4.0 dB mid (immense authority without driver rattling)
-            float subBoostDb = safeBass * 5.0f;
-            float midBoostDb = safeBass * 2.7f;
+            // Broad Q (0.85) covers the entire musical bass spectrum without dead notches:
+            // 50Hz covers 30-80Hz (sub-bass / 808 weight)
+            // 95Hz covers 65-140Hz (kick body & bass guitar notes in older songs)
+            float subBoostDb = safeBass * 3.5f;
+            float midBoostDb = safeBass * 2.2f;
 
-            p->subPeakL.update_coeffs(sr, 48.0f, 1.15f, subBoostDb);
-            p->subPeakR.update_coeffs(sr, 48.0f, 1.15f, subBoostDb);
-            p->midPeakL.update_coeffs(sr, 92.0f, 1.30f, midBoostDb);
-            p->midPeakR.update_coeffs(sr, 92.0f, 1.30f, midBoostDb);
+            p->subPeakL.update_coeffs(sr, 50.0f, 0.85f, subBoostDb);
+            p->subPeakR.update_coeffs(sr, 50.0f, 0.85f, subBoostDb);
+            p->midPeakL.update_coeffs(sr, 95.0f, 0.85f, midBoostDb);
+            p->midPeakR.update_coeffs(sr, 95.0f, 0.85f, midBoostDb);
 
             p->lastBassGain = safeBass;
             p->isHighlightInit = true;
@@ -633,18 +631,24 @@ static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint3
         float boostedMidL = p->midPeakL.process(midBassL);
         float boostedMidR = p->midPeakR.process(midBassR);
 
-        // Combined low-frequency energy in pure stereo
-        float combinedBassL = boostedSubL + boostedMidL;
-        float combinedBassR = boostedSubR + boostedMidR;
+        // Broad low-end linear drive: lifts ALL bass notes across 30Hz-180Hz evenly
+        // Guarantees immediate, unmistakable impact on older songs (bass guitars, disco/rock kicks)
+        // safeBass = 0.25 -> 1.35x (+2.6 dB)
+        // safeBass = 0.75 -> 2.05x (+6.2 dB)
+        // safeBass = 1.50 -> 3.10x (+9.8 dB)
+        float linearScale = 1.0f + (safeBass * 1.40f);
 
-        // Transparent soft-knee analog limiter on bass band (ceiling 0.95):
-        // Allows transients to peak naturally up to 0.88 with 100% linear transparency.
+        float combinedBassL = (boostedSubL + boostedMidL) * linearScale;
+        float combinedBassR = (boostedSubR + boostedMidR) * linearScale;
+
+        // Transparent soft-knee analog limiter on bass band (ceiling 1.25):
+        // Allows transients to peak naturally up to 1.05 with 100% linear punch.
         // Gently rounds extreme overloads so the master limiter NEVER pumps or modulates vocals!
         auto softCeiling = [](float b) {
             float ab = fabsf(b);
-            if (ab <= 0.88f) return b;
-            float over = ab - 0.88f;
-            float lim = 0.88f + 0.08f * tanhf(over / 0.08f);
+            if (ab <= 1.05f) return b;
+            float over = ab - 1.05f;
+            float lim = 1.05f + 0.20f * tanhf(over / 0.20f);
             return (b > 0) ? lim : -lim;
         };
 

@@ -806,19 +806,38 @@ body {
 
 .glass-options-menu {
   position: absolute;
-  top: 70px; /* Pushed down to clear the 3-dot button */
+  top: 55px; /* Pushed down to clear the 3-dot button */
   right: 15px;
-  width: 220px;
-  background: rgba(40, 40, 40, 0.25); /* Less dark, more transparent */
+  width: 285px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: rgba(22, 22, 26, 0.88); /* Legible, gorgeous frosted glass */
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 16px;
   padding: 16px;
   z-index: 100;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
   color: #ffffff;
   text-align: left;
+  overscroll-behavior: contain;
+}
+
+.glass-options-menu::-webkit-scrollbar {
+  width: 6px;
+}
+.glass-options-menu::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+}
+.glass-options-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+}
+.glass-options-menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.40);
 }
 
 .glass-menu-header {
