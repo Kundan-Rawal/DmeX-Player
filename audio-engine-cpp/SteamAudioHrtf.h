@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 
 #ifdef DMEX_USE_STEAMAUDIO
 #include "phonon.h"
@@ -10,7 +11,7 @@ public:
     static constexpr int kFrameSize = 64;
     static constexpr int kMaxSources = 6;
 
-    SteamAudioHrtf() = default;
+    SteamAudioHrtf();
     ~SteamAudioHrtf();
 
     SteamAudioHrtf(const SteamAudioHrtf&) = delete;
@@ -22,6 +23,7 @@ public:
 
     bool available() const;
     bool measured() const { return measured_; }
+    bool portableMeasured() const { return portable_ != nullptr; }
     int sampleRate() const { return sampleRate_; }
     int initStatus() const { return initStatus_; }
 
@@ -43,6 +45,9 @@ public:
                       float* mixRight);
 
 private:
+    struct Portable;
+    std::unique_ptr<Portable> portable_;
+    bool initPortable();
 #ifdef DMEX_USE_STEAMAUDIO
     static IPLVector3 direction(float azimuthDeg, float elevationDeg);
     IPLerror createEffect(IPLBinauralEffect& effect);

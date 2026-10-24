@@ -1,4 +1,6 @@
 #include "SteamAudioHrtf.h"
+#include "FFTConvolver.h"
+#include "PortableHrtfData.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +13,45 @@ bool SteamAudioHrtf::available() const { return ready_; }
 
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
+}
+
+struct SteamAudioHrtf::Portable {
+    FFTConvolver filters[kMaxSources][dmex_hrtf::kDirectionCount][2];
+    float left[kFrameSize]{}, right[kFrameSize]{};
+    bool prepare(int rate, bool eco) {
+        for (const auto& bank : dmex_hrtf::banks) {
+            if (bank.rate != rate) continue;
+            const int taps = eco ? (std::min)(bank.taps, (int)std::ceil(160.0 * rate / 44100.0)) : bank.taps;
+            for (auto& source : filters) for (int direction = 0; direction < dmex_hrtf::kDirectionCount; ++direction)
+                for (int ear = 0; ear < 2; ++ear)
+                    if (!source[direction][ear].prepare(bank.data + (direction * 2 + ear) * bank.taps, taps, kFrameSize)) return false;
+            return true;
+        }
+        return false;
+    }
+    void reset() { for (auto& source : filters) for (auto& direction : source) for (auto& ear : direction) ear.reset(); }
+    void render(int source, const float* input, float az, float el, float gain, float* outL, float* outR) {
+        const float radians = kPi / 180.0f;
+        int nearest = 0; float best = -2.0f;
+        for (int i = 0; i < dmex_hrtf::kDirectionCount; ++i) {
+            const float score = std::sin(el*radians)*std::sin(dmex_hrtf::elevation[i]*radians)
+                + std::cos(el*radians)*std::cos(dmex_hrtf::elevation[i]*radians)*std::cos((az-dmex_hrtf::azimuth[i])*radians);
+            if (score > best) { best = score; nearest = i; }
+        }
+        filters[source][nearest][0].process(input, left);
+        filters[source][nearest][1].process(input, right);
+        for (int i = 0; i < kFrameSize; ++i) { outL[i] += left[i]*gain; outR[i] += right[i]*gain; }
+    }
+};
+
+SteamAudioHrtf::SteamAudioHrtf() = default;
+bool SteamAudioHrtf::initPortable() {
+    try {
+        portable_ = std::make_unique<Portable>();
+        if (!portable_->prepare(sampleRate_, g_ecoMode.load())) { portable_.reset(); return true; }
+        measured_ = true;
+    } catch (...) { portable_.reset(); measured_ = false; initStatus_ = 400; }
+    return true;
 }
 
 SteamAudioHrtf::~SteamAudioHrtf()
@@ -30,7 +71,7 @@ bool SteamAudioHrtf::init(int sampleRate, const char* sofaFile)
     ready_ = true;
     reset();
 #ifdef DMEX_USE_STEAMAUDIO
-    if (g_ecoMode.load()) return true;
+    if (g_ecoMode.load()) return initPortable();
 
     IPLContextSettings contextSettings{};
     contextSettings.version = STEAMAUDIO_VERSION;
@@ -41,7 +82,7 @@ bool SteamAudioHrtf::init(int sampleRate, const char* sofaFile)
         initStatus_ = 100 + static_cast<int>(contextResult);
         shutdown();
         ready_ = true;
-        return true;
+        return initPortable();
     }
 
     audioSettings_.samplingRate = (std::max)(sampleRate, 8000);
@@ -57,7 +98,7 @@ bool SteamAudioHrtf::init(int sampleRate, const char* sofaFile)
         initStatus_ = 200 + static_cast<int>(hrtfResult);
         shutdown();
         ready_ = true;
-        return true;
+        return initPortable();
     }
 
     for (int index = 0; index < kMaxSources; ++index) {
@@ -66,12 +107,14 @@ bool SteamAudioHrtf::init(int sampleRate, const char* sofaFile)
             initStatus_ = 300 + index * 10 + static_cast<int>(effectResult);
             shutdown();
             ready_ = true;
-            return true;
+            return initPortable();
         }
     }
 
     measured_ = true;
     ready_ = true;
+#else
+    return initPortable();
 #endif
     return true;
 }
@@ -87,6 +130,7 @@ IPLerror SteamAudioHrtf::createEffect(IPLBinauralEffect& effect)
 
 void SteamAudioHrtf::shutdown()
 {
+    portable_.reset();
 #ifdef DMEX_USE_STEAMAUDIO
     for (auto& effect : effects_) {
         if (effect) iplBinauralEffectRelease(&effect);
@@ -100,6 +144,7 @@ void SteamAudioHrtf::shutdown()
 
 void SteamAudioHrtf::reset()
 {
+    if (portable_) portable_->reset();
 #ifdef DMEX_USE_STEAMAUDIO
     for (auto effect : effects_) {
         if (effect) iplBinauralEffectReset(effect);
@@ -149,6 +194,10 @@ bool SteamAudioHrtf::renderSource(int sourceIndex,
 {
     if (!available() || sourceIndex < 0 || sourceIndex >= kMaxSources
         || !input || !mixLeft || !mixRight) return false;
+    if (portable_) {
+        portable_->render(sourceIndex, input, azimuthDeg, elevationDeg, gain, mixLeft, mixRight);
+        return true;
+    }
 #ifndef DMEX_USE_STEAMAUDIO
     (void)elevationDeg;
 #endif

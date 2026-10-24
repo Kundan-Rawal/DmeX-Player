@@ -21,6 +21,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 interface MobileExpandedPlayerProps {
   isExpanded?: boolean;
+  contentReady?: boolean;
   trackTitle: string; trackArtist: string; albumArt: string | null;
   isPlaying: boolean; currentTime: number; duration: number;
   isShuffle: boolean; repeatMode: 'OFF'|'ALL'|'ONE'; repeatDeg: number; repeatBusy: boolean;
@@ -76,7 +77,7 @@ interface MobileExpandedPlayerProps {
 
 
 export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => {
-
+  const visualsReady = (p.contentReady ?? p.isExpanded ?? true) && (p.isExpanded ?? true);
 
   // 2. Define the TASTES array
   const TASTES: { id: Taste; icon: React.ReactNode; label: string }[] = [
@@ -119,15 +120,15 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
 
   const TitleNode = useMemo(() => (
     safeTitle.length > 22
-      ? <Marquee speed={38} gradient={false} delay={1.5}><h1 className="mep-title" style={{ paddingRight: 60, margin: 0 }}>{safeTitle}</h1></Marquee>
+      ? <Marquee play={visualsReady} speed={38} gradient={false} delay={1.5}><h1 className="mep-title" style={{ paddingRight: 60, margin: 0 }}>{safeTitle}</h1></Marquee>
       : <h1 className="mep-title">{safeTitle}</h1>
-  ), [safeTitle]);
+  ), [safeTitle, visualsReady]);
 
   const ArtistNode = useMemo(() => (
     safeArtist.length > 28
-      ? <Marquee speed={32} gradient={false} delay={1.5}><span className="mep-artist" style={{ paddingRight: 60 }}>{safeArtist}</span></Marquee>
+      ? <Marquee play={visualsReady} speed={32} gradient={false} delay={1.5}><span className="mep-artist" style={{ paddingRight: 60 }}>{safeArtist}</span></Marquee>
       : <span className="mep-artist">{safeArtist}</span>
-  ), [safeArtist]);
+  ), [safeArtist, visualsReady]);
 
   const panelOpen = panel !== 'none';
 
@@ -203,13 +204,13 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
   }, [extractIRFile, p.writeToEngine, p.setSelectedAcousticEnv, p.setIsManualOverride, p.setSmartTaste]);
 
   return (
-    <div className="mep-root">
-      <AmbientBackground
+    <div className="mep-root" data-visuals-ready={visualsReady}>
+      {visualsReady && <AmbientBackground
         isExpandedRef={p.isExpandedRef} audioLevelRef={p.audioLevelRef} spatialData={p.spatialData} visMode={p.visMode}
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
-      />
+      />}
 
-      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} isDarkMode={p.isDarkMode} />}
+      {visualsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} isDarkMode={p.isDarkMode} />}
 
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">
@@ -269,7 +270,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             
             {/* 1. Album Art */}
             <div className="mep-art-wrap">
-              {IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples spatialData={p.spatialData} isPlaying={p.isPlaying} />}
+              {visualsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples spatialData={p.spatialData} isPlaying={p.isPlaying} />}
               <div className="mep-art" style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
                 {!p.albumArt && <span className="mep-art-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={48} /></span>}
                 {p.lyrics.length > 0 && <div className="lyrics-art-badge">Synced lyrics</div>}
@@ -311,7 +312,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
               </div>
             )}
 
-            {panel === 'dsp' && (
+            {panel === 'dsp' && visualsReady && (
               <div className="mep-dsp-scroll">
                 <DSPStudio
                   isRemastered={p.isRemastered}               setIsRemastered={p.setIsRemastered}

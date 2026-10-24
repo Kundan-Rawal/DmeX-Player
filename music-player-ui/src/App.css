@@ -1885,7 +1885,7 @@ body {
      ==================================================================== */
   /* 1. Synchronize the expanding background container timing */
   .bottom-player {
-    transition: all 0.5s cubic-bezier(0.2, 0.9, 0.1, 1) !important;
+    transition: width .42s cubic-bezier(.22,1,.36,1), height .42s cubic-bezier(.22,1,.36,1), left .42s cubic-bezier(.22,1,.36,1), bottom .42s cubic-bezier(.22,1,.36,1), border-radius .42s cubic-bezier(.22,1,.36,1), background-color .2s ease !important;
   }
 
   /* 2. Base fixed layout (prevents the flexbox squish) */
@@ -1915,36 +1915,34 @@ body {
   }
 
   /* 3. When EXPANDED (Full Screen View) */
-  .bottom-player.expanded .expanded-player-content {
+  .bottom-player.expanded .expanded-player-content[data-ready="true"] {
     opacity: 1 !important;
     visibility: visible !important;
-    transform: translateY(0) scale(1) !important;
-    /* Fades in smoothly, transforms instantly */
-    transition: opacity 0.1s ease 0.1s !important; 
+    transform: translate3d(0,0,0) !important;
+    transition: opacity .16s ease, transform .20s cubic-bezier(.22,1,.36,1), visibility 0s !important;
   }
 
   .bottom-player.expanded .mini-player-content {
     opacity: 0 !important;
     visibility: hidden !important;
-    transform: translateY(-20px) scale(0.95) !important;
-    /* Zero transitions = instant snap. Property removed entirely. */
+    transform: translate3d(0,-8px,0) !important;
+    transition: opacity .10s ease, transform .16s ease, visibility 0s .10s !important;
   }
 
   /* 4. When MINIMIZED (Pill View) */
-  .bottom-player:not(.expanded) .expanded-player-content {
+  .bottom-player:not(.expanded) .expanded-player-content,
+  .bottom-player.expanded .expanded-player-content[data-ready="false"] {
     opacity: 0 !important;
     visibility: hidden !important;
-    transform: translateY(80px) scale(0.85) !important;
-    /* Opacity drops instantly, only transform is animated */
-    transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.1, 1) !important;
+    transform: translate3d(0,24px,0) !important;
+    transition: opacity .14s ease, transform .20s ease, visibility 0s .14s !important;
   }
 
   .bottom-player:not(.expanded) .mini-player-content {
     opacity: 1 !important;
     visibility: visible !important;
-    transform: translateY(0) scale(1) !important;
-    /* Fades in slightly delayed, transforms smoothly */
-    transition: opacity 0.1s ease 0.1s, transform 1s cubic-bezier(0.2, 0.9, 0.1, 1) !important;
+    transform: translate3d(0,0,0) !important;
+    transition: opacity .14s ease .32s, transform .20s ease .26s, visibility 0s .26s !important;
   }
   .dsp-container{
   width: 100%;
@@ -1962,6 +1960,12 @@ body {
 .mainclasstastepilllabel{
   margin-bottom: 5px;
   margin-left: 3px;
+}
+
+@media (max-width:768px) and (prefers-reduced-motion:reduce) {
+  .bottom-player, .bottom-player .expanded-player-content, .bottom-player .mini-player-content {
+    transition: none !important;
+  }
 }
 
 

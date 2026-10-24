@@ -316,6 +316,8 @@ void comb_init(CombFilter *c, int sz, float fb, float dp)
 }
 void reverb_init_filters(ReverbNode *r, float sampleRate)
 {
+    r->autoFast = r->autoSlow = 0;
+    r->automaticBlend.init(r->automatic.load(), sampleRate, 60.0f);
     float fb = r->roomSize.peek(), dp = r->damp.peek();
     
     // Scale indices by sample rate (they were hardcoded for 44.1kHz)
@@ -353,6 +355,9 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
+    const bool automatic = r->automatic.load(std::memory_order_relaxed);
+    r->automaticBlend.set(automatic);
+    const float fastCoef = tauCoef(4.0f, r->sampleRate), slowCoef = tauCoef(120.0f, r->sampleRate);
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float iL = pIn[i * 2], iR = pIn[i * 2 + 1];
@@ -360,7 +365,15 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         // Keep low bass out of the room so kick weight remains direct and localizable.
         float hpL = r->hpfL.process(iL);
         float hpR = r->hpfR.process(iR);
-        const float room = r->roomSize.next(), damping = r->damp.next();
+        const float manualRoom = r->roomSize.next(), manualDamping = r->damp.next();
+        const float amount = r->wetMix.next() * r->enabled.next();
+        const float activity = (std::max)(fabsf(hpL), fabsf(hpR));
+        r->autoFast += fastCoef * (activity - r->autoFast);
+        r->autoSlow += slowCoef * (activity - r->autoSlow);
+        const float onset = (std::max)(0.0f, r->autoFast - r->autoSlow) / (r->autoSlow + 0.03f);
+        const float autoBlend = r->automaticBlend.next();
+        const float room = manualRoom + (0.42f + 0.40f * amount - manualRoom) * autoBlend;
+        const float damping = manualDamping + (0.68f - 0.24f * amount - manualDamping) * autoBlend;
 
         // Feed both channels independently, including centered sources, while
         // crossfeeding enough energy to create a room around the stereo image.
@@ -382,7 +395,7 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         
         // The room is additive: never turn down the dry kick attack, vocal or stereo image
         // as the user raises Reverb. The wet scale leaves headroom for the final limiter.
-        float curWet = r->wetMix.next() * r->enabled.next();
+        const float curWet = amount * (1.0f - autoBlend) + amount / (1.0f + 0.8f * onset) * autoBlend;
         const float wetGain = curWet * (0.45f + 0.40f * curWet);
         pOut[i * 2] = iL + oL * wetGain;
         pOut[i * 2 + 1] = iR + oR * wetGain;
@@ -486,7 +499,7 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         const float onset = (std::max)(0.0f, p->transientFast - p->transientSlow);
         const float onsetRatio = (std::min)(1.0f, onset / (p->transientSlow + 0.015f));
         const float punchGain = 0.42f * drive * onsetRatio;
-        const float tonalBlend = (std::min)(0.65f, 0.36f + 0.07f * drive + 0.12f * p->bassScarcity);
+        const float tonalBlend = (std::min)(0.90f, 0.42f + 0.16f * drive + 0.12f * p->bassScarcity);
         const float tonalDeltaL = (shapedBassL - L) * tonalBlend;
         const float tonalDeltaR = (shapedBassR - R) * tonalBlend;
 
@@ -494,8 +507,10 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         // the short upper-bass attack separately. There is no internal bass clipper;
         // the downstream lookahead limiter remains the single peak-control stage.
         const float active = (std::min)(1.0f, drive / 0.02f);
-        float outL = L + active * (cleanL - bassL) + tonalDeltaL + midL * punchGain;
-        float outR = R + active * (cleanR - bassR) + tonalDeltaR + midR * punchGain;
+        const float punchDeltaL = (shapedBassL - L) * punchGain * 0.5f;
+        const float punchDeltaR = (shapedBassR - R) * punchGain * 0.5f;
+        float outL = L + active * (cleanL - bassL) + tonalDeltaL + punchDeltaL;
+        float outR = R + active * (cleanR - bassR) + tonalDeltaR + punchDeltaR;
 
         // Field receives only upper bass and remains independent from Drive.
         const float sendL = midL;
@@ -509,7 +524,7 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         const float transientSpace = 1.0f / (1.0f + 6.0f * spatialOnset / (oldEnergy + 0.01f));
         // Compact Bass is an exact no-reflection mode. Bass Field becomes audible
         // only when 3D Room is explicitly selected.
-        const float space = field * room * 0.30f * transientSpace;
+        const float space = field * room * 0.24f * transientSpace * (1.0f - onsetRatio);
         outL += space * reflectL;
         outR += space * reflectR;
 
@@ -902,6 +917,7 @@ void dsp_flush_all_state(void)
     std::fill(std::begin(g_subwooferNode.fieldDelayL), std::end(g_subwooferNode.fieldDelayL), 0.0f);
     std::fill(std::begin(g_subwooferNode.fieldDelayR), std::end(g_subwooferNode.fieldDelayR), 0.0f);
     g_reverbNode.hpfL.reset(); g_reverbNode.hpfR.reset();
+    g_reverbNode.autoFast = g_reverbNode.autoSlow = 0;
     g_spatializerNode.crossSubwooferL.reset(); g_spatializerNode.crossSubwooferR.reset();
     g_spatializerNode.bandsMid.reset(); g_spatializerNode.bandsSide.reset();
     {

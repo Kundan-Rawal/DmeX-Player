@@ -10,6 +10,7 @@ export interface AudioStatus {
   outputPeak: number; limiterGain: number; correctionAvailable: boolean; convolutionAvailable: boolean;
   recoveryRequested: boolean; settings: number[];
   irRestoreFailed: boolean;
+  autoReverb?: boolean; portableHrtf?: boolean;
   processingDelayFrames: number; callbackLoadPercent: number; maximumCallbackLoadPercent: number; overBudgetCallbacks: number;
 }
 export const PARAM = {
@@ -26,6 +27,7 @@ interface AudioControls {
   command: (cmd: string) => Promise<void>;
   loadAsset: (id: string, correction: boolean) => Promise<void>;
   refresh: () => Promise<void>;
+  setAutoReverb: (enabled: boolean) => Promise<void>;
 }
 const Context = createContext<AudioControls | null>(null);
 export function AudioSettingsProvider({ children }: { children: React.ReactNode }) {
@@ -61,12 +63,26 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
   const update = useCallback(async (changes: Partial<Record<Parameter, number>>) => {
     const next = [...valuesRef.current];
     for (const [key, value] of Object.entries(changes)) next[PARAM[key as Parameter]] = value!;
+    if (changes.spatial === 1) {
+      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.65;
+      if (next[PARAM.depth] === 0) next[PARAM.depth] = 0.45;
+    }
+    if (changes.spatial !== 0 && ((changes.separation ?? 0) > 0 || (changes.depth ?? 0) > 0)) {
+      next[PARAM.spatial] = 1;
+      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.65;
+    }
+    if (changes.roomBass === 1 && next[PARAM.bassField] === 0) next[PARAM.bassField] = 0.35;
+    if ((changes.bassField ?? 0) > 0 && changes.roomBass !== 0) next[PARAM.roomBass] = 1;
     ++revision.current; ++mutations.current;
     valuesRef.current = next; setValues(next); setError('');
     try { await applyAudioSettings(next); }
     catch (e) { setError(String(e)); throw e; }
     finally { if (--mutations.current === 0) await refresh(); }
   }, [refresh]);
+  const setAutoReverb = useCallback(async (enabled: boolean) => {
+    await command('AUTO_REVERB ' + (enabled ? '1' : '0'));
+    localStorage.setItem('dmex_auto_reverb', String(enabled));
+  }, [command]);
   const loadAsset = useCallback(async (id: string, correction: boolean) => {
     const selected = (correction ? HEADPHONE_MODELS : ACOUSTIC_ENVIRONMENTS).find(v => v.id === id);
     if (!selected) throw new Error('Unknown audio asset');
@@ -100,6 +116,7 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
         if (rate === '44100' || rate === '48000' || (!IS_ANDROID && rate === '96000')) await sendAudioCommand('SAMPLE_RATE ' + rate);
           await sendAudioCommand('QUALITY ' + (localStorage.getItem('dmex_audio_quality') || (IS_ANDROID ? 'ECO' : 'FULL')));
           await sendAudioCommand('BYPASS_ALL ' + (localStorage.getItem('dmex_bypass_all') === 'true' ? '1' : '0'));
+          await sendAudioCommand('AUTO_REVERB ' + (localStorage.getItem('dmex_auto_reverb') === 'false' ? '0' : '1'));
           await loadAsset(localStorage.getItem('dmex_headphone_model') || 'NONE', true);
           await loadAsset(localStorage.getItem('dmex_environment_v2') || 'NONE', false);
         } catch (e) { setError(String(e)); }
@@ -114,7 +131,7 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
     return () => { clearInterval(interval); window.removeEventListener('dmex-audio-changed', changed);
       window.removeEventListener('dmex-audio-error', failed); };
   }, [refresh, loadAsset]);
-  return <Context.Provider value={{ status, values, busy, error, headphone, environment, update, command, loadAsset, refresh }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ status, values, busy, error, headphone, environment, update, command, loadAsset, refresh, setAutoReverb }}>{children}</Context.Provider>;
 }
 export function useAudioSettings() {
   const value = useContext(Context);

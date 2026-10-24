@@ -14,3 +14,13 @@ maintainers request acknowledgement when used in commercial products.
 
 DmeX uses this measured `SimpleFreeFieldHRIR` profile with Valve Steam Audio.
 Steam Audio generates the binaural filters at the active DmeX pipeline rate.
+
+Android and Eco mode use fixed-zone measured filters generated from the same
+profile in `audio-engine-cpp/PortableHrtfData.h`. The generator is
+`scripts/generate_portable_hrtf.py`. Its generated header includes the original
+SOFA permission notice and source SHA256. Both ears share one normalization
+gain per direction; interaural timing and level differences remain intact.
+The filters are resampled offline for supported pipeline rates, not during
+the real-time callback. Full uses the complete measured impulse and Eco uses
+its first 160 source-rate-equivalent taps. This is an eight-zone renderer,
+not continuous head tracking or a personalized HRTF measurement.

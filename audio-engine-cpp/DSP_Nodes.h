@@ -409,6 +409,9 @@ struct ReverbNode
     SmoothedParam roomSize, wetMix, damp;
     SmoothedGate enabled;
     BiquadHPF hpfL, hpfR;
+    std::atomic<bool> automatic{false};
+    SmoothedGate automaticBlend;
+    float autoFast = 0.0f, autoSlow = 0.0f;
 };
 
 struct SubwooferNode

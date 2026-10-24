@@ -33,6 +33,7 @@ public:
     float separationTarget() const { return separation_.target.load(std::memory_order_relaxed); }
     bool hrtfAvailable() const { return hrtf_.available(); }
     bool hrtfMeasured() const { return hrtf_.measured(); }
+    bool hrtfPortable() const { return hrtf_.portableMeasured(); }
     int sampleRate() const { return static_cast<int>(sampleRate_); }
     int hrtfSampleRate() const { return hrtf_.sampleRate(); }
     int hrtfInitStatus() const { return hrtf_.initStatus(); }

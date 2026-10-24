@@ -21,13 +21,14 @@ document.documentElement.style.setProperty('--blob-3', '#bd8942');
 const status = { ready: true, bypassAll: false, ecoMode: IS_ANDROID, measuredHrtf: !IS_ANDROID,
   spatialAvailable: true, sampleRate: 48000, requestedSampleRate: 48000, generation: 1,
   outputPeak: 0.5, limiterGain: 1, correctionAvailable: false, convolutionAvailable: false,
-  recoveryRequested: false, irRestoreFailed: false, settings: [...DEFAULT_AUDIO],
+  recoveryRequested: false, irRestoreFailed: false, autoReverb: true, settings: [...DEFAULT_AUDIO],
   processingDelayFrames: 1208, callbackLoadPercent: 5, maximumCallbackLoadPercent: 10, overBudgetCallbacks: 0 };
 mockIPC((command, payload) => {
   if (command === 'audio_status') return { ...status, settings: [...status.settings] };
   if (command === 'audio_apply_settings') status.settings = (payload?.values as number[]).map(Math.fround);
   if (command === 'audio_command' && typeof payload?.cmd === 'string') {
     if (payload.cmd.startsWith('BYPASS_ALL ')) status.bypassAll = payload.cmd.endsWith('1');
+    if (payload.cmd.startsWith('AUTO_REVERB ')) status.autoReverb = payload.cmd.endsWith('1');
   }
 });
 

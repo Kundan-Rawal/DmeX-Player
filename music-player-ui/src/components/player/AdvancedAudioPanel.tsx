@@ -52,7 +52,7 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
     <div className="audio-engine-status" role="status">
       <span>{audio.status?.bypassAll ? 'Raw stereo / unity' : 'Enhanced stereo'}</span>
       <span>{audio.status ? (audio.status.sampleRate / 1000).toFixed(1) + ' kHz' : 'Connecting'}</span>
-      <span>{audio.status?.bypassAll ? 'DSP disconnected' : audio.status?.measuredHrtf ? 'Measured HRTF' : 'Lightweight spatial'}</span>
+      <span>{audio.status?.bypassAll ? 'DSP disconnected' : audio.status?.portableHrtf ? 'Portable measured HRTF' : audio.status?.measuredHrtf ? 'Measured HRTF' : 'Lightweight spatial'}</span>
     </div>
     {audio.status?.recoveryRequested && <p className="audio-error" role="status">Output changed. Reconnect output to resume.</p>}
     {audio.status?.irRestoreFailed && <p className="audio-error" role="status">An IR could not be restored. Reselect the headphone or acoustic preset.</p>}
@@ -101,13 +101,18 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
         {slider('bassField', 'Bass Field', 0, 1, 0.01, percent)}
       </>)}
       {group('Room & Reverb', 'room', <>
+        <div className="dsp-control dsp-switch-row"><span className="dsp-label-row">Automatic room</span>
+          <ToggleSwitch label="Automatic reverb" checked={audio.status?.autoReverb ?? true} disabled={disabled}
+            onChange={enabled => { onManualEdit?.(); void audio.setAutoReverb(enabled).catch(() => {}); }} /></div>
         <div className="dsp-control"><span className="dsp-label-row">Acoustic Environment</span>
           <CustomSelect label="Acoustic impulse response" disabled={disabled}
             value={audio.status?.convolutionAvailable ? audio.environment : 'NONE'} options={environmentOptions}
             onChange={id => { onManualEdit?.(); void audio.loadAsset(id, false).catch(() => {}); }} /></div>
         {slider('reverb', 'Digital Reverb', 0, 1, 0.01, percent)}
-        {slider('roomSize', 'Room Size', 0.2, 0.98, 0.01, percent)}
-        {slider('damping', 'Damping', 0, 0.95, 0.01, percent)}
+        {audio.status?.autoReverb === false && <>
+          {slider('roomSize', 'Room Size', 0.2, 0.98, 0.01, percent)}
+          {slider('damping', 'Damping', 0, 0.95, 0.01, percent)}
+        </>}
       </>)}
       {group('Headphone Correction', 'neutral', <div className="dsp-control">
         <span className="dsp-label-row">Headphone EQ</span>

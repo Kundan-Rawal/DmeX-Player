@@ -31,3 +31,4 @@ music-player-ui/tests/artifacts/
 *.keystore
 **/keystore.properties
 **/key.properties
+/.tools/

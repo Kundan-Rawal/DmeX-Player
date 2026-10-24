@@ -239,6 +239,10 @@ extern "C" int execute_audio_command(const char* input) {
         } else if (command == "STOP") {
             Suspended suspend; engine_release_source(); dsp_flush_all_state(); restore_audio_parameters();
             g_lastLoadedPath.clear(); playbackPath.clear();
+        } else if (command == "AUTO_REVERB") {
+            const float value = number(args);
+            if (value != 0 && value != 1) return -1;
+            g_reverbNode.automatic.store(value == 1);
         } else if (command == "PLAY") {
             if (!g_soundInitialized) return -1;
             g_pauseRequested.store(false, std::memory_order_release);

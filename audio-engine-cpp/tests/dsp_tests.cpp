@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include <cstdio>
+#include <array>
 extern "C" bool engine_init_offline(int rate);
 extern "C" void engine_render_offline(float* output, ma_uint32 frames);
 extern "C" void get_audio_settings(float*);
@@ -94,7 +95,7 @@ void sampleRateModes() {
 #ifdef DMEX_USE_STEAMAUDIO
         check(hrtf.measured(), "Full Windows renderer uses the measured HRTF bank");
 #else
-        check(!hrtf.measured(), "portable renderer does not claim measured HRTF");
+        check(hrtf.measured() && hrtf.portableMeasured(), "portable renderer uses the bundled measured HRTF bank");
 #endif
     }
 }
@@ -442,6 +443,53 @@ void spatialAndReverb() {
           "spatial renderer distinguishes these test directions");
 }
 
+void measuredMobileAndAutomaticRoom() {
+    g_ecoMode = true;
+    auto front = std::make_unique<SteamAudioHrtf>();
+    auto rear = std::make_unique<SteamAudioHrtf>();
+    auto elevated = std::make_unique<SteamAudioHrtf>();
+    check(front->init(48000) && rear->init(48000) && elevated->init(48000) && front->portableMeasured(),
+          "mobile Eco renderer prepares measured filters without the Windows SDK");
+    Audio a(1024), b(1024), c(1024);
+    float input[64]{}; input[0] = 1;
+    for (int block = 0; block < 8; ++block) {
+        float al[64]{}, ar[64]{}, bl[64]{}, br[64]{}, cl[64]{}, cr[64]{};
+        front->renderSource(0, input, -45, 0, 1, al, ar);
+        rear->renderSource(0, input, -135, 0, 1, bl, br);
+        elevated->renderSource(0, input, -45, 45, 1, cl, cr);
+        for (int i = 0; i < 64; ++i) {
+            const int pos = (block*64+i)*2;
+            a[pos]=al[i]; a[pos+1]=ar[i]; b[pos]=bl[i]; b[pos+1]=br[i]; c[pos]=cl[i]; c[pos+1]=cr[i];
+        }
+        input[0] = 0;
+    }
+    check(difference(a,b)>0.01f, "mobile front and rear differ even at equal lateral angle");
+    check(difference(a,c)>0.01f, "mobile elevation changes measured spectral cues");
+    check(energy(a,0,0)>energy(a,1,0)*1.1, "mobile left source remains stronger at the left ear");
+    front->reset(); float zero[64]{}, outL[64]{}, outR[64]{};
+    front->renderSource(0, zero, -45, 0, 1, outL, outR);
+    check(std::all_of(std::begin(outL),std::end(outL),[](float x){return x==0;}), "mobile filter reset removes previous-track tails");
+    g_ecoMode = false;
+
+    g_isReverbOn = true;
+    Audio impulse(48000*2); impulse[12000*2] = 0.3f;
+    auto small = reverb(0.2f,0.0f), large = reverb(0.98f,0.95f);
+    for (auto* room : {small.get(),large.get()}) {
+        room->automatic = true; room->automaticBlend.init(true,sr); room->wetMix.snap(0.7f);
+    }
+    auto autoA=process(small.get(),g_reverb_vtable,impulse,137);
+    auto autoB=process(large.get(),g_reverb_vtable,impulse,256);
+    check(difference(autoA,autoB)<1e-6f, "automatic reverb derives the room independently of saved manual controls");
+    check(finite(autoA) && autoA[24000]==impulse[24000], "automatic room preserves the dry attack and stays finite");
+    auto subtle = reverb(), strong = reverb();
+    for (auto* room : {subtle.get(),strong.get()}) { room->automatic=true; room->automaticBlend.init(true,sr); }
+    subtle->wetMix.snap(0.2f); strong->wetMix.snap(0.8f);
+    const auto subtleOut=process(subtle.get(),g_reverb_vtable,impulse);
+    const auto strongOut=process(strong.get(),g_reverb_vtable,impulse);
+    check(differenceEnergy(strongOut,impulse)>differenceEnergy(subtleOut,impulse)*3,
+          "single automatic reverb amount controls an audible bounded room tail");
+}
+
 void airAndLimiter() {
     auto input = tone(9000);
     auto air = std::make_unique<AudioRestorationNode>(); air->init(sr); g_isUpscaleOn = false;
@@ -531,6 +579,12 @@ void adapterAndRawRouting() {
     float settings[20]{2.1f,12,1,2.5f,1,1,1,1,0.1f,30,1,1,1,1,0.98f,0.95f,1,1,1,0};
     check(apply_audio_settings(settings,20)==0, "one coherent advanced settings snapshot accepted");
     audio_apply_pending_parameters();
+    check(g_bassGain.load()==settings[0] && g_widenerNode.width.target.load()==settings[3] &&
+          g_8DNode.separationTarget()==settings[4] && g_reverbNode.wetMix.target.load()==settings[6] &&
+          g_roomBass.load() && g_bassField.load()==settings[10] && g_upscaleTarget.load()==settings[16] && g_is8DModeOn.load(),
+          "production control snapshot reaches bass, width, stage, room and harmonic DSP targets");
+    check(execute_audio_command("AUTO_REVERB 1")==0 && g_reverbNode.automatic.load(), "automatic room command reaches the native renderer");
+    check(execute_audio_command("AUTO_REVERB 2")!=0, "automatic room rejects invalid modes");
     check(execute_audio_command("BASS nan") != 0 && execute_audio_command("COMPRESS invalid") != 0,
           "invalid numeric controls cannot escape the native boundary");
     settings[9] = 53;
@@ -578,8 +632,8 @@ void adapterAndRawRouting() {
           "routing changes clear stale visualizer levels");
     check(execute_audio_command("HEADPHONE_CORRECTION OFF")==0,
           "correction can be disabled independently");
-    check(execute_audio_command("QUALITY ECO")==0 && !g_8DNode.upmixer.hrtfMeasured(),
-          "Eco selects the lightweight spatial renderer");
+    check(execute_audio_command("QUALITY ECO")==0 && g_8DNode.upmixer.hrtfMeasured() && g_8DNode.upmixer.hrtfPortable(),
+          "Eco retains measured directional filters with the compact portable renderer");
     check(execute_audio_command("QUALITY FULL")==0,
           "Full quality can be restored without changing controls");
     execute_audio_command("STOP");
@@ -589,10 +643,65 @@ void adapterAndRawRouting() {
 }
 }
 
+void productionControlSweep() {
+    g_ecoMode = true;
+    check(engine_init_offline(48000), "mobile-equivalent production graph prepares for control sweep");
+    execute_audio_command("BYPASS_ALL 0");
+    execute_audio_command("HEADPHONE_CORRECTION OFF");
+    execute_audio_command("CONVOLUTION 0");
+    execute_audio_command("AUTO_REVERB 0");
+    Audio input(48000*2);
+    unsigned random = 12345;
+    for (int i=0;i<48000;++i) {
+        random = random*1664525u+1013904223u;
+        const float noise = (static_cast<float>(random>>8)/16777216.0f-.5f)*.12f;
+        const float bass = .16f*std::sin(2*M_PI*80*i/48000);
+        const float vocal = .20f*std::sin(2*M_PI*2500*i/48000);
+        input[2*i] = bass+vocal+noise+.14f*std::sin(2*M_PI*1300*i/48000);
+        input[2*i+1] = bass+vocal-noise+.14f*std::sin(2*M_PI*5900*i/48000);
+    }
+    ma_encoder encoder;
+    auto config=ma_encoder_config_init(ma_encoding_format_wav,ma_format_f32,2,48000);
+    check(ma_encoder_init_file("controls-fixture.wav",&config,&encoder)==MA_SUCCESS, "control sweep stereo fixture prepared");
+    ma_encoder_write_pcm_frames(&encoder,input.data(),48000,nullptr); ma_encoder_uninit(&encoder);
+    const std::array<float,20> neutral{0,0,0,1,0,0,0,0,.2f,52,0,0,0,0,.84f,.5f,0,0,0,0};
+    auto render = [&](const std::array<float,20>& values) {
+        if (apply_audio_settings(values.data(),20)!=0 || execute_audio_command("LOAD controls-fixture.wav")!=0 || execute_audio_command("PLAY")!=0)
+            throw std::runtime_error("production control sweep load failed");
+        Audio result(48000*2);
+        for(int frame=0;frame<48000;frame+=256) engine_render_offline(result.data()+frame*2,(std::min)(256,48000-frame));
+        check(finite(result) && std::all_of(result.begin(), result.end(), [](float value) { return std::abs(value) < .9f; }),
+              "control sweep retains finite output below the safety ceiling");
+        return result;
+    };
+    const auto base=render(neutral);
+    struct Case { const char* name; std::initializer_list<std::pair<int,float>> changes; };
+    for(const auto& test : {
+        Case{"Bass Drive",{{0,1.5f}}}, Case{"Treble",{{1,6.0f}}}, Case{"Tube Exciter",{{2,.7f}}},
+        Case{"Stereo Widener",{{3,2.0f}}}, Case{"9D Stage",{{17,1.0f},{4,.8f},{5,.7f}}},
+        Case{"Reverb",{{6,.5f}}}, Case{"Compressor",{{7,1.0f}}}, Case{"Bass Field",{{10,.8f},{11,1.0f}}},
+        Case{"Vocal Frontness",{{12,.8f}}}, Case{"Adaptive Loudness",{{13,1.0f}}},
+        Case{"Harmonic Air",{{16,.7f}}}, Case{"Speaker Boost",{{18,.6f}}}, Case{"Phone Speaker Protection",{{19,2.0f}}}
+    }) {
+        auto values=neutral; for(const auto& [index,value]:test.changes) values[index]=value;
+        const auto output=render(values);
+        const double delta=std::sqrt(differenceEnergy(base,output,24000)/48000);
+        std::cout << "CONTROL " << test.name << " output delta RMS=" << delta << '\n';
+        check(delta>0.00001, test.name);
+    }
+    auto room=neutral; room[6]=.6f;
+    const auto roomBase=render(room); room[14]=.4f; room[15]=.85f;
+    check(differenceEnergy(roomBase,render(room),24000)>.0001, "manual room size and damping affect production output");
+    auto stage=neutral; stage[17]=1; stage[4]=.8f; stage[5]=.1f;
+    const auto near=render(stage); stage[5]=.9f;
+    check(differenceEnergy(near,render(stage),24000)>.0001, "depth slider affects the production measured stage");
+    execute_audio_command("STOP"); uninit_audio_engine(); std::remove("controls-fixture.wav"); g_ecoMode=false;
+}
+
 int main() {
     const auto start = std::chrono::steady_clock::now();
     try {
-        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); spatialAndReverb(); airAndLimiter(); convolution(); adapterAndRawRouting();
+        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
         std::cout << checks << " checks passed in " << ms << " ms (offline; no audio devices opened).\n";
         return 0;

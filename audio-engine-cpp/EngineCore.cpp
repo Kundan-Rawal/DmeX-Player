@@ -492,7 +492,7 @@ extern "C" int get_audio_status_json(char* output, int capacity) {
         "\"limiterGain\":%.6f,\"subBassHz\":%.0f,\"bassField\":%.4f,\"roomBass\":%s,"
         "\"vocalPresence\":%.4f,\"adaptiveLoudness\":%s,\"roomSize\":%.4f,\"damping\":%.4f,"
         "\"correctionAvailable\":%s,\"convolutionAvailable\":%s,\"recoveryRequested\":%s,\"processingDelayFrames\":%d,"
-        "\"callbackLoadPercent\":%.4f,\"maximumCallbackLoadPercent\":%.4f,\"overBudgetCallbacks\":%u,\"irRestoreFailed\":%s}",
+        "\"callbackLoadPercent\":%.4f,\"maximumCallbackLoadPercent\":%.4f,\"overBudgetCallbacks\":%u,\"irRestoreFailed\":%s,\"autoReverb\":%s,\"portableHrtf\":%s}",
         g_engineInitialized.load() ? "true" : "false", g_bypassAll.load() ? "true" : "false",
         g_ecoMode.load() ? "true" : "false", engine_get_sample_rate(), g_requestedSampleRate.load(),
         g_audioGeneration.load(), g_8DNode.upmixer.hrtfMeasured() ? "true" : "false",
@@ -503,6 +503,7 @@ extern "C" int get_audio_status_json(char* output, int capacity) {
         g_headphoneCompNode.convL.load() ? "true" : "false",
         g_convolutionNode.convL.load() ? "true" : "false", recoveryRequested.load() ? "true" : "false",
         g_bypassAll.load() ? 0 : 1024 + 40 + g_compressorNode.delaySamples + g_limiterNode.delaySamples,
-        callbackLoad.load(), maximumCallbackLoad.load(), overBudgetCallbacks.load(), g_irRestoreFailed.load() ? "true" : "false");
+        callbackLoad.load(), maximumCallbackLoad.load(), overBudgetCallbacks.load(), g_irRestoreFailed.load() ? "true" : "false",
+        g_reverbNode.automatic.load() ? "true" : "false", g_8DNode.upmixer.hrtfPortable() ? "true" : "false");
     return length >= capacity ? -1 : length;
 }

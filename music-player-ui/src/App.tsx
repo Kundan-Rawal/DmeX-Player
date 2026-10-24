@@ -126,13 +126,12 @@ function App() {
   const isExpandedRef = useRef(false);
   useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
 
-  const [, setIsAnimatingUI] = useState(false);
-  
-  // THE SAMSUNG FIX: Track when the player is transitioning
-  useEffect(() => {
-    setIsAnimatingUI(true);
-    // 350ms covers the CSS opacity fade duration + a 50ms safety buffer
-    const t = setTimeout(() => setIsAnimatingUI(false), 350);
+  const [expandedContentReady, setExpandedContentReady] = useState(false);
+  useLayoutEffect(() => {
+    setExpandedContentReady(false);
+    if (!isExpanded) return;
+    const delay = IS_MOBILE && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 420 : 0;
+    const t = setTimeout(() => setExpandedContentReady(true), delay);
     return () => clearTimeout(t);
   }, [isExpanded]);
 
@@ -1693,7 +1692,7 @@ function App() {
           />
 
           {/* 2. Expanded Player: Hardware Accelerated Decoupled Layout */}
-          <div className="expanded-player-content" style={{ 
+          <div className="expanded-player-content" data-ready={expandedContentReady} aria-hidden={!isExpanded} style={{
             opacity: isExpanded ? 1 : 0, 
             pointerEvents: isExpanded ? 'auto' : 'none',
             // CRITICAL FIX: 'fixed' decouples this heavy DOM tree from the parent's width/height animation!
@@ -1711,6 +1710,7 @@ function App() {
           }}>
             {IS_MOBILE ? (
               <MobileExpandedPlayer 
+                contentReady={expandedContentReady}
                 is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
                 is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
                 selectedHeadphoneModel={selectedHeadphoneModel}
