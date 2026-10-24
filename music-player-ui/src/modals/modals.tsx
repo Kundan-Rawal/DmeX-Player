@@ -1,30 +1,29 @@
-import { memo, useRef, useEffect } from 'react';
+import { memo, useRef, useEffect, useState } from 'react';
+import { Music2, HardDrive, Download, FolderOpen, X } from 'lucide-react';
+import { IS_ANDROID } from '../types';
+import { CustomSelect } from '../components/common/CustomSelect';
+import { ToggleSwitch } from '../components/common/ToggleSwitch';
+import { LibraryFilters, MINIMUM_DURATIONS } from '../utils/libraryFilters';
 import { CustomPlaylist } from '../types/index'; // Adjust path if needed
 
-export const FolderModal = memo(({ onClose, onScan }: { onClose:()=>void; onScan:(path:string)=>void }) => {
-  const commonFolders = [
-    { label:'Music', path:'/storage/emulated/0/Music' },
-    { label:'⬇Downloads', path:'/storage/emulated/0/Download' },
-    { label:'Downloads (alt)', path:'/storage/emulated/0/Downloads' },
-    { label:'Internal Storage', path:'/storage/emulated/0' },
-    { label:'SD Card', path:'/storage/sdcard1/Music' },
-    { label:'SD Card Root', path:'/storage/sdcard1' },
+export const FolderModal = memo(({ onClose, onScan }: { onClose: () => void; onScan: (path: string) => void }) => {
+  const folders = [
+    { label: 'Music folder', path: '/storage/emulated/0/Music', icon: Music2 },
+    { label: 'Internal Storage', path: 'ALL', icon: HardDrive },
+    { label: 'Downloads', path: '/storage/emulated/0/Download', icon: Download },
+    { label: 'Custom', path: 'CUSTOM', icon: FolderOpen },
   ];
   return (
     <div className="folder-modal-overlay" onClick={onClose}>
-      <div className="folder-modal" onClick={e=>e.stopPropagation()}>
-        <div className="folder-modal-header"><h2>Choose Music Folder</h2><button className="folder-modal-close" onClick={onClose}>×</button></div>
-        <p className="folder-modal-hint">Tap a folder to scan it. All audio files inside will be added to your library.</p>
+      <div className="folder-modal" role="dialog" aria-modal="true" aria-label="Choose Music Folder" onClick={e => e.stopPropagation()}>
+        <div className="folder-modal-header"><h2>Choose Music Folder</h2><button className="folder-modal-close" aria-label="Close" onClick={onClose}><X size={20} /></button></div>
         <div className="folder-modal-list">
-          {commonFolders.map(f=>(
-            <button key={f.path} className="folder-modal-item" onClick={()=>{onScan(f.path);onClose();}}>
-              <span className="folder-modal-icon">{f.label.split(' ')[0]}</span>
-              <div><div className="folder-modal-name">{f.label.slice(f.label.indexOf(' ')+1)}</div><div className="folder-modal-path">{f.path}</div></div>
+          {folders.map(({ label, path, icon: Icon }) => (
+            <button key={path} className="folder-modal-item" onClick={() => { onClose(); onScan(path); }}>
+              <Icon size={22} aria-hidden="true" />
+              <div><div className="folder-modal-name">{label}</div></div>
             </button>
           ))}
-        </div>
-        <div className="folder-modal-footer">
-          <button className="folder-modal-scan-all" onClick={()=>{onScan('ALL');onClose();}}>📂 Scan All Common Folders</button>
         </div>
       </div>
     </div>
@@ -62,20 +61,34 @@ export const PlaylistPopup = memo(({ playlists, onClose, onCreate, onAdd, newPla
   );
 });
 
-export const SettingsModal = memo(({ apiKey, setApiKey, onClose, onSave }: { apiKey: string, setApiKey: (k:string)=>void, onClose: ()=>void, onSave: ()=>void }) => {
+export const SettingsModal = memo(({ apiKey, setApiKey, filters, onClose, onSave }: { apiKey: string, setApiKey: (k:string)=>void, filters: LibraryFilters, onClose: ()=>void, onSave: (filters: LibraryFilters)=>Promise<void> }) => {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [draft, setDraft] = useState(filters);
   return (
     <div className="folder-modal-overlay" onClick={onClose}>
-      <div className="folder-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth: '400px', height: 'auto', paddingBottom: '20px' }}>
+      <div className="folder-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth: '400px', height: 'auto', maxHeight: '90dvh', overflowY: 'auto', paddingBottom: IS_ANDROID ? 'calc(52px + env(safe-area-inset-bottom, 0px))' : '20px' }}>
         <div className="folder-modal-header"><h2>Settings</h2><button className="folder-modal-close" onClick={onClose}>×</button></div>
         
         <div style={{ padding: '0 20px', marginTop: '10px' }}>
+          <h3 style={{ fontSize: '14px', marginBottom: '16px' }}>Library filters</h3>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '18px', fontSize: '14px' }}>
+            Minimum duration
+            <CustomSelect label="Minimum duration" value={draft.minimumDuration} options={MINIMUM_DURATIONS.map(seconds => ({ value: String(seconds), label: seconds ? `${seconds} seconds` : 'Off' }))} onChange={value => setDraft(previous => ({ ...previous, minimumDuration: Number(value) }))} />
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '24px', fontSize: '14px' }}>
+            <span>Skip call recordings</span>
+            <ToggleSwitch label="Skip call recordings" checked={draft.skipCallRecordings} onChange={checked => setDraft(previous => ({ ...previous, skipCallRecordings: checked }))} />
+          </div>
           <h3 style={{ fontSize: '14px', marginBottom: '8px', opacity: 0.8 }}>Gemini API Key (AI Lyrics)</h3>
           <p style={{ fontSize: '12px', opacity: 0.6, marginBottom: '12px', lineHeight: '1.4' }}>
-            Enter your Google Gemini API Key to enable AI-powered lyrics fetching and metadata correction. 
-            Your key is saved locally in the database.
+            Optional: use Gemini to identify a song when standard lyrics search fails.
+            Only song details are sent to Google. The key is stored on this device. Online lyrics search works without it.
           </p>
           <input 
             type="password"
+            aria-label="Gemini API Key"
+            autoComplete="off"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="AIzaSy..."
@@ -88,10 +101,12 @@ export const SettingsModal = memo(({ apiKey, setApiKey, onClose, onSave }: { api
           <button 
             className="add-folder-btn" 
             style={{ width: '100%' }}
-            onClick={() => { onSave(); onClose(); }}
+            disabled={saving}
+            onClick={async () => { setSaving(true); setError(''); try { await onSave(draft); } catch { setError('Settings could not be saved. Please retry.'); } finally { setSaving(false); } }}
           >
-            Save Settings
+            {saving ? 'Saving...' : 'Save Settings'}
           </button>
+          {error && <p role="alert">{error}</p>}
         </div>
       </div>
     </div>

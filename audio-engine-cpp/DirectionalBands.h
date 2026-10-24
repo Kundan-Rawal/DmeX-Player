@@ -12,6 +12,7 @@ struct DirectionalBands {
 
     void init(float sampleRate) {
         sr = sampleRate;
+        reset();
         setPosition(0.0f, 0.0f, 1.0f);
     }
 
@@ -26,22 +27,22 @@ struct DirectionalBands {
         float b_gain = 0.0f;
         
         if (frontness > 0.0f) {
-            f_gain = 2.5f * frontness * depth;
-            b_gain = -1.5f * frontness * depth;
+            f_gain = 8.0f * frontness * depth;
+            b_gain = -4.0f * frontness * depth;
         } else {
-            b_gain = 2.5f * (-frontness) * depth;
-            f_gain = -1.5f * (-frontness) * depth;
+            b_gain = 8.0f * (-frontness) * depth;
+            f_gain = -4.0f * (-frontness) * depth;
         }
 
-        float u_gain = 2.0f * elevation * depth;
+        float u_gain = 5.0f * elevation * depth;
 
-        front1.init(sr, 450.0f, 1.0f, f_gain);
-        front2.init(sr, 3500.0f, 1.4f, f_gain);
+        front1.update_coeffs(sr, 450.0f, 1.0f, f_gain);
+        front2.update_coeffs(sr, 3500.0f, 1.4f, f_gain);
         
-        back1.init(sr, 1200.0f, 0.9f, b_gain);
-        back2.init(sr, 11000.0f, 1.5f, b_gain);
+        back1.update_coeffs(sr, 1200.0f, 0.9f, b_gain);
+        back2.update_coeffs(sr, 11000.0f, 1.5f, b_gain);
 
-        up1.init(sr, 8500.0f, 1.2f, u_gain);
+        up1.update_coeffs(sr, 8500.0f, 1.2f, u_gain);
     }
 
     inline float process(float x) {

@@ -1,792 +1,412 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "EngineCore.h"
-#include "Telemetry.h"
-#include <string>
-#include <vector>
-#include <cstring>
+#include "StreamingDecoder.h"
+#include <algorithm>
+#include <array>
 #include <cmath>
-#include <mutex>
-#include <cstdlib>
-
-static float safe_stof(const std::string& s) {
-    if (s.empty()) return 0.0f;
-    return std::strtof(s.c_str(), nullptr);
-}
-
-#define MAX_IR_SAMPLES 2048
-
-using namespace std;
-
-// ================================================================
-// SYMPHONIA RUST FFI BRIDGE
-// ================================================================
-extern "C"
-{
-    struct RustAudioBuffer
-    {
-        float *data;
-        uint64_t total_samples;
-        uint64_t capacity; // <-- CRITICAL: YOU MUST ADD THIS LINE HERE
-        uint32_t channels;
-        uint32_t sample_rate;
-    };
-    RustAudioBuffer *rust_decode_file(const char *path);
-    void rust_free_audio_buffer(RustAudioBuffer *ptr);
-}
-
-struct MemoryDataSource
-{
-    ma_data_source_base base;
-    RustAudioBuffer *buffer;
-    uint64_t cursor_frames;
-};
-
-static ma_result mem_ds_read(ma_data_source *pDS, void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead)
-{
-    std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
-    MemoryDataSource *m = (MemoryDataSource *)pDS;
-
-    if (!m->buffer || m->buffer->channels == 0)
-        return MA_INVALID_OPERATION;
-
-    uint64_t total_frames = m->buffer->total_samples / m->buffer->channels;
-    uint64_t frames_left = total_frames - m->cursor_frames;
-    uint64_t to_read = (frameCount < frames_left) ? frameCount : frames_left;
-
-    if (to_read > 0)
-    {
-        uint64_t sample_offset = m->cursor_frames * m->buffer->channels;
-        memcpy(pFramesOut, m->buffer->data + sample_offset, to_read * m->buffer->channels * sizeof(float));
-        m->cursor_frames += to_read;
-    }
-
-    if (pFramesRead)
-        *pFramesRead = to_read;
-
-    return (to_read < frameCount) ? MA_AT_END : MA_SUCCESS;
-}
-
-static ma_result mem_ds_seek(ma_data_source *pDS, ma_uint64 frameIndex)
-{
-    std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
-    MemoryDataSource *m = (MemoryDataSource *)pDS;
-    if (!m->buffer || m->buffer->channels == 0)
-        return MA_INVALID_OPERATION;
-    uint64_t total_frames = m->buffer->total_samples / m->buffer->channels;
-    m->cursor_frames = (frameIndex > total_frames) ? total_frames : frameIndex;
-    return MA_SUCCESS;
-}
-
-static ma_result mem_ds_get_format(ma_data_source *pDS, ma_format *pFormat, ma_uint32 *pChannels, ma_uint32 *pSampleRate, ma_channel *pChannelMap, size_t cmCap)
-{
-    // CRITICAL FIX: Silence compiler warnings for parameters we don't need to use
-    (void)pChannelMap;
-    (void)cmCap;
-
-    MemoryDataSource *m = (MemoryDataSource *)pDS;
-    if (!m->buffer || m->buffer->channels == 0 || m->buffer->sample_rate == 0)
-        return MA_INVALID_OPERATION;
-    if (pFormat)
-        *pFormat = ma_format_f32;
-    if (pChannels)
-        *pChannels = m->buffer->channels;
-    if (pSampleRate)
-        *pSampleRate = m->buffer->sample_rate;
-    return MA_SUCCESS;
-}
-
-static ma_result mem_ds_get_length(ma_data_source *pDS, ma_uint64 *pLength)
-{
-    MemoryDataSource *m = (MemoryDataSource *)pDS;
-    if (!m->buffer || m->buffer->channels == 0)
-        return MA_INVALID_OPERATION;
-    if (pLength)
-        *pLength = m->buffer->total_samples / m->buffer->channels;
-    return MA_SUCCESS;
-}
-
-static ma_result mem_ds_get_cursor(ma_data_source *pDS, ma_uint64 *pCursor)
-{
-    MemoryDataSource *m = (MemoryDataSource *)pDS;
-    if (!m->buffer)
-        return MA_INVALID_OPERATION;
-    if (pCursor)
-        *pCursor = m->cursor_frames;
-    return MA_SUCCESS;
-}
-
-ma_data_source_vtable g_mem_vtable = {mem_ds_read, mem_ds_seek, mem_ds_get_format, mem_ds_get_cursor, mem_ds_get_length, NULL, 0};
-MemoryDataSource g_symSource;
-bool g_usingSymphonia = false;
-
-// ================================================================
-// EXPORTED API FOR RUST/REACT
-// ================================================================
-static std::mutex g_commandMutex;
-
-// ================================================================
-// TASK T22: INVERSE HEADPHONE COMPENSATION (HARMAN TARGET CALIBRATION)
-// ================================================================
-static void load_headphone_correction_file(const string &path)
-{
-    if (path.empty() || path == "OFF" || path == "NONE" || path == "0")
-    {
-        g_headphoneCompNode.enabled.set(false);
-        return;
-    }
-
-    ma_decoder_config dcfg = ma_decoder_config_init(ma_format_f32, 2, 44100);
-    ma_decoder dec;
-    if (ma_decoder_init_file(path.c_str(), &dcfg, &dec) != MA_SUCCESS)
-    {
-        dcfg = ma_decoder_config_init(ma_format_f32, 2, 0);
-        if (ma_decoder_init_file(path.c_str(), &dcfg, &dec) != MA_SUCCESS)
-            return;
-    }
-
-    const int read_samples = MAX_IR_SAMPLES;
-    float *tempInterleaved = (float *)calloc(read_samples * 2, sizeof(float));
-    if (!tempInterleaved)
-    {
-        ma_decoder_uninit(&dec);
-        return;
-    }
-
-    ma_uint64 framesRead = 0;
-    ma_decoder_read_pcm_frames(&dec, tempInterleaved, read_samples, &framesRead);
-    ma_decoder_uninit(&dec);
-
-    if (framesRead == 0)
-    {
-        free(tempInterleaved);
-        return;
-    }
-
-    float *newIrL = (float *)calloc(framesRead, sizeof(float));
-    float *newIrR = (float *)calloc(framesRead, sizeof(float));
-    if (!newIrL || !newIrR)
-    {
-        free(tempInterleaved);
-        if (newIrL) free(newIrL);
-        if (newIrR) free(newIrR);
-        return;
-    }
-
-    for (ma_uint64 i = 0; i < framesRead; i++)
-    {
-        newIrL[i] = tempInterleaved[i * 2];
-        newIrR[i] = tempInterleaved[i * 2 + 1];
-    }
-    free(tempInterleaved);
-
-    auto *freshL = new FFTConvolver();
-    auto *freshR = new FFTConvolver();
-    bool okL = freshL->prepare(newIrL, (int)framesRead, g_headphoneCompNode.blockSize);
-    bool okR = freshR->prepare(newIrR, (int)framesRead, g_headphoneCompNode.blockSize);
-
-    if (okL && okR)
-    {
-        auto *oldL = g_headphoneCompNode.convL.exchange(freshL, std::memory_order_acq_rel);
-        auto *oldR = g_headphoneCompNode.convR.exchange(freshR, std::memory_order_acq_rel);
-        g_headphoneCompNode.pendingDeleteL = oldL;
-        g_headphoneCompNode.pendingDeleteR = oldR;
-        g_headphoneCompNode.deleteCountdown = 10;
-        g_headphoneCompNode.enabled.set(true);
-    }
-    else
-    {
-        delete freshL;
-        delete freshR;
-    }
-    free(newIrL);
-    free(newIrR);
-}
-
-extern "C" void execute_audio_command(const char *cmd_in)
-{
-    std::lock_guard<std::mutex> cmdLock(g_commandMutex);
-
-    if (!g_engineInitialized)
-        init_audio_engine();
-    if (!g_engineInitialized)
-        return;
-
-    string full(cmd_in);
-    size_t sp = full.find(' ');
-    string command = full.substr(0, sp);
-    string args = (sp != string::npos) ? full.substr(sp + 1) : "";
-
-    if (command == "LOAD")
-    {
-        if (g_soundInitialized)
-        {
-            ma_sound_stop(&g_sound);
-            ma_sound_uninit(&g_sound);
-
-            {
-                std::lock_guard<std::mutex> lock(g_audioMutex);
-                if (g_usingSymphonia && g_symSource.buffer)
-                {
-                    rust_free_audio_buffer(g_symSource.buffer);
-                    g_symSource.buffer = nullptr;
-                    g_usingSymphonia = false;
-                }
-            }
-            g_soundInitialized = false;
-        }
-        g_audioLevel.store(0.0f, std::memory_order_relaxed);
-
-        RustAudioBuffer *new_buf = rust_decode_file(args.c_str());
-        if (new_buf)
-        {
-            {
-                std::lock_guard<std::mutex> lock(g_audioMutex);
-                memset(&g_symSource, 0, sizeof(g_symSource));
-                ma_data_source_config baseConfig = ma_data_source_config_init();
-                baseConfig.vtable = &g_mem_vtable;
-                ma_data_source_init(&baseConfig, &g_symSource.base);
-                g_symSource.buffer = new_buf;
-                g_symSource.cursor_frames = 0;
-            }
-
-            if (ma_sound_init_from_data_source(&g_engine, &g_symSource, 0, NULL, &g_sound) == MA_SUCCESS)
-            {
-                g_usingSymphonia = true;
-                g_soundInitialized = true;
-                {
-                    std::lock_guard<std::mutex> lk(g_pathMutex);
-                    g_lastLoadedPath = args;
-                }
-                updateRouting();
-                dsp_flush_all_state();
-            }
-            else
-            {
-                std::lock_guard<std::mutex> lock(g_audioMutex);
-                rust_free_audio_buffer(new_buf);
-                g_symSource.buffer = nullptr;
-                std::lock_guard<std::mutex> lk(g_pathMutex);
-                g_lastLoadedPath.clear();
-            }
-        }
-        else
-        {
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
 #ifdef __ANDROID__
-            const ma_uint32 loadFlags = MA_SOUND_FLAG_STREAM;
-#else
-            const ma_uint32 loadFlags = MA_SOUND_FLAG_DECODE;
+#include <android/log.h>
 #endif
-            if (ma_sound_init_from_file(&g_engine, args.c_str(), loadFlags, NULL, NULL, &g_sound) == MA_SUCCESS)
-            {
-                g_usingSymphonia = false;
-                g_soundInitialized = true;
-                {
-                    std::lock_guard<std::mutex> lk(g_pathMutex);
-                    g_lastLoadedPath = args;
-                }
-                updateRouting();
-                dsp_flush_all_state();
-            }
-        }
-    }
-    else if (command == "STOP")
-    {
-        if (g_soundInitialized)
-        {
-            ma_sound_stop(&g_sound);
-            ma_sound_uninit(&g_sound);
-            {
-                std::lock_guard<std::mutex> lock(g_audioMutex);
-                if (g_usingSymphonia && g_symSource.buffer)
-                {
-                    rust_free_audio_buffer(g_symSource.buffer);
-                    g_symSource.buffer = nullptr;
-                    g_usingSymphonia = false;
-                }
-            }
-            g_soundInitialized = false;
-            dsp_flush_all_state();
-        }
-    }
-    else if (command == "PLAY" && g_soundInitialized)
-        ma_sound_start(&g_sound);
-    else if (command == "PAUSE" && g_soundInitialized)
-        ma_sound_stop(&g_sound);
-    else if (command == "VOLUME" && !args.empty()) {
-        float v = safe_stof(args);
-        ma_engine_set_volume(&g_engine, v);
-        g_masterVolume = v;
-    }
-    else if (command == "SEEK" && g_soundInitialized)
-    {
-        ma_uint32 target_sr = 44100; // default fallback
-        if (g_usingSymphonia && g_symSource.buffer) {
-            target_sr = g_symSource.buffer->sample_rate;
-        } else {
-            ma_data_source* pDS = ma_sound_get_data_source(&g_sound);
-            if (pDS) {
-                ma_format fmt;
-                ma_uint32 channels;
-                ma_data_source_get_data_format(pDS, &fmt, &channels, &target_sr, NULL, 0);
-            } else {
-                target_sr = ma_engine_get_sample_rate(&g_engine);
-            }
-        }
-        
-        ma_sound_seek_to_pcm_frame(&g_sound, (ma_uint64)(safe_stof(args) * (float)target_sr));
-        dsp_flush_all_state();
-    }
-    else if (command == "REMASTER")
-    {
-        g_isRemasterOn = (stoi(args) == 1);
-        if (g_isRemasterOn)
-        {
-            g_audiophileEQNode.targetBass.set(1.6f);
-            g_audiophileEQNode.targetMid.set(0.7f);
-            g_audiophileEQNode.targetHigh.set(1.4f);
-        }
-        else if (!g_isFIRModeOn)
-        {
-            g_audiophileEQNode.targetBass.set(1.0f);
-            g_audiophileEQNode.targetMid.set(1.0f);
-            g_audiophileEQNode.targetHigh.set(1.0f);
-        }
-    }
-    else if (command == "FIRMODE")
-    {
-        g_isFIRModeOn = (stoi(args) == 1);
-    }
-    else if (command == "FIRGAIN")
-    {
-        float b = 1.15f, m = 0.90f, h = 1.15f;
-        sscanf(args.c_str(), "%f %f %f", &b, &m, &h);
-        auto clamp = [](float v)
-        { return v < 0.0f ? 0.0f : v > 2.0f ? 2.0f
-                                            : v; };
-        if (g_isFIRModeOn)
-        {
-            g_audiophileEQNode.targetBass.set(clamp(b));
-            g_audiophileEQNode.targetMid.set(clamp(m));
-            g_audiophileEQNode.targetHigh.set(clamp(h));
-        }
-    }
-    else if (command == "COMPRESS")
-    {
-        g_isCompressOn = (stoi(args) == 1);
-    }
-    else if (command == "UPSCALE")
-    {
-        float d = safe_stof(args);
-        g_exciterNode.drive.set(d * 4.0f);
-    }
-    else if (command == "RESTORE_DENOISE")
-    {
-        g_restorationNode.denoiseIntensity = safe_stof(args);
-    }
-    else if (command == "RESTORE_UPSCALE")
-    {
-        g_restorationNode.upscaleTarget = safe_stof(args);
-    }
-    else if (command == "RESTORE_PRESENCE")
-    {
-        g_restorationNode.presenceBoost = safe_stof(args);
-    }
-    else if (command == "WIDEN")
-    {
-        float w = safe_stof(args);
-        g_widenerNode.width.set(w);
-        g_isWidenOn = (w > 1.01f);
-    }
-    else if (command == "DEPTH")
-    {
-        float d = safe_stof(args);
-        if (d < 0.0f) d = 0.0f;
-        if (d > 1.0f) d = 1.0f;
-        g_spatializerNode.depthAmount.set(d);
-    }
-    else if (command == "3D")
-    {
-        float val = safe_stof(args);
-        g_spatializerNode.spatialIntensity.set(val * 0.50f);
-    }
-    else if (command == "BASS")
-    {
-        g_bassGain = safe_stof(args);
-    }
-    else if (command == "TREBLE")
-    {
-        g_trebleGain = safe_stof(args);
-    }
-    else if (command == "ISO226")
-    {
-        g_isAdaptiveLoudnessOn = (args == "ON");
-    }
-    else if (command == "LOAD_IR")
-    {
-        g_isConvolutionOn = false;
 
-        if (args.empty())
-            return;
+extern "C" {
+struct RustAudioBuffer { float* data; uint64_t total_samples, capacity; uint32_t channels, sample_rate; };
+char* rust_prepare_audio_file(const char*, uint32_t);
+char* rust_prepare_impulse(const char*, uint32_t);
+void rust_free_audio_path(char*);
+}
+namespace {
+std::string playbackPath;
+std::string correctionPath, convolutionPath;
+float correctionStrength = 1.0f, convolutionWet = 0.0f;
+std::array<float, 20> settings{0.25f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+    52.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.84f, 0.50f, 0.0f, 0.0f, 0.0f, 0.0f};
 
-        ma_decoder_config dcfg = ma_decoder_config_init(ma_format_f32, 2, 44100);
-        ma_decoder dec;
-        if (ma_decoder_init_file(args.c_str(), &dcfg, &dec) != MA_SUCCESS)
-            return;
+std::mutex parameterMutex;
+std::array<float, 20> pendingSettings{};
+std::atomic<bool> parametersPending{false};
 
-        const int read_samples = MAX_IR_SAMPLES;
-
-        float *tempInterleaved = (float *)calloc(read_samples * 2, sizeof(float));
-        ma_uint64 framesRead = 0;
-        ma_decoder_read_pcm_frames(&dec, tempInterleaved, read_samples, &framesRead);
-        ma_decoder_uninit(&dec);
-
-        if (framesRead == 0)
-        {
-            free(tempInterleaved);
-            return;
-        }
-
-        float *newIrL = (float *)calloc(framesRead, sizeof(float));
-        float *newIrR = (float *)calloc(framesRead, sizeof(float));
-        float *newHistL = (float *)calloc(framesRead, sizeof(float));
-        float *newHistR = (float *)calloc(framesRead, sizeof(float));
-        for (ma_uint64 i = 0; i < framesRead; i++)
-        {
-            newIrL[i] = tempInterleaved[i * 2];
-            newIrR[i] = tempInterleaved[i * 2 + 1];
-        }
-        free(tempInterleaved);
-
-        {
-            auto* freshL = new FFTConvolver();
-            auto* freshR = new FFTConvolver();
-            bool okL = freshL->prepare(newIrL, (int)framesRead, g_convolutionNode.blockSize);
-            bool okR = freshR->prepare(newIrR, (int)framesRead, g_convolutionNode.blockSize);
-            
-            if(okL && okR) {
-                auto* oldL = g_convolutionNode.convL.exchange(freshL, std::memory_order_acq_rel);
-                auto* oldR = g_convolutionNode.convR.exchange(freshR, std::memory_order_acq_rel);
-                g_convolutionNode.pendingDeleteL = oldL;
-                g_convolutionNode.pendingDeleteR = oldR;
-                g_convolutionNode.deleteCountdown = 10;
-            } else {
-                delete freshL;
-                delete freshR;
-            }
-            free(newIrL);
-            free(newIrR);
-            free(newHistL);
-            free(newHistR);
-        }
-    }
-    else if (command == "LOAD_IR_DUAL")
-    {
-        g_isConvolutionOn = false;
-
-        size_t delimiter = args.find('|');
-        if (delimiter == string::npos)
-            return;
-        string pathL = args.substr(0, delimiter);
-        string pathR = args.substr(delimiter + 1);
-
-        ma_decoder_config dcfg = ma_decoder_config_init(ma_format_f32, 1, 44100);
-        ma_decoder decL, decR;
-
-        if (ma_decoder_init_file(pathL.c_str(), &dcfg, &decL) != MA_SUCCESS)
-            return;
-
-        const int read_samples = MAX_IR_SAMPLES;
-
-        float *tempL = (float *)calloc(read_samples, sizeof(float));
-        ma_uint64 framesL = 0;
-        ma_decoder_read_pcm_frames(&decL, tempL, read_samples, &framesL);
-        ma_decoder_uninit(&decL);
-
-        if (ma_decoder_init_file(pathR.c_str(), &dcfg, &decR) != MA_SUCCESS)
-        {
-            free(tempL);
-            return;
-        }
-        float *tempR = (float *)calloc(read_samples, sizeof(float));
-        ma_uint64 framesR = 0;
-        ma_decoder_read_pcm_frames(&decR, tempR, read_samples, &framesR);
-        ma_decoder_uninit(&decR);
-
-        ma_uint64 maxFrames = (framesL > framesR) ? framesL : framesR;
-        if (maxFrames == 0)
-        {
-            free(tempL);
-            free(tempR);
-            return;
-        }
-
-        float *newIrL = (float *)calloc(maxFrames, sizeof(float));
-        float *newIrR = (float *)calloc(maxFrames, sizeof(float));
-        float *newHistL = (float *)calloc(maxFrames, sizeof(float));
-        float *newHistR = (float *)calloc(maxFrames, sizeof(float));
-
-        for (ma_uint64 i = 0; i < framesL; i++)
-            newIrL[i] = tempL[i];
-        for (ma_uint64 i = 0; i < framesR; i++)
-            newIrR[i] = tempR[i];
-
-        free(tempL);
-        free(tempR);
-
-        {
-            auto* freshL = new FFTConvolver();
-            auto* freshR = new FFTConvolver();
-            bool okL = freshL->prepare(newIrL, (int)framesL, g_convolutionNode.blockSize);
-            bool okR = freshR->prepare(newIrR, (int)framesR, g_convolutionNode.blockSize);
-            
-            if(okL && okR) {
-                auto* oldL = g_convolutionNode.convL.exchange(freshL, std::memory_order_acq_rel);
-                auto* oldR = g_convolutionNode.convR.exchange(freshR, std::memory_order_acq_rel);
-                g_convolutionNode.pendingDeleteL = oldL;
-                g_convolutionNode.pendingDeleteR = oldR;
-                g_convolutionNode.deleteCountdown = 10;
-            } else {
-                delete freshL;
-                delete freshR;
-            }
-            free(newIrL);
-            free(newIrR);
-            free(newHistL);
-            free(newHistR);
-        }
-    }
-    else if (command == "REVERB")
-    {
-        float w = safe_stof(args);
-        g_reverbNode.wetMix.set(w);
-        g_isReverbOn = (w > 0.005f);
-        if (g_isReverbOn)
-            g_isConvolutionOn = false;
-    }
-    else if (command == "CONVOLUTION")
-    {
-        float w = safe_stof(args);
-        g_convolutionNode.wetMix.set(w);
-        g_isConvolutionOn = (w > 0.005f);
-        if (g_isConvolutionOn)
-            g_isReverbOn = false;
-    }
-    else if (command == "LIMITER")
-    {
-        float val = safe_stof(args);
-        g_limiterNode.boost.set(1.0f + (val * 1.2f));
-        g_limiterNode.gainEnv = 1.0f;
-    }
-    // Add this inside your if/else if chain block
-    else if (command == "SPEAKER9D" || command == "TOGGLE_8D")
-    {
-        g_is8DModeOn = (args.find("1") != string::npos || args.find("ON") != string::npos || args.find("on") != string::npos);
-    }
-    else if (command == "SPEAKER9D_BASS")
-    {
-        bool isRoom = (args.find("ROOM") != string::npos || args.find("room") != string::npos || args.find("1") != string::npos || args.find("ON") != string::npos);
-        g_8DNode.setBass3D(isRoom);
-    }
-    else if (command == "ANDROID_SPEAKER")
-    {
-        g_isAndroidSpeaker = (stoi(args) == 1);
-    }
-    else if (command == "LAPTOP_SPEAKER")
-    {
-        g_isLaptopSpeaker = (stoi(args) == 1);
-    }
-    else if (command == "HEADPHONE_CORRECTION")
-    {
-        load_headphone_correction_file(args);
-    }
-    else if (command == "HEADPHONE_CORRECTION_STRENGTH")
-    {
-        float val = safe_stof(args);
-        if (val < 0.0f) val = 0.0f;
-        if (val > 1.0f) val = 1.0f;
-        g_headphoneCompNode.strength.set(val);
+float number(const std::string& text) {
+    std::istringstream stream(text);
+    float value; char extra;
+    if (!(stream >> value) || (stream >> extra) || !std::isfinite(value))
+        throw std::runtime_error("Invalid numeric audio control");
+    return value;
+}
+float bounded(float v, float low, float high) { return (std::clamp)(v, low, high); }
+struct Suspended {
+    bool resume;
+    Suspended() : resume(engine_is_rendering()) { engine_suspend(); }
+    ~Suspended() { if (resume) try { engine_resume(); } catch (...) {} }
+};
+void installIR(const float* left, int nL, const float* right, int nR, bool correction) {
+    if (!left || !right || nL <= 0 || nR <= 0 || nL > engine_get_sample_rate() * 4 + 2048 || nR > engine_get_sample_rate() * 4 + 2048)
+        throw std::runtime_error("Invalid or overlong impulse response");
+    auto l = std::make_unique<FFTConvolver>(), r = std::make_unique<FFTConvolver>();
+    if (!l->prepare(left, nL, 512) || !r->prepare(right, nR, 512)) throw std::runtime_error("IR preparation failed");
+    Suspended suspend;
+    if (correction) {
+        delete g_headphoneCompNode.convL.exchange(l.release());
+        delete g_headphoneCompNode.convR.exchange(r.release());
+        g_headphoneCompNode.blockAdapterL.reset();
+        g_headphoneCompNode.blockAdapterR.reset();
+        g_headphoneCompNode.enabled.set(true);
+    } else {
+        delete g_convolutionNode.convL.exchange(l.release());
+        delete g_convolutionNode.convR.exchange(r.release());
+        g_convolutionNode.blockAdapterL.reset();
+        g_convolutionNode.blockAdapterR.reset();
     }
 }
-
-extern "C" void get_audio_metrics(float *out_data, float *out_level)
-{
-    if (!g_soundInitialized || !g_engineInitialized)
-    {
-        memset(out_data, 0, 11 * sizeof(float));
-        out_data[6] = 1.0f;
-        out_data[9] = 1.0f;
-        out_data[10] = 1.0f; // No gain reduction when stopped
-        *out_level = 0.0f;
+std::vector<float> decodeIR(const std::string& path, int channels) {
+    char* prepared = rust_prepare_impulse(path.c_str(),engine_get_sample_rate());
+    if (!prepared) throw std::runtime_error("Impulse response preparation failed");
+    const std::string cached(prepared); rust_free_audio_path(prepared);
+    ma_decoder decoder;
+    auto config = ma_decoder_config_init(ma_format_f32, channels, engine_get_sample_rate());
+    if (ma_decoder_init_file(cached.c_str(), &config, &decoder) != MA_SUCCESS)
+        throw std::runtime_error("Impulse response could not be decoded");
+    struct DecoderGuard { ma_decoder* value; ~DecoderGuard() { ma_decoder_uninit(value); } } guard{&decoder};
+    ma_uint64 total = 0;
+    if (ma_decoder_get_length_in_pcm_frames(&decoder, &total) != MA_SUCCESS ||
+        total == 0 || total > static_cast<ma_uint64>(engine_get_sample_rate()) * 4 + 2048)
+        throw std::runtime_error("Impulse response exceeds the four-second budget");
+    std::vector<float> samples(total * channels);
+    ma_uint64 count = 0;
+    if (ma_decoder_read_pcm_frames(&decoder, samples.data(), total, &count) < 0 || count == 0)
+        throw std::runtime_error("Impulse response is empty");
+    samples.resize(count * channels);
+    if (!std::all_of(samples.begin(), samples.end(), [](float v) { return std::isfinite(v); }))
+        throw std::runtime_error("Impulse response contains invalid samples");
+    return samples;
+}
+void loadIR(const std::string& path, bool correction) {
+    if (path.empty() || path == "OFF" || path == "NONE" || path == "0") {
+        if (correction) g_headphoneCompNode.enabled.set(false);
+        else { g_isConvolutionOn.store(false); g_convolutionNode.wetMix.set(0.0f); }
         return;
     }
-
-    {
-        std::lock_guard<std::mutex> lock(g_audioMutex); // <-- PROTECT THIS
-        if (g_usingSymphonia && g_symSource.buffer)
-        {
-            uint32_t ch = g_symSource.buffer->channels;
-            uint32_t sr = g_symSource.buffer->sample_rate;
-            if (ch == 0 || sr == 0)
-                return;
-
-            out_data[0] = (float)g_symSource.cursor_frames / (float)sr;
-            out_data[1] = (float)(g_symSource.buffer->total_samples / ch) / (float)sr;
-        }
-        else
-        {
-            ma_sound_get_cursor_in_seconds(&g_sound, &out_data[0]);
-            ma_sound_get_length_in_seconds(&g_sound, &out_data[1]);
-        }
+    const auto separator = path.find('|');
+    std::vector<float> left, right;
+    if (separator != std::string::npos) {
+        left = decodeIR(path.substr(0, separator), 1);
+        right = decodeIR(path.substr(separator + 1), 1);
+    } else {
+        const auto stereo = decodeIR(path, 2);
+        for (size_t i = 0; i < stereo.size(); i += 2) { left.push_back(stereo[i]); right.push_back(stereo[i+1]); }
     }
-    out_data[2] = g_bLvl.load(std::memory_order_relaxed);
-    out_data[3] = g_bPan.load(std::memory_order_relaxed);
-    out_data[4] = g_mLvl.load(std::memory_order_relaxed);
-    out_data[5] = g_mPan.load(std::memory_order_relaxed);
-    out_data[6] = g_mPhase.load(std::memory_order_relaxed);
-    out_data[7] = g_tLvl.load(std::memory_order_relaxed);
-    out_data[8] = g_tPan.load(std::memory_order_relaxed);
-    out_data[9] = g_tPhase.load(std::memory_order_relaxed);
-    out_data[10] = g_limiterGR.load(std::memory_order_relaxed);
-    *out_level = g_audioLevel.load(std::memory_order_relaxed);
+    installIR(left.data(), static_cast<int>(left.size()), right.data(), static_cast<int>(right.size()), correction);
+}
 }
 
-extern "C" bool analyze_audio(float *sc_out, float *cf_out, float *zcr_out, float *rms_out)
-{
-    std::vector<float> slice;
-    uint32_t ch = 2;
-    uint64_t limit = 0;
+void audio_restore_impulses() {
+    g_irRestoreFailed.store(false);
+    try { if (!correctionPath.empty()) loadIR(correctionPath, true); }
+    catch (...) { correctionPath.clear(); g_headphoneCompNode.enabled.set(false); g_irRestoreFailed.store(true); }
+    try { if (!convolutionPath.empty()) loadIR(convolutionPath, false); }
+    catch (...) { convolutionPath.clear(); convolutionWet=0; g_irRestoreFailed.store(true); }
+    g_headphoneCompNode.strength.set(correctionStrength);
+    g_convolutionNode.wetMix.set(convolutionWet);
+    g_isConvolutionOn.store(convolutionWet > 0 && !convolutionPath.empty());
+}
 
-    {
-        std::lock_guard<std::mutex> lock(g_audioMutex);
-        if (g_usingSymphonia && g_symSource.buffer)
-        {
-            uint64_t total = g_symSource.buffer->total_samples;
-            ch = g_symSource.buffer->channels;
-            if (ch == 0)
-                return false;
-            if (total < 4800 * ch)
-                return false;
-
-            uint64_t max_samples = 44100 * 10 * ch;
-            limit = (total < max_samples) ? total : max_samples;
-            slice.assign(g_symSource.buffer->data, g_symSource.buffer->data + limit);
-        }
-        else
-        {
-            return false;
-        }
+static void applyTargets(const std::array<float,20>& values) {
+    g_bassGain.store(values[0]);
+    g_trebleGain.store(values[1]);
+    g_exciterNode.drive.set(values[2]);
+    g_isUpscaleOn.store(values[2] > 0 || values[16] > 0);
+    g_widenerNode.width.set(values[3]);
+    g_isWidenOn.store(values[3] != 1);
+    g_spatializerNode.spatialIntensity.set(0.0f);
+    g_8DNode.setSeparation(values[4]);
+    g_8DNode.setDepth(values[5]);
+    g_reverbNode.wetMix.set(values[6]);
+    g_isReverbOn.store(values[6] > 0);
+    g_isCompressOn.store(values[7] > 0.5f);
+    g_outputGain.store(values[8] * (1.0f + values[18]));
+    g_masterVolume.store(values[8]);
+    g_subBassHz.store(values[9]);
+    g_bassField.store(values[10]);
+    g_roomBass.store(values[11] > 0.5f);
+    g_presenceBoost.store(values[12]);
+    g_isAdaptiveLoudnessOn.store(values[13] > 0.5f);
+    g_reverbNode.roomSize.set(values[14]);
+    g_reverbNode.damp.set(values[15]);
+    g_upscaleTarget.store(values[16]);
+    g_is8DModeOn.store(values[17] > 0.5f);
+    g_isAndroidSpeaker.store(values[19] == 2);
+    g_isLaptopSpeaker.store(values[19] == 1);
+}
+void restore_audio_parameters() {
+    std::lock_guard<std::mutex> publish(parameterMutex);
+    pendingSettings = settings;
+    parametersPending.store(true, std::memory_order_release);
+}
+void audio_apply_pending_parameters() {
+    if (!parametersPending.load(std::memory_order_acquire)) return;
+    std::unique_lock<std::mutex> publish(parameterMutex, std::try_to_lock);
+    if (!publish.owns_lock()) return;
+    const auto values = pendingSettings;
+    parametersPending.store(false, std::memory_order_release);
+    publish.unlock();
+    applyTargets(values);
+}
+void engine_release_source() {
+    if (g_soundInitialized) {
+        ma_sound_stop(&g_sound);
+        ma_sound_uninit(&g_sound);
+        g_soundInitialized = false;
     }
-
-    double sL2 = 0, sR2 = 0, sLR = 0, pk = 0, zcr = 0;
-    float prev = 0;
-    for (uint64_t i = 0; i < limit; i += ch)
-    {
-        float L = slice[i], R = (ch > 1) ? slice[i + 1] : slice[i];
-            sL2 += L * L;
-            sR2 += R * R;
-            sLR += L * R;
-            float am = fabsf((L + R) * 0.5f);
-            if (am > pk)
-                pk = am;
-            float m = (L + R) * 0.5f;
-            if ((m >= 0 && prev < 0) || (m < 0 && prev >= 0))
-                zcr++;
-            prev = m;
+    engine_reset_transport();
+}
+extern "C" int apply_audio_settings(const float* values, int count) {
+    std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
+    try {
+        if (!values || count != static_cast<int>(settings.size())) return -1;
+        std::array<float, 20> prepared;
+        std::copy(values, values + count, prepared.begin());
+        if (!std::all_of(prepared.begin(), prepared.end(), [](float v) { return std::isfinite(v); })) return -1;
+        if (prepared[0] < 0 || prepared[0] > 2.1f || std::abs(prepared[1]) > 12 ||
+            prepared[2] < 0 || prepared[2] > 1 || prepared[3] < 1 || prepared[3] > 2.5f ||
+            prepared[8] < 0 || prepared[8] > 1 || prepared[14] < 0.2f || prepared[14] > 0.98f ||
+            prepared[15] < 0 || prepared[15] > 0.95f || prepared[19] < 0 || prepared[19] > 2) return -1;
+        const float anchors[]{30,40,52,60,70,80};
+        if (std::find(std::begin(anchors), std::end(anchors), prepared[9]) == std::end(anchors)) return -1;
+        for (int i : {4,5,6,7,10,11,12,13,16,17,18}) if (prepared[i] < 0 || prepared[i] > 1) return -1;
+        for (int i : {7,11,13,17}) if (prepared[i] != 0 && prepared[i] != 1) return -1;
+        if (prepared[19] != std::floor(prepared[19])) return -1;
+        if (!g_engineInitialized.load()) init_audio_engine();
+        if (!g_engineInitialized.load()) return -1;
+        settings = prepared;
+        restore_audio_parameters();
+        g_audioGeneration.fetch_add(1);
+        return 0;
+    } catch (...) { return -1; }
+}
+extern "C" void get_audio_settings(float* output) {
+    std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
+    std::copy(settings.begin(), settings.end(), output);
+}
+extern "C" int execute_audio_command(const char* input) {
+    std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
+    try {
+        if (!input) return -1;
+        const std::string full(input);
+        const auto split = full.find(' ');
+        const auto command = full.substr(0, split);
+        const auto args = split == std::string::npos ? "" : full.substr(split + 1);
+        if (!g_engineInitialized.load()) init_audio_engine();
+        if (!g_engineInitialized.load()) return -1;
+        if (command == "LOAD") {
+            const auto loadStart = std::chrono::steady_clock::now();
+            ma_uint32 originalRate = 0;
+            ma_uint64 length = 0;
+            g_streamTargetRate.store(g_bypassAll.load() ? 0 : engine_get_sample_rate());
+            if (stream_probe(args.c_str(), g_streamTargetRate.load(), &originalRate, &length) != MA_SUCCESS) return -1;
+            Suspended suspend;
+            engine_release_source();
+            if (g_bypassAll.load()) {
+                if (static_cast<int>(originalRate) != engine_get_sample_rate()) {
+                    const int selectedRate = g_requestedSampleRate.load();
+                    uninit_audio_engine(); g_requestedSampleRate.store(originalRate); init_audio_engine();
+                    g_requestedSampleRate.store(selectedRate);
+                    if (!g_engineInitialized.load()) return -1;
+                    engine_suspend();
+                }
+            }
+            const ma_uint32 flags = MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION | MA_SOUND_FLAG_NO_PITCH |
+                (length == std::numeric_limits<ma_uint64>::max() ? MA_SOUND_FLAG_UNKNOWN_LENGTH : 0);
+            if (ma_sound_init_from_file(&g_engine, args.c_str(), flags, nullptr, nullptr, &g_sound) != MA_SUCCESS) return -1;
+            g_soundInitialized = true;
+            g_lastLoadedPath = args;
+            playbackPath = args;
+            dsp_flush_all_state();
+            restore_audio_parameters();
+            updateRouting();
+            const auto elapsed = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - loadStart).count());
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO, "DmeXAudio", "Stream ready in %lld ms", elapsed);
+#else
+            std::fprintf(stderr, "[Playback] Stream ready in %lld ms\n", elapsed);
+#endif
+        } else if (command == "STOP") {
+            Suspended suspend; engine_release_source(); dsp_flush_all_state(); restore_audio_parameters();
+            g_lastLoadedPath.clear(); playbackPath.clear();
+        } else if (command == "PLAY") {
+            if (!g_soundInitialized) return -1;
+            g_pauseRequested.store(false, std::memory_order_release);
+            if (g_trackFinished.load()) { Suspended suspend; ma_sound_seek_to_pcm_frame(&g_sound, 0); dsp_flush_all_state(); restore_audio_parameters(); engine_reset_transport(); }
+            ma_sound_start(&g_sound);
+        } else if (command == "PAUSE" || command == "PAUSE_DEVICE") {
+            if (g_soundInitialized && (command == "PAUSE" || g_pauseRequested.load())) ma_sound_stop(&g_sound);
+        } else if (command == "SEEK") {
+            if (!g_soundInitialized) return -1;
+            const float seconds = (std::max)(0.0f, number(args));
+            ma_uint32 rate = 0;
+            ma_data_source_get_data_format(ma_sound_get_data_source(&g_sound), nullptr, nullptr, &rate, nullptr, 0);
+            Suspended suspend;
+            ma_sound_seek_to_pcm_frame(&g_sound, static_cast<ma_uint64>(seconds * rate));
+            dsp_flush_all_state(); restore_audio_parameters(); engine_reset_transport();
+        } else if (command == "BYPASS_ALL") {
+            const bool bypass = number(args) > 0.5f;
+            if (bypass == g_bypassAll.load()) return 0;
+            const bool playing = g_soundInitialized && ma_sound_is_playing(&g_sound);
+            const std::string path = g_lastLoadedPath;
+            float seconds = 0;
+            if (g_soundInitialized) ma_sound_get_cursor_in_seconds(&g_sound, &seconds);
+            Suspended suspend;
+            g_bypassAll.store(bypass);
+            if (!bypass && engine_get_sample_rate() != g_requestedSampleRate.load()) {
+                uninit_audio_engine(); init_audio_engine();
+                if (!g_engineInitialized.load()) return -1;
+                engine_suspend();
+            }
+            dsp_flush_all_state(); restore_audio_parameters(); updateRouting();
+            if (!path.empty()) {
+                if (execute_audio_command(("LOAD " + path).c_str()) != 0) return -1;
+                execute_audio_command(("SEEK " + std::to_string(seconds)).c_str());
+                if (playing) execute_audio_command("PLAY");
+            }
+        } else if (command == "QUALITY") {
+            const bool eco = args == "ECO";
+            if (!eco && args != "FULL") return -1;
+            Suspended suspend;
+            g_ecoMode.store(eco);
+            audio_rebuild_spatial_renderer();
+            dsp_flush_all_state(); restore_audio_parameters();
+        } else if (command == "SAMPLE_RATE" || command == "RECOVER") {
+            const int rate = command == "RECOVER" ? g_requestedSampleRate.load() : static_cast<int>(number(args));
+            if (rate != 44100 && rate != 48000 && rate != 96000) return -1;
+#ifdef __ANDROID__
+            if (rate == 96000) return -1;
+#endif
+            const int previous = g_requestedSampleRate.load();
+            const std::string path = g_lastLoadedPath;
+            float seconds = 0; const bool playing = g_soundInitialized && ma_sound_is_playing(&g_sound);
+            if (g_soundInitialized) ma_sound_get_cursor_in_seconds(&g_sound, &seconds);
+            uninit_audio_engine(); g_requestedSampleRate.store(rate); init_audio_engine();
+            if (!g_engineInitialized.load()) { g_requestedSampleRate.store(previous); init_audio_engine(); }
+            if (!g_engineInitialized.load()) return -1;
+            if (!path.empty()) {
+                if (execute_audio_command(("LOAD " + path).c_str()) != 0) return -1;
+                execute_audio_command(("SEEK " + std::to_string(seconds)).c_str());
+                if (playing) execute_audio_command("PLAY");
+            }
+            return engine_get_sample_rate() == rate ? 0 : -1;
+        } else if (command == "HEADPHONE_CORRECTION") {
+            loadIR(args, true);
+            correctionPath = (args == "OFF" || args == "NONE" || args == "0") ? "" : args;
+        } else if (command == "LOAD_IR" || command == "LOAD_IR_DUAL") {
+            loadIR(args, false);
+            convolutionPath = (args == "OFF" || args == "NONE" || args == "0") ? "" : args;
+        } else if (command == "HEADPHONE_CORRECTION_STRENGTH") {
+            correctionStrength = bounded(number(args),0,1);
+            g_headphoneCompNode.strength.set(correctionStrength);
+        } else if (command == "CONVOLUTION") {
+            const float wet = bounded(number(args),0,1);
+            if (wet > 0 && (!g_convolutionNode.convL.load() || !g_convolutionNode.convR.load())) return -1;
+            g_convolutionNode.wetMix.set(wet);
+            g_isConvolutionOn.store(wet > 0);
+            convolutionWet = wet;
+        } else if (command == "FIRMODE" || command == "FIRGAIN" || command == "REMASTER") {
+            // Legacy preset compatibility: tone now has explicit shelf/presence controls.
+            if (command == "REMASTER") { settings[12] = number(args) > 0.5f ? 0.25f : 0; restore_audio_parameters(); }
+        } else {
+            const float v = (command == "SPEAKER9D" || command == "TOGGLE_8D") ?
+                (args == "ON" || args == "1" ? 1.0f : 0.0f) :
+                command == "SPEAKER9D_BASS" ? (args == "ROOM" ? 1.0f : 0.0f) :
+                command == "ISO226" ? (args == "ON" ? 1.0f : 0.0f) : number(args);
+            if (command == "BASS") settings[0]=bounded(v,0,2.1f);
+            else if (command == "TREBLE") settings[1]=bounded(v,-12,12);
+            else if (command == "UPSCALE") settings[2]=bounded(v,0,1);
+            else if (command == "WIDEN") settings[3]=bounded(v,1,2.5f);
+            else if (command == "3D") settings[4]=bounded(v,0,1);
+            else if (command == "DEPTH") settings[5]=bounded(v,0,1);
+            else if (command == "REVERB") settings[6]=bounded(v,0,1);
+            else if (command == "COMPRESS") settings[7]=v>0.5f;
+            else if (command == "VOLUME") settings[8]=bounded(v,0,1);
+            else if (command == "SUB_BASS_HZ") { const float a[]{30,40,52,60,70,80}; if (std::find(std::begin(a),std::end(a),v)==std::end(a)) return -1; settings[9]=v; }
+            else if (command == "BASS_FIELD") settings[10]=bounded(v,0,1);
+            else if (command == "SPEAKER9D_BASS") settings[11]=v;
+            else if (command == "VOCAL_PRESENCE" || command == "RESTORE_PRESENCE") settings[12]=bounded(v,0,1);
+            else if (command == "ISO226") settings[13]=v;
+            else if (command == "ROOM_SIZE") settings[14]=bounded(v,0.2f,0.98f);
+            else if (command == "DAMPING") settings[15]=bounded(v,0,0.95f);
+            else if (command == "RESTORE_UPSCALE") settings[16]=bounded(v,0,1);
+            else if (command == "SPEAKER9D" || command == "TOGGLE_8D") settings[17]=v;
+            else if (command == "LIMITER") settings[18]=bounded(v,0,1);
+            else if (command == "ANDROID_SPEAKER") settings[19]=v>0.5f?2:0;
+            else if (command == "LAPTOP_SPEAKER") settings[19]=v>0.5f?1:0;
+            else if (command == "RESTORE_DENOISE") { if (v != 0) return -1; }
+            else return -1;
+            restore_audio_parameters();
         }
-    uint64_t frames = limit / ch;
-    double n = (double)frames, rms = sqrt((sL2 + sR2) / (2 * n)), den = sqrt(sL2 * sR2);
-    *sc_out = (float)((den > 1e-12) ? (sLR / den) : 0.0);
-    *cf_out = (float)((rms > 1e-9) ? (20.0 * log10(pk / rms)) : 0.0);
-    *zcr_out = (float)(zcr / n);
-    *rms_out = (float)rms;
+        return 0;
+    } catch (...) { return -1; }
+}
+extern "C" void get_audio_metrics(float* output, float* level) {
+    std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
+    std::fill(output, output + 11, 0.0f);
+    output[6] = output[9] = 1;
+    output[10] = g_limiterGR.load();
+    *level = g_audioLevel.load();
+    if (!g_engineInitialized.load() || !g_soundInitialized) return;
+    ma_sound_get_cursor_in_seconds(&g_sound, &output[0]);
+    ma_sound_get_length_in_seconds(&g_sound, &output[1]);
+    output[2]=g_bLvl.load(); output[3]=g_bPan.load();
+    output[4]=g_mLvl.load(); output[5]=g_mPan.load(); output[6]=g_mPhase.load();
+    output[7]=g_tLvl.load(); output[8]=g_tPan.load(); output[9]=g_tPhase.load();
+}
+extern "C" bool audio_track_finished() { return g_trackFinished.load(); }
+static bool analyzeFile(const char* path, float* sc, float* cf, float* zcr, float* rms) {
+    if (!path || !sc || !cf || !zcr || !rms) return false;
+    ma_decoder decoder;
+    auto config = ma_decoder_config_init(ma_format_f32, 2, 0);
+    ma_decoding_backend_vtable* backends[]{ &g_streamingDecoder };
+    config.ppCustomBackendVTables = backends;
+    config.customBackendCount = 1;
+    if (ma_decoder_init_file(path, &config, &decoder) != MA_SUCCESS) return false;
+    struct Guard { ma_decoder* decoder; ~Guard() { ma_decoder_uninit(decoder); } } guard{&decoder};
+    const auto rate = decoder.outputSampleRate;
+    if (rate < 22050 || rate > 96000) return false;
+    std::vector<float> input(static_cast<size_t>(rate) * 10 * 2);
+    ma_uint64 frames = 0;
+    ma_decoder_read_pcm_frames(&decoder, input.data(), rate * 10, &frames);
+    if (!frames) return false;
+    double l2=0,r2=0,lr=0,peak=0,changes=0; float previous=0;
+    for(size_t i=0;i<frames;++i) {
+        const float l=input[i*2],r=input[i*2+1];
+        l2+=l*l;r2+=r*r;lr+=l*r;peak=(std::max)(peak,static_cast<double>((std::max)(std::abs(l),std::abs(r))));
+        const float m=(l+r)*0.5f; if ((m>=0)!=(previous>=0)) ++changes;previous=m;
+    }
+    *rms=static_cast<float>(std::sqrt((l2+r2)/(2*frames)));
+    *sc=static_cast<float>(lr/(std::sqrt(l2*r2)+1e-12));
+    *cf=*rms>1e-9?static_cast<float>(20*std::log10(peak / *rms)):0;
+    *zcr=static_cast<float>(changes/frames*rate/44100.0);
     return true;
 }
-extern "C" void load_ir_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
-{
-    int maxLen = (lenL > lenR) ? lenL : lenR;
-    if (maxLen <= 0) return;
-
-    float* newIrL = (float*)calloc(maxLen, sizeof(float));
-    float* newIrR = (float*)calloc(maxLen, sizeof(float));
-    float* newHistL = (float*)calloc(maxLen, sizeof(float));
-    float* newHistR = (float*)calloc(maxLen, sizeof(float));
-
-    if (newIrL && newIrR && newHistL && newHistR)
-    {
-        if (irL && lenL > 0) memcpy(newIrL, irL, lenL * sizeof(float));
-        if (irR && lenR > 0) memcpy(newIrR, irR, lenR * sizeof(float));
-
-        
-        auto* freshL = new FFTConvolver();
-        auto* freshR = new FFTConvolver();
-        bool okL = freshL->prepare(newIrL, lenL, g_convolutionNode.blockSize);
-        bool okR = freshR->prepare(newIrR, lenR, g_convolutionNode.blockSize);
-        
-        if(okL && okR) {
-            auto* oldL = g_convolutionNode.convL.exchange(freshL, std::memory_order_acq_rel);
-            auto* oldR = g_convolutionNode.convR.exchange(freshR, std::memory_order_acq_rel);
-            g_convolutionNode.pendingDeleteL = oldL;
-            g_convolutionNode.pendingDeleteR = oldR;
-            g_convolutionNode.deleteCountdown = 10;
-        } else {
-            delete freshL;
-            delete freshR;
-        }
-        free(newIrL);
-        free(newIrR);
-        free(newHistL);
-        free(newHistR);
-
-    }
-    else
-    {
-        if (newIrL) free(newIrL);
-        if (newIrR) free(newIrR);
-        if (newHistL) free(newHistL);
-        if (newHistR) free(newHistR);
-    }
+extern "C" bool analyze_audio_file_cpp(const char* path, float* sc, float* cf, float* zcr, float* rms) {
+    try { return analyzeFile(path,sc,cf,zcr,rms); } catch (...) { return false; }
 }
-
-extern "C" void load_headphone_comp_from_memory_cpp(const float* irL, int lenL, const float* irR, int lenR)
-{
-    int maxLen = (lenL > lenR) ? lenL : lenR;
-    if (maxLen <= 0)
-    {
-        g_headphoneCompNode.enabled.set(false);
-        return;
-    }
-
-    float* newIrL = (float*)calloc(maxLen, sizeof(float));
-    float* newIrR = (float*)calloc(maxLen, sizeof(float));
-    if (!newIrL || !newIrR)
-    {
-        if (newIrL) free(newIrL);
-        if (newIrR) free(newIrR);
-        return;
-    }
-
-    if (irL && lenL > 0) memcpy(newIrL, irL, lenL * sizeof(float));
-    if (irR && lenR > 0) memcpy(newIrR, irR, lenR * sizeof(float));
-
-    auto* freshL = new FFTConvolver();
-    auto* freshR = new FFTConvolver();
-    bool okL = freshL->prepare(newIrL, maxLen, g_headphoneCompNode.blockSize);
-    bool okR = freshR->prepare(newIrR, maxLen, g_headphoneCompNode.blockSize);
-
-    if (okL && okR)
-    {
-        auto* oldL = g_headphoneCompNode.convL.exchange(freshL, std::memory_order_acq_rel);
-        auto* oldR = g_headphoneCompNode.convR.exchange(freshR, std::memory_order_acq_rel);
-        g_headphoneCompNode.pendingDeleteL = oldL;
-        g_headphoneCompNode.pendingDeleteR = oldR;
-        g_headphoneCompNode.deleteCountdown = 10;
-        g_headphoneCompNode.enabled.set(true);
-    }
-    else
-    {
-        delete freshL;
-        delete freshR;
-    }
-    free(newIrL);
-    free(newIrR);
+extern "C" bool analyze_audio(float* sc, float* cf, float* zcr, float* rms) {
+    try {
+    std::string path;
+    { std::lock_guard<std::recursive_mutex> owner(g_audioMutex); path = playbackPath; }
+    return !path.empty() && analyze_audio_file_cpp(path.c_str(),sc,cf,zcr,rms);
+    } catch (...) { return false; }
+}
+extern "C" void load_ir_from_memory_cpp(const float* l,int nL,const float* r,int nR) {
+    std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
+    try { installIR(l,nL,r,nR,false); } catch (...) {}
+}
+extern "C" void load_headphone_comp_from_memory_cpp(const float* l,int nL,const float* r,int nR) {
+    std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
+    try { installIR(l,nL,r,nR,true); } catch (...) {}
 }

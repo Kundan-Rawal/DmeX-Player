@@ -22,6 +22,7 @@ public:
         if (!setup) return false;
 
         scratch = (float*)pffft_aligned_malloc(sizeof(float) * N);
+        if (!scratch) { destroy(); return false; }
 
         // ---- Pre-transform the IR partitions ----
         H.resize((size_t)P * N);
@@ -104,6 +105,12 @@ struct BlockAdapter {
         inBuf.assign(B * ch, 0.0f);
         outBuf.assign(B * ch, 0.0f);
         fill = 0;
+    }
+
+    void reset() {
+        fill = 0;
+        std::fill(inBuf.begin(), inBuf.end(), 0.0f);
+        std::fill(outBuf.begin(), outBuf.end(), 0.0f);
     }
 
     template <typename Fn>

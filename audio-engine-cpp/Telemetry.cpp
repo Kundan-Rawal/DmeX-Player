@@ -1,5 +1,7 @@
 #include "Telemetry.h"
 #include <cmath>
+#include <algorithm>
+#include <cstring>
 
 
 // Define the global atomics we declared in the header
@@ -9,13 +11,9 @@ std::atomic<float> g_mLvl{0.0f}, g_mPan{0.0f}, g_mPhase{1.0f};
 std::atomic<float> g_tLvl{0.0f}, g_tPan{0.0f}, g_tPhase{1.0f};
 std::atomic<float> g_limiterGR{1.0f};
 
-static void meter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+void meter_analyze(MeterNode* p, const float* pIn, ma_uint32 fc)
 {
-    MeterNode *p = (MeterNode *)pNode;
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
+    if (!p || !pIn || !fc) return;
 
     float bL2 = 0, bR2 = 0, bLR = 0, bPk = 0;
     float mL2 = 0, mR2 = 0, mLR = 0, mPk = 0;
@@ -25,7 +23,6 @@ static void meter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *p
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
-        pOut[i * 2] = L; pOut[i * 2 + 1] = R;
 
         float bL, nonLowL, bR, nonLowR;
         p->crossLowL.process(L, bL, nonLowL);
@@ -75,5 +72,21 @@ static void meter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *p
     calcSpatial(bL2, bR2, bLR, g_bPan, nullptr);
     calcSpatial(mL2, mR2, mLR, g_mPan, &g_mPhase);
     calcSpatial(tL2, tR2, tLR, g_tPan, &g_tPhase);
+}
+void meter_reset(MeterNode* p) {
+    p->crossLowL.reset(); p->crossLowR.reset();
+    p->crossHighL.reset(); p->crossHighR.reset();
+    p->lowL = p->lowR = p->highStateL = p->highStateR = 0;
+    g_audioLevel.store(0); g_bLvl.store(0); g_mLvl.store(0); g_tLvl.store(0);
+    g_bPan.store(0); g_mPan.store(0); g_tPan.store(0);
+    g_mPhase.store(1); g_tPhase.store(1);
+}
+static void meter_process(ma_node* pNode, const float** ppFramesIn, ma_uint32* pFrameCountIn,
+                          float** ppFramesOut, ma_uint32* pFrameCountOut) {
+    const ma_uint32 frames = (std::min)(*pFrameCountIn, *pFrameCountOut);
+    *pFrameCountIn = *pFrameCountOut = frames;
+    if (ppFramesIn[0] != ppFramesOut[0])
+        std::memcpy(ppFramesOut[0], ppFramesIn[0], frames * 2 * sizeof(float));
+    meter_analyze(reinterpret_cast<MeterNode*>(pNode), ppFramesIn[0], frames);
 }
 ma_node_vtable g_meter_vtable = {meter_process, NULL, 1, 1, 0};

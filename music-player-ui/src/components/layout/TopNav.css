@@ -1,0 +1,6 @@
+.samsung-nav-tabs.mobile-scroll-nav { position:relative; display:flex !important; align-items:center !important; justify-content:flex-start !important; gap:24px !important; width:100%; padding:12px 0 20px !important; overflow-x:auto !important; overflow-y:hidden; scroll-snap-type:x mandatory !important; scroll-behavior:smooth; overscroll-behavior-x:contain; scrollbar-width:none; touch-action:pan-x; }
+.samsung-nav-tabs.mobile-scroll-nav::-webkit-scrollbar { display:none; }
+.samsung-nav-tabs.mobile-scroll-nav .nav-spacer { flex:0 0 auto; height:1px; }
+.samsung-nav-tabs.mobile-scroll-nav button { flex:0 0 auto; white-space:nowrap; font-size:18px !important; min-height:44px; padding:6px 0 !important; scroll-snap-align:center; transform-origin:center; transition:color .15s ease !important; letter-spacing:0; }
+.samsung-nav-tabs.mobile-scroll-nav button:focus-visible { outline:2px solid var(--theme-color); outline-offset:2px; border-radius:4px; }
+@media(prefers-reduced-motion:reduce) { .samsung-nav-tabs.mobile-scroll-nav { scroll-behavior:auto; } }

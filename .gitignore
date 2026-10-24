@@ -10,6 +10,7 @@ src-tauri/Cargo.lock
 
 # C++ Engine Build Artifacts
 audio-engine-cpp/build/
+audio-engine-cpp/build-*/
 audio-engine-cpp/.vs/
 audio-engine-cpp/out/
 audio-engine-cpp/bin/*.exe
@@ -17,8 +18,16 @@ audio-engine-cpp/bin/*.pdb
 audio-engine-cpp/bin/*.ilk
 
 # OS generated files
+__pycache__/
 .DS_Store
 Thumbs.db
 
 # User specific database
 library.json
+music-player-ui/tests/artifacts/
+
+# Local Android signing material
+*.jks
+*.keystore
+**/keystore.properties
+**/key.properties

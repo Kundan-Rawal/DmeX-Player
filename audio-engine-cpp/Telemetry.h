@@ -19,6 +19,10 @@ struct MeterNode {
 
 extern ma_node_vtable g_meter_vtable;
 
+// Observation only: never writes to the rendered stereo samples.
+void meter_analyze(MeterNode* meter, const float* samples, ma_uint32 frames);
+void meter_reset(MeterNode* meter);
+
 // Functions to expose data to React
 extern "C" {
     void get_audio_metrics(float *out_data, float *out_level);

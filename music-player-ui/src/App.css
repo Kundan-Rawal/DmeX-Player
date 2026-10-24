@@ -590,6 +590,10 @@ body {
 
 /* ─── SCAN PROGRESS TOAST ──────────────────────────────────────── */
 .scan-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   background: color-mix(in srgb, var(--theme-color) 15%, var(--bg-surface));
   border: 1px solid color-mix(in srgb, var(--theme-color) 30%, transparent);
   color: var(--text-primary);

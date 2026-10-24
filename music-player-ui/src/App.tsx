@@ -5,29 +5,34 @@ import { readFile, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 // import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
-import * as mm from "music-metadata";
+import { extractTrackMetadata } from './services/metadata';
 import { FastAverageColor } from "fast-average-color";
 import "./App.css";
 // import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useLibraryScanner } from './hooks/useLibraryScanner';
 import { AlbumGalleryView } from './views/AlbumGalleryView';
 import { ArtistGalleryView } from './views/ArtistGalleryView';
 import { CloudFetchView } from './views/CloudFetchView';
 import { vaultGet, vaultSet, initVault } from './services/vault';
-import { splitArtists } from './utils/artistEngine';
+import { splitArtists, artistCacheKey, artistIdentity } from './utils/artistEngine';
 import { formatTime, parseLRC } from './utils/formatters';
 import { PlaylistGalleryView } from './views/PlaylistGalleryView';
-import { PROFILES, FIR_GAINS, classifyAudio, applyTaste, AudioProfile } from './config/audio';
-import { isHexDark, getPalette, getMime, stripExt } from './utils/helpers';
-import { FolderModal, PlaylistPopup } from './modals/modals';
+import { PROFILES, classifyAudio, AudioProfile } from './config/audio';
+import { isHexDark, getPalette, stripExt } from './utils/helpers';
+import { FolderModal, PlaylistPopup, SettingsModal } from './modals/modals';
 import { VirtualList, DraggablePlaylistView } from './components/library/TrackLists';
 import { TopNav } from './components/layout/TopNav';
 import { MiniPlayer } from './components/player/MiniPlayer';
 import { AmbientBackground } from './components/player/AmbientBackground';
 import { fetchLyricsOnline } from './services/lyricsFetcher';
 
-import { DSPStudio, ExpandedControls, HEADPHONE_MODELS } from './components/player/ExpandedPlayerUI';
+import { DSPStudio, ExpandedControls } from './components/player/ExpandedPlayerUI';
 import { MobileExpandedPlayer } from './components/player/MobileExpandedPlayer';
+import { sendAudioCommand } from './services/audioBridge';
+import { useAudioSettings, PARAM } from './components/player/AudioSettingsContext';
+import { TrackOptions } from './components/player/TrackOptions';
+import { LyricsSearch } from './components/player/LyricsSearch';
+import { X } from 'lucide-react';
+import { DEFAULT_LIBRARY_FILTERS, includeLibraryTrack, LibraryFilters, parseLibraryFilters } from './utils/libraryFilters';
 import { BulkScanner } from './components/library/BulkScanner';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
@@ -64,6 +69,7 @@ const fac = new FastAverageColor();
 // MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
 function App() {
+  const audio = useAudioSettings();
   // const appWindow = getCurrentWindow();
 
   const [isPlaying, setIsPlaying]           = useState(false);
@@ -82,8 +88,8 @@ function App() {
   const [sortMode, setSortMode]             = useState<'TITLE'|'ARTIST'|'ALBUM'|'YEAR'|'DATE_ADDED'>('DATE_ADDED');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
-  const [isProfileActive, setIsProfileActive] = useState(true);
-  const isProfileActiveRef = useRef(true);
+  const [isProfileActive, setIsProfileActive] = useState(false);
+  const isProfileActiveRef = useRef(false);
 
   // CHANGE: Raw search query debounced before filtering.
   // debouncedSearchQuery is what useMemo depends on — it only updates 300ms
@@ -91,6 +97,21 @@ function App() {
   const debouncedSearchQuery = useDebounce(searchQuery, IS_ANDROID ? 300 : 0);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [showFolderModal, setShowFolderModal]   = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(DEFAULT_LIBRARY_FILTERS);
+  const libraryFiltersRef = useRef(libraryFilters);
+  libraryFiltersRef.current = libraryFilters;
+  const visiblePlaylist = useMemo(() => playlist.filter(track => includeLibraryTrack(track, libraryFilters)), [playlist, libraryFilters]);
+  const playablePlaylistRef = useRef(visiblePlaylist);
+  playablePlaylistRef.current = visiblePlaylist;
+  const scanRunning = useRef(false);
+  const metadataFailures = useRef(new Set<string>());
+  const metadataQueuePending = useRef(false);
+  useEffect(() => {
+    invoke<string | null>('get_setting', { key: 'gemini_api_key' }).then(key => setGeminiApiKey(key || '')).catch(console.error);
+    invoke<string | null>('get_setting', { key: 'library_filters' }).then(value => setLibraryFilters(parseLibraryFilters(value))).catch(console.error);
+  }, []);
   const [isEnvDropdownOpen, setIsEnvDropdownOpen] = useState(false);
   const [albumArt, setAlbumArt]             = useState<string | null>(null);
   const [trackTitle, setTrackTitle]         = useState('Ready');
@@ -161,7 +182,12 @@ function App() {
   const [selectedAcousticEnv, setSelectedAcousticEnv] = useState('NONE');
   const [isManualOverride, setIsManualOverride] = useState(false);
   const [isFIRMode, setIsFIRMode]     = useState(false);
-  const [visMode, setVisMode]         = useState<'ORBIT'|'RADAR'>('ORBIT');
+  const [visMode, setVisMode] = useState<'ORBIT'|'RADAR'>(localStorage.getItem('dmex_visualizer') === 'RADAR' ? 'RADAR' : 'ORBIT');
+  useEffect(() => {
+    const changed = (event: Event) => setVisMode((event as CustomEvent).detail === 'RADAR' ? 'RADAR' : 'ORBIT');
+    window.addEventListener('dmex-visualizer', changed);
+    return () => window.removeEventListener('dmex-visualizer', changed);
+  }, []);
   const [speakerMode, setSpeakerMode] = useState<'NONE'|'LOW'|'MED'|'HIGH'>('NONE');
   const [is9DStageOn, setIs9DStageOn] = useState(() => {
     return localStorage.getItem('dmex_9d_stage') === 'true';
@@ -187,14 +213,13 @@ function App() {
   const selectedHeadphoneModelRef = useRef(selectedHeadphoneModel);
   useEffect(() => {
     selectedHeadphoneModelRef.current = selectedHeadphoneModel;
-    localStorage.setItem('dmex_headphone_model', selectedHeadphoneModel);
   }, [selectedHeadphoneModel]);
 
   const [isPhoneSpeaker, setIsPhoneSpeaker] = useState(false);
   const isPhoneSpeakerRef = useRef(false);
   useEffect(() => { isPhoneSpeakerRef.current = isPhoneSpeaker; }, [isPhoneSpeaker]);
 
-  const smartTasteRef      = useRef<Taste>('QUALITY');
+  const smartTasteRef      = useRef<Taste>('ORIGINAL');
   const detectedProfileRef = useRef<AudioProfile | null>(null);
   const loadIdRef          = useRef(0);
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
@@ -229,15 +254,6 @@ function App() {
 
 
   const isTransitioningRef = useRef(false);
-    useLibraryScanner(
-      setIsLoading,
-      setScanProgress,
-      setPlaylist,
-      setFavorites,
-      setCustomPlaylists,
-      setIsDarkMode,
-      playlistRef
-    );
 
   
 
@@ -255,22 +271,25 @@ function App() {
   useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
 
   useEffect(() => {
-    if (isPlaying && currentTrack) {
-      const start = Date.now();
-      const path = currentTrack.path;
-      return () => {
-        const elapsed = (Date.now() - start) / 1000;
-        if (elapsed > 1.0) {
-          const listened = Math.floor(elapsed);
-          setPlaylist(prev => {
-            const nextList = prev.map(t => t.path === path ? { ...t, totalSecondsListened: (t.totalSecondsListened || 0) + listened } : t);
-            vaultSet("user_playlist", nextList);
-            return nextList;
-          });
-          invoke('update_play_stats', { path, seconds: listened }).catch(console.error);
-        }
-      };
-    }
+    if (!isPlaying || !currentTrack) return;
+    const path = currentTrack.path;
+    let start = performance.now();
+    const flush = () => {
+      const seconds = Math.floor((performance.now() - start) / 1000);
+      if (seconds <= 0) return;
+      start += seconds * 1000;
+      setPlaylist(prev => prev.map(t => t.path === path ? { ...t, totalSecondsListened: (t.totalSecondsListened || 0) + seconds } : t));
+      invoke('update_play_stats', { path, seconds }).catch(console.error);
+    };
+    const timer = setInterval(flush, 15000);
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flush);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flush);
+      flush();
+    };
   }, [isPlaying, currentTrack?.path]);
 
   useEffect(() => {
@@ -298,25 +317,25 @@ function App() {
   // the favorites array directly in useMemo (cheap reference check) and the
   // O(1) favoritesSet is used inside VirtualList's TrackRow render below.
   const displayedTracks = useMemo(() => {
-    let base = playlist;
+    let base = visiblePlaylist;
 
     // 1. VIEW ROUTING
     if (currentView === 'FAVOURITES') {
-      base = playlist.filter(t => favorites.includes(t.path));
+      base = visiblePlaylist.filter(t => favorites.includes(t.path));
     } else if (currentView === 'BOLLYWOOD') {
-      base = playlist.filter(t => {
+      base = visiblePlaylist.filter(t => {
         const s = `${t.genre||''} ${t.album||''} ${t.path}`.toLowerCase();
         return s.includes('bollywood') || s.includes('hindi') || s.includes('indian');
       });
     } else if (currentView === 'TOPTRACKS') {
-      base = [...playlist].filter(t=>(t.totalSecondsListened||0)>0).sort((a,b)=>(b.totalSecondsListened||0)-(a.totalSecondsListened||0)).slice(0,50);
+      base = [...visiblePlaylist].filter(t=>(t.totalSecondsListened||0)>0).sort((a,b)=>(b.totalSecondsListened||0)-(a.totalSecondsListened||0)).slice(0,50);
     } else if (activePlaylistId) {
       const pl = customPlaylists.find(p=>p.id===activePlaylistId);
-      if (pl) base = pl.trackPaths.map(path=>playlist.find(t=>t.path===path)).filter((t):t is Track=>t!==undefined);
+      if (pl) base = pl.trackPaths.map(path=>visiblePlaylist.find(t=>t.path===path)).filter((t):t is Track=>t!==undefined);
     } else if (activeAlbumName) {
-      base = playlist.filter(t => (t.album || 'Unknown Album') === activeAlbumName);
+      base = visiblePlaylist.filter(t => (t.album || 'Unknown Album') === activeAlbumName);
     } else if (activeArtistName) {
-      base = playlist.filter(t => splitArtists(t.artist || 'Unknown Artist').includes(activeArtistName));
+      base = visiblePlaylist.filter(t => splitArtists(t.artist || 'Unknown Artist').some(name => artistIdentity(name) === artistIdentity(activeArtistName)));
     }
 
     // 2. THE SEARCH ENGINE
@@ -340,7 +359,7 @@ function App() {
       }
       return 0;
     });
-  }, [playlist, currentView, favorites, customPlaylists, debouncedSearchQuery, sortMode, activePlaylistId, activeAlbumName, activeArtistName]);
+  }, [visiblePlaylist, currentView, favorites, customPlaylists, debouncedSearchQuery, sortMode, activePlaylistId, activeAlbumName, activeArtistName]);
 
 
   // CHANGE: favorites → Set<string>, memoized.
@@ -351,28 +370,10 @@ function App() {
   const stateRefs = useRef({ displayedTracks, currentTrack });
   useEffect(() => { stateRefs.current = { displayedTracks, currentTrack }; }, [displayedTracks, currentTrack]);
 
-  const writeToEngine = useCallback(async (cmd:string) => {
-    try { await invoke('audio_command', { cmd: cmd.trim() }); } catch (_) {}
-  }, []);
+  const writeToEngine = useCallback(sendAudioCommand, []);
 
   
-  const applyHeadphoneCorrection = useCallback(async (modelId: string) => {
-    setSelectedHeadphoneModel(modelId);
-    selectedHeadphoneModelRef.current = modelId;
-    if (!modelId || modelId === 'NONE') {
-      await writeToEngine('HEADPHONE_CORRECTION OFF');
-      return;
-    }
-    const model = HEADPHONE_MODELS.find(m => m.id === modelId);
-    if (model && model.path) {
-      try {
-        const physicalPath = await invoke<string>('extract_and_load_ir', { assetPath: model.path });
-        await writeToEngine(`HEADPHONE_CORRECTION ${physicalPath}`);
-      } catch (err) {
-        console.error('Failed to load Headphone Correction file:', err);
-      }
-    }
-  }, [writeToEngine]);
+  const applyHeadphoneCorrection = useCallback((modelId: string) => audio.loadAsset(modelId, true), [audio.loadAsset]);
 
   // 1.1 SETTINGS PERSISTER
   useEffect(() => {
@@ -446,7 +447,10 @@ function App() {
           }
           if (settings.smartTaste !== undefined) { setSmartTaste(settings.smartTaste); smartTasteRef.current = settings.smartTaste; }
           if (settings.isManualOverride !== undefined) setIsManualOverride(settings.isManualOverride);
-          if (settings.visMode !== undefined) setVisMode(settings.visMode);
+          if (!localStorage.getItem('dmex_visualizer') && settings.visMode !== undefined) {
+            setVisMode(settings.visMode); localStorage.setItem('dmex_visualizer', settings.visMode);
+            window.dispatchEvent(new CustomEvent('dmex-visualizer', { detail: settings.visMode }));
+          }
           if (settings.sortMode !== undefined) setSortMode(settings.sortMode);
           if (settings.volume !== undefined) { setVolume(settings.volume); volumeRef.current = settings.volume; }
           if (settings.isPhoneSpeaker !== undefined) { setIsPhoneSpeaker(settings.isPhoneSpeaker); isPhoneSpeakerRef.current = settings.isPhoneSpeaker; }
@@ -456,37 +460,20 @@ function App() {
              setTimeout(async () => {
                  const currentPl = playlistRef.current;
                  const track = currentPl.find((t: any) => t.path === settings.lastTrackPath);
-                 if (track) {
+                 if (track && includeLibraryTrack(track, libraryFiltersRef.current)) {
                      setCurrentTrack(track);
+                     setDuration(track.duration || 0);
                      setTrackTitle(track.name);
                      setTrackArtist(track.artist);
                      setLyrics(track.lyrics?.length ? track.lyrics : []);
+                     setAlbumArt(track.thumb || null);
+                     const storedLyrics = await vaultGet<string>(`lrc_${track.path}`);
+                     if (storedLyrics) setLyrics(parseLRC(storedLyrics));
                      if (track.profile) {
                          const p = PROFILES.find((pr: any) => pr.id === track.profile);
                          if (p) setDetectedProfile(p);
                      }
                      try {
-                         await writeToEngine(`LOAD ${track.path}`);
-                         await writeToEngine(`VOLUME ${settings.volume ?? 1.0}`);
-                         await writeToEngine(`REMASTER ${settings.isRemastered ? 1 : 0}`);
-                         await writeToEngine(`COMPRESS ${settings.isCompressed ? 1 : 0}`);
-                         await writeToEngine(`UPSCALE ${settings.upscaleDrive || 0}`);
-                         await writeToEngine(`WIDEN ${settings.widenWidth || 1.0}`);
-                         await writeToEngine(`3D ${settings.spatialExtra || 0}`);
-                         await writeToEngine(`REVERB ${settings.reverbWet || 0}`);
-                         await writeToEngine(`BASS ${settings.bassLevel ?? 0.25}`);
-                         await writeToEngine(`TREBLE ${settings.trebleLevel ?? 0.0}`);
-                         await writeToEngine(`LIMITER ${settings.speakerMode==='NONE'?0:settings.speakerMode==='LOW'?0.3:settings.speakerMode==='MED'?0.6:1.0}`);
-                         await writeToEngine(`ANDROID_SPEAKER ${settings.isPhoneSpeaker ? 1 : 0}`);
-                         await writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`);
-                         await writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`);
-                         if (selectedHeadphoneModelRef.current && selectedHeadphoneModelRef.current !== 'NONE') {
-                             const hm = HEADPHONE_MODELS.find(h => h.id === selectedHeadphoneModelRef.current);
-                             if (hm && hm.path) {
-                                 const p = await invoke<string>('extract_and_load_ir', { assetPath: hm.path });
-                                 await writeToEngine(`HEADPHONE_CORRECTION ${p}`);
-                             }
-                         }
                          await writeToEngine(`LOAD ${track.path}`);
                      } catch (_) {}
                  }
@@ -543,20 +530,23 @@ function App() {
 
   const handleNext = useCallback(() => {
     const { displayedTracks:list, currentTrack:track } = stateRefs.current;
-    if (!playlistRef.current.length||!track) return;
-    if (repeatModeRef.current==='ONE') { playTrack(track); return; }
+    const library = playablePlaylistRef.current;
+    if (!library.length||!track) return;
+    if (repeatModeRef.current==='ONE' && includeLibraryTrack(track, libraryFiltersRef.current)) { playTrack(track); return; }
     playHistoryRef.current.push(track.path);
     if (isShuffleRef.current&&shuffledQueueRef.current.length>0) {
-      const q=shuffledQueueRef.current,idx=q.indexOf(track.path);
+      const available = new Set(library.map(t => t.path));
+      const q=shuffledQueueRef.current.filter(path => available.has(path)),idx=q.indexOf(track.path);
+      if (!q.length) return;
       let nextPath=q[0];
       if(idx!==-1&&idx+1<q.length) nextPath=q[idx+1];
       else if(repeatModeRef.current!=='ALL'&&idx+1>=q.length) return;
-      const nextTrack=playlistRef.current.find(t=>t.path===nextPath);
+      const nextTrack=library.find(t=>t.path===nextPath);
       if(nextTrack) playTrack(nextTrack);
       return;
     }
     let activeQueue=list,i=activeQueue.findIndex(t=>t.path===track.path);
-    if(i===-1){activeQueue=playlistRef.current;i=activeQueue.findIndex(t=>t.path===track.path);}
+    if(i===-1){activeQueue=library;i=activeQueue.findIndex(t=>t.path===track.path);}
     if(i+1>=activeQueue.length){if(repeatModeRef.current==='ALL') playTrack(activeQueue[0]);}
     else playTrack(activeQueue[i+1]);
   }, []);
@@ -573,25 +563,28 @@ function App() {
       }
 
       try {
-        const m: number[] = await invoke('audio_metrics');
-        const lvl = Math.min(1, (m[10] || 0) * 3.5);
+        const m: { currentTime:number; duration:number; bassLevel:number; bassPan:number; midLevel:number; midPan:number; midPhase:number; trebleLevel:number; treblePan:number; treblePhase:number; audioLevel:number; limiterGain:number; finished:boolean; pausedByDevice:boolean } = await invoke('audio_metrics');
+        if (m.pausedByDevice) { audioLevelRef.current=0; setAudioLevel(0); setIsPlaying(false); return; }
+        const lvl = Math.min(1, (m.audioLevel || 0) * 3.5);
         audioLevelRef.current = lvl;
-        spatialData.current = { bLvl:m[2],bPan:m[3],mLvl:m[4],mPan:m[5],mPhs:m[6],tLvl:m[7],tPan:m[8],tPhs:m[9] };
+        spatialData.current = { bLvl:m.bassLevel,bPan:m.bassPan,mLvl:m.midLevel,mPan:m.midPan,mPhs:m.midPhase,tLvl:m.trebleLevel,tPan:m.treblePan,tPhs:m.treblePhase };
         
         const now = Date.now();
         if (now - lastReactUpdate.current > 250) {
-          if (!isSeekingRef.current) setCurrentTime(m[0]);
-          if (m[1] > 0) setDuration(m[1]);
+          if (!isSeekingRef.current) setCurrentTime(m.currentTime);
+          if (m.duration > 0) setDuration(m.duration);
           setAudioLevel(lvl);
           lastReactUpdate.current = now;
         }
 
-        if (m[11] === 1.0 || (m[1] > 0 && m[1] - m[0] <= 0.2)) {
+        if (m.finished) {
+          setIsPlaying(false);
           if (!isTransitioningRef.current) {
             isTransitioningRef.current = true;
             const currentPath = stateRefs.current.currentTrack?.path;
             if (currentPath && lastCountedTrackRef.current !== currentPath) {
               lastCountedTrackRef.current = currentPath;
+              invoke('record_play', { path: currentPath }).catch(console.error);
               setPlaylist(prev => prev.map(t => t.path === currentPath ? { ...t, playCount: (t.playCount || 0) + 1 } : t));
             }
             handleNext();
@@ -614,6 +607,23 @@ function App() {
 
 
 
+  useEffect(() => {
+    if (!audio.status?.ready) return;
+    const v=audio.values;
+    setBassLevel(v[PARAM.bass]); bassLevelRef.current=v[PARAM.bass];
+    setTrebleLevel(v[PARAM.treble]); trebleLevelRef.current=v[PARAM.treble];
+    setUpscaleDrive(v[PARAM.exciter]); setWidenWidth(v[PARAM.width]);
+    setSpatialExtra(v[PARAM.separation]); setDepthAmount(v[PARAM.depth]); setReverbWet(v[PARAM.reverb]);
+    setIsCompressed(v[PARAM.compressor]>0.5); setVolume(v[PARAM.volume]); volumeRef.current=v[PARAM.volume];
+    setRestorationUpscale(v[PARAM.air]); setRestorationPresence(v[PARAM.vocal]);
+    setIs9DStageOn(v[PARAM.spatial]>0.5); setIs9DBassRoom(v[PARAM.roomBass]>0.5);
+    setIsPhoneSpeaker(v[PARAM.device]===2);
+  }, [audio.status?.ready, audio.values]);
+  useEffect(() => {
+    setSelectedHeadphoneModel(audio.headphone);
+    setSelectedAcousticEnv(audio.environment);
+  }, [audio.headphone, audio.environment]);
+
   const activeLyricIndex = lyrics.findIndex((lyric,i)=>{ const next=lyrics[i+1]; return currentTime>=lyric.time&&(!next||currentTime<next.time); });
   
   useEffect(() => {
@@ -629,64 +639,23 @@ function App() {
     await vaultSet("isDarkMode", next);
   };
 
-  const applySmartSettings = async (profile:AudioProfile, taste:Taste) => {
-    const s = applyTaste(profile.settings, taste);
-    setUpscaleDrive(s.drive);
-    setWidenWidth(s.widen);
-    setSpatialExtra(s.spatial);
-      setDepthAmount(s.depth);
-      await writeToEngine(`DEPTH ${s.depth}`);
-    setReverbWet(s.reverb);
-    setIsCompressed(s.compress);
-    setIsRemastered(s.remaster);
-
-    await writeToEngine(`UPSCALE ${s.drive}`);
-    await writeToEngine(`WIDEN ${s.widen}`);
-    await writeToEngine(`3D ${s.spatial}`);
-    await writeToEngine(`REVERB ${s.reverb}`);
-    await writeToEngine(`COMPRESS ${s.compress ? 1 : 0}`);
-    await writeToEngine(`REMASTER ${s.remaster ? 1 : 0}`);
-
-    // CRITICAL FIX: The True Flat Bypass
-    // FIR_GAINS.DEFAULT is actually [1.50, 0.79, 1.33]. It is a massive V-shape.
-    // If the AI profile is bypassed, we MUST force absolute 1.0s.
-    const baseGains = isProfileActiveRef.current 
-        ? (FIR_GAINS[profile.id] ?? FIR_GAINS.DEFAULT) 
-        : [1.0, 1.0, 1.0];
-    
-    const baseBass = baseGains[0];
-    const baseMid = baseGains[1];
-    const baseTreble = baseGains[2];
-
-    let modB = 0, modM = 0, modT = 0;
-    if (taste === 'QUALITY') {
-      modB = 0.15; modM = 0.05; modT = 0.20; 
-    } else if (taste === 'IMMERSIVE') {
-      modB = 0.25; modM = -0.10; modT = 0.15; 
-    } else if (taste === 'CHILL') {
-      modB = 0.10; modM = 0.15; modT = -0.20; 
-    }
-
-    const finalBass = baseBass + modB;
-    const finalMid = baseMid + modM;
-    const finalTreble = baseTreble + modT;
-
-    setIsFIRMode(true);
-
-    await writeToEngine(`FIRMODE 1`); 
-    await writeToEngine(`FIRGAIN ${finalBass.toFixed(3)} ${finalMid.toFixed(3)} ${finalTreble.toFixed(3)}`);
+  const applySmartSettings = async (_profile:AudioProfile | null, taste:Taste) => {
+    if (audio.status?.bypassAll) return;
+    const neutral = { bass:0, treble:0, exciter:0, width:1, separation:0, depth:0,
+      reverb:0, compressor:0, bassField:0, roomBass:0, vocal:0, air:0, spatial:0, boost:0 };
+    const selected = taste === 'QUALITY' ? { ...neutral, bass:0.25, vocal:0.12 }
+      : taste === 'IMMERSIVE' ? { ...neutral, bass:0.35, spatial:1, separation:0.55, depth:0.4, reverb:0.08 }
+      : taste === 'CHILL' ? { ...neutral, bass:0.15, treble:-1, reverb:0.12 } : neutral;
+    await audio.update(selected);
+    setIsFIRMode(false);
   };
 
-
   const handleTasteChange = async (taste:Taste) => {
+    if (audio.status?.bypassAll) return;
     const newTaste=(smartTaste===taste)?'ORIGINAL':taste;
     setSmartTaste(newTaste);smartTasteRef.current=newTaste;
-    if(isManualOverride){setIsManualOverride(false);setSelectedAcousticEnv('NONE');await writeToEngine(`LOAD_IR `);await writeToEngine(`CONVOLUTION 0.0`);}
-    if(detectedProfileRef.current) await applySmartSettings(detectedProfileRef.current,newTaste);
-    else if(newTaste==='ORIGINAL'){
-      setUpscaleDrive(0);setWidenWidth(1.0);setSpatialExtra(0);setDepthAmount(0);setReverbWet(0);setIsCompressed(false);setIsRemastered(false);
-      await writeToEngine(`UPSCALE 0`);await writeToEngine(`WIDEN 1.0`);await writeToEngine(`3D 0`);await writeToEngine(`REVERB 0`);await writeToEngine(`COMPRESS 0`);await writeToEngine(`REMASTER 0`);
-    }
+    setIsManualOverride(false);
+    await applySmartSettings(detectedProfileRef.current,newTaste);
   };
 
   const handleToggleShuffle = useCallback((e?:React.MouseEvent) => {
@@ -695,10 +664,10 @@ function App() {
     if(next){
       const {displayedTracks:list,currentTrack:track}=stateRefs.current;
       let activeQueue=list;
-      if(track&&activeQueue.findIndex(t=>t.path===track.path)===-1) activeQueue=playlistRef.current;
+      if(track&&activeQueue.findIndex(t=>t.path===track.path)===-1) activeQueue=playablePlaylistRef.current;
       let paths=activeQueue.map(t=>t.path);
       for(let i=paths.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[paths[i],paths[j]]=[paths[j],paths[i]];}
-      if(track){paths=paths.filter(p=>p!==track.path);paths.unshift(track.path);}
+      if(track && includeLibraryTrack(track, libraryFiltersRef.current)){paths=paths.filter(p=>p!==track.path);paths.unshift(track.path);}
       setShuffledQueue(paths);shuffledQueueRef.current=paths;
     } else {setShuffledQueue([]);shuffledQueueRef.current=[];}
   }, [isShuffle]);
@@ -712,10 +681,11 @@ function App() {
 
   const handlePrev = useCallback(() => {
     const {displayedTracks:list,currentTrack:track}=stateRefs.current;
-    if(!playlistRef.current.length||!track) return;
-    if(playHistoryRef.current.length>0){const prevPath=playHistoryRef.current.pop();const prevTrack=playlistRef.current.find(t=>t.path===prevPath);if(prevTrack){playTrack(prevTrack);return;}}
+    const library = playablePlaylistRef.current;
+    if(!library.length||!track) return;
+    while(playHistoryRef.current.length>0){const prevPath=playHistoryRef.current.pop();const prevTrack=library.find(t=>t.path===prevPath);if(prevTrack){playTrack(prevTrack);return;}}
     let activeQueue=list,i=activeQueue.findIndex(t=>t.path===track.path);
-    if(i===-1){activeQueue=playlistRef.current;i=activeQueue.findIndex(t=>t.path===track.path);}
+    if(i===-1){activeQueue=library;i=activeQueue.findIndex(t=>t.path===track.path);}
     playTrack(activeQueue[(i-1)<0?activeQueue.length-1:i-1]);
   }, []);
 
@@ -736,39 +706,52 @@ function App() {
       .catch(console.error);
   }, [currentView]);
 
-  const scanAndAdd = async (folderPath:string) => {
-    setIsLoading(true); setScanProgress('Scanning…');
-    if(IS_ANDROID){
-      try { await invoke('scan_android_music',{folderPath}); }
-      catch(e){ console.error(e); setIsLoading(false); setScanProgress('Scan failed.'); }
-      return;
-    }
+  const scanAndAdd = async (folderPath: string) => {
+    if (scanRunning.current) return;
+    scanRunning.current = true;
+    setIsLoading(true);
+    setScanProgress('Scanning...');
     try {
-      let filePaths:string[]=[];
-      if(folderPath==='ALL') filePaths=await invoke<string[]>('scan_mobile_audio');
-      else filePaths=await invoke<string[]>('scan_directory',{path:folderPath});
-      if(!filePaths?.length){setScanProgress('No audio files found');setTimeout(()=>setScanProgress(''),2500);return;}
-      const existing=new Set(playlistRef.current.map(t=>t.path));
-      const newTracks:Track[]=filePaths.filter(p=>!existing.has(p)).map(fullPath=>{
-        const fileName=fullPath.split(/[/\\]/).pop()||'Unknown';
-        const cleanName=stripExt(fileName).replace(/9convert\.com\s*-\s*/i,'').replace(/\[PagalWorld\.com\]/i,'').replace(/\(Pagalworld\.mobi\)/i,'').trim();
-        return {name:cleanName,path:fullPath,artist:'Unknown Artist',album:'Unknown Album',year:'-',quality:'-',duration:0};
-      });
-      setScanProgress(`Found ${newTracks.length} new tracks — loading metadata…`);
-      const merged=[...playlistRef.current,...newTracks].sort((a,b)=>a.name.localeCompare(b.name));
+      if (folderPath === 'CUSTOM') {
+        const selected = IS_ANDROID
+          ? await invoke<string | null>('pick_music_folder')
+          : await open({ directory: true, multiple: false });
+        if (!selected || typeof selected !== 'string') { setScanProgress(''); return; }
+        folderPath = selected;
+      }
+      const discovered: Track[] = IS_ANDROID
+        ? (await invoke<Array<{ file_path: string; title: string; artist: string; album: string; duration: number }>>('scan_android_music', { folderPath }))
+            .map(t => ({ path: t.file_path, name: t.title, artist: t.artist, album: t.album, duration: t.duration, metadataLoaded: false }))
+        : (await invoke<string[]>('scan_directory', { path: folderPath })).map(path => ({
+            path, name: stripExt(path.split(/[/\\\\]/).pop() || 'Unknown Title'),
+            artist: 'Unknown Artist', album: 'Unknown Album', duration: 0, metadataLoaded: false
+          }));
+      const known = new Set(playlistRef.current.map(t => t.path));
+      const fresh = discovered.filter(t => { if (known.has(t.path)) return false; known.add(t.path); return true; });
+      // Persist before publishing tracks, so enrichment cannot race a raw insert.
+      for (let offset = 0; offset < fresh.length; offset += 100) {
+        await invoke('add_library_tracks', { tracks: fresh.slice(offset, offset + 100) });
+        setScanProgress(`Adding tracks... ${Math.min(offset + 100, fresh.length)} / ${fresh.length}`);
+      }
+      const importedPaths = new Set(fresh.map(t => t.path));
+      const persisted = fresh.length ? await invoke<Track[]>('fetch_library') : [];
+      const merged = [...playlistRef.current, ...persisted.filter(t => importedPaths.has(t.path))].sort((a, b) => a.name.localeCompare(b.name));
+      playlistRef.current = merged;
       setPlaylist(merged);
-      for(const t of newTracks){try{await invoke('add_to_library',{track:t});}catch(e){console.error(e);}}
-      
-      // RE-FETCH FROM DB TO GET THE TRUE OS DATE ADDED!
-      const freshDbTracks = await invoke<Track[]>('fetch_library');
-      const sortedFresh = [...freshDbTracks].sort((a,b)=>a.name.localeCompare(b.name));
-      setPlaylist(sortedFresh);
-      
-      setTimeout(()=>enrichMetadataInBackground(sortedFresh), 400);
-    } finally { setIsLoading(false); }
+      metadataFailures.current.clear();
+      setScanProgress(fresh.length ? `Found ${fresh.length} new tracks. Loading metadata...` : 'No new tracks found.');
+      await enrichMetadataInBackground(merged);
+    } catch (error) {
+      console.error('Music scan failed:', error);
+      setScanProgress(String(error));
+    } finally {
+      scanRunning.current = false;
+      setIsLoading(false);
+    }
   };
 
   const handleAddFolder = () => {
+    if (!isBooted || isLoading) return;
     if(IS_MOBILE) setShowFolderModal(true);
     else open({directory:true,multiple:false}).then(sel=>{if(sel&&typeof sel==='string') scanAndAdd(sel);});
   };
@@ -776,6 +759,10 @@ function App() {
   // THE NUCLEAR OPTION: Wipe the entire library
   // ====================================================================
   const handleClearLibrary = async () => {
+    if (scanRunning.current || enricherRunning.current) {
+      setScanProgress('Please wait for scanning and metadata loading to finish.');
+      return;
+    }
     if (!confirm("WARNING: Are you absolutely sure you want to wipe your entire library? This will delete all tracks, custom playlists, and play history. This cannot be undone.")) return;
     
     setIsLoading(true);
@@ -786,7 +773,10 @@ function App() {
       // NOTE: You must ensure you have a 'clear_library' command in your Rust backend!
       await invoke('clear_library'); 
     } catch (e) {
-      console.error("Backend clear failed. Wiping frontend state anyway.", e);
+      console.error('Library could not be cleared:', e);
+      setIsLoading(false);
+      setScanProgress('The library could not be cleared. Nothing was removed from this view.');
+      return;
     }
     
     // 1. Halt the music engine
@@ -812,123 +802,52 @@ function App() {
     setScanProgress('');
   };
 
-  const enrichMetadataInBackground = useCallback(async (tracks:Track[]) => {
-    if(enricherRunning.current) return;
-    enricherRunning.current=true;
-    const needsEnrich=tracks.filter(t=>!t.metadataLoaded);
-    if(!needsEnrich.length){enricherRunning.current=false;return;}
-    setScanProgress(`Loading metadata for ${needsEnrich.length} tracks…`);
-    let enriched=0;
-    
-    for(const track of needsEnrich){
-      if(!enricherRunning.current) break;
-      
-      try {
-        let meta;
-        let thumbPath = track.thumb;
-
-        const uniqueString = (meta?.common?.album || track.album || 'unknown') + "_" + (meta?.common?.title || track.name);
-        const safeAlbum = uniqueString.replace(/[^a-z0-9]/gi, '_');
-
-        if (IS_ANDROID) {
-            // ==============================================================
-            // ANDROID ONLY: 256KB buffer, JS ignores images, Rust extracts
-            // ==============================================================
-            const raw = await invoke<string>('read_file_head', { path: track.path, maxBytes: 256000 });
-            const bin = atob(raw);
-            const uint8 = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) uint8[i] = bin.charCodeAt(i);
-            
-            meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) }, { skipCovers: true });
-            
-            if (!thumbPath) {
-                try {
-                    const rustExtractedPath = await invoke<string>('extract_and_cache_art', { path: track.path, safeAlbum: safeAlbum });
-                    if (rustExtractedPath) thumbPath = convertFileSrc(rustExtractedPath);
-                } catch (e) { /* Suppress Symphonia missing feature spam */ }
-            }
-        } else {
-            // ==============================================================
-            // WINDOWS ONLY: 5MB buffer, JS extraction (UNTOUCHED)
-            // ==============================================================
-            const raw = await invoke<string>('read_file_head', { path: track.path, maxBytes: 5242880 });
-            const bin = atob(raw);
-            const uint8 = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) uint8[i] = bin.charCodeAt(i);
-            
-            meta = await mm.parseBuffer(uint8, { mimeType: getMime(track.path) });
-            
-            if (!thumbPath && meta.common.picture?.length) {
-                try {
-                    const pic = meta.common.picture[0];
-                    const ext = pic.format.includes('png') ? 'png' : 'jpg';
-                    const fileName = `art_${safeAlbum}.${ext}`;
-                    
-                    const fullPath = await invoke<string>('save_art_to_cache', { fileName: fileName, data: Array.from(new Uint8Array(pic.data)) });
-                    thumbPath = convertFileSrc(fullPath);
-                } catch (e) { console.error("Rust Disk cache error:", e); }
-            }
-        }
-        
-        // THE SPLIT SCANNER: Check Vault on Android, Disk on PC
-        let localLyrics = track.lyrics || [];
-        try {
-          let lrcContent = null;
-          if (IS_ANDROID) {
-            lrcContent = await vaultGet(`lrc_${track.path}`);
-          } else {
-            const lrcPath = track.path.substring(0, track.path.lastIndexOf('.')) + '.lrc';
-            lrcContent = await readTextFile(lrcPath);
+  const enrichMetadataInBackground = useCallback(async (tracks: Track[]) => {
+    if (enricherRunning.current) { metadataQueuePending.current = true; return; }
+    enricherRunning.current = true;
+    let failed = 0;
+    let completed = 0;
+    try {
+      do {
+        metadataQueuePending.current = false;
+        const pending = tracks.filter(t => !t.metadataLoaded && !metadataFailures.current.has(t.path));
+        for (const track of pending) {
+          try {
+            const native = await extractTrackMetadata(track);
+            let localLyrics = track.lyrics || [];
+            try {
+              const stored = await vaultGet<string>(`lrc_${track.path}`);
+              const text = stored || (!track.path.startsWith('content://') ? await readTextFile(track.path.slice(0, track.path.lastIndexOf('.')) + '.lrc') : null);
+              if (text) localLyrics = parseLRC(text);
+            } catch {}
+            const current = playlistRef.current.find(t => t.path === track.path);
+            if (!current) continue;
+            const updated = { ...current, ...native, lyrics: localLyrics };
+            await invoke('add_to_library', { track: updated });
+            playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updated : t);
+            setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, ...native, lyrics: localLyrics } : t));
+          } catch (error) {
+            failed++;
+            metadataFailures.current.add(track.path);
+            console.error('Metadata unavailable:', track.path, error);
           }
-          
-          if (lrcContent && typeof lrcContent === 'string') {
-            localLyrics = parseLRC(lrcContent);
-          }
-        } catch(e) {}
-          const updatedTrack = {
-          ...track,
-          name: meta.common.title || track.name,
-          artist: meta.common.artist || track.artist,
-          album: meta.common.album || track.album,
-          year: meta.common.year?.toString() || track.year,
-          quality: meta.format.bitrate ? `${Math.round(meta.format.bitrate / 1000)} kbps` : track.quality,
-          duration: meta.format.duration || track.duration,
-          metadataLoaded: true,
-          genre: meta.common.genre?.[0] || track.genre || '',
-          thumb: thumbPath, /* <-- CRITICAL FIX: This was crashing the scanner */
-          lyrics: localLyrics
-        };        
-        
-        setPlaylist(prev => prev.map(t => t.path === track.path ? updatedTrack : t));
-        playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updatedTrack : t);
-        
-        // PREVENT DB SPAM: Save to DB if text changed, OR if we just marked a raw track as loaded
-        if (!track.metadataLoaded || track.name !== updatedTrack.name || track.artist !== updatedTrack.artist || track.album !== updatedTrack.album) {
-            await invoke('add_to_library', { track: updatedTrack });
+          completed++;
+          if (completed % 5 === 0) setScanProgress(`Loading metadata... ${completed} tracks`);
+          await new Promise(resolve => setTimeout(resolve, 15));
         }
-      } catch(err) {
-        console.error(`METADATA CRASH [${track.name}]:`, err);
-        setPlaylist(prev=>prev.map(t=>t.path===track.path?{...t,metadataLoaded:true}:t));
-      }
-      
-      enriched++;
-      if(enriched%3===0) setScanProgress(`Loading metadata… ${Math.round((enriched/needsEnrich.length)*100)}%`);
-      
-      // THE FIX: Do not use requestAnimationFrame! It fires 60 times a second.
-      // We force a 150ms delay between tracks to give the Chromium Garbage Collector 
-      // time to clear the RAM before fetching the next 500KB file.
-      await new Promise(resolve => setTimeout(resolve, 150));
+        tracks = playlistRef.current;
+      } while (metadataQueuePending.current);
+    } finally {
+      enricherRunning.current = false;
+      setScanProgress(failed ? `Metadata unavailable for ${failed} tracks. Scan again to retry.` : '');
     }
-    
-    setScanProgress('');
-    enricherRunning.current=false;
   }, []);
 
-
-  useEffect(()=>{
-    const needsWork=playlist.some(t=>!t.metadataLoaded);
-    if(needsWork&&!enricherRunning.current) setTimeout(()=>enrichMetadataInBackground(playlistRef.current),800);
-  },[playlist.length]);
+  useEffect(() => {
+    if (!playlist.some(t => !t.metadataLoaded && !metadataFailures.current.has(t.path))) return;
+    const timer = setTimeout(() => enrichMetadataInBackground(playlistRef.current), 300);
+    return () => clearTimeout(timer);
+  }, [playlist.length, enrichMetadataInBackground]);
 
   const startBulkCategoryScan = useCallback(async () => {
     if(bulkScanRunning.current) return;
@@ -941,9 +860,7 @@ function App() {
       while(bulkScanPausedRef.current&&bulkScanRunning.current) await new Promise(r=>setTimeout(r,200));
       if(!bulkScanRunning.current) break;
       try{
-        await invoke('audio_command',{cmd:`LOAD ${track.path}`});
-        await new Promise(r=>setTimeout(r,150));
-        const fpLine:string=await invoke('analyze_current_track');
+        const fpLine:string=await invoke('analyze_audio_file', { path: track.path });
         if(fpLine.startsWith("FINGERPRINT ")){
           const p=fpLine.split(' ');
           const prof=classifyAudio(parseFloat(p[1])||0,parseFloat(p[2])||10,parseFloat(p[3])||0.1,parseFloat(p[4])||0.1);
@@ -963,36 +880,15 @@ function App() {
   const stopBulkScan   = useCallback(()=>{bulkScanRunning.current=false;bulkScanPausedRef.current=false;setBulkScanActive(false);setBulkScanPaused(false);},[]);
 
   const playTrack = async (track:Track) => {
-    try { await writeToEngine('STOP'); } catch (_) {}
-    currentTimeRef.current=0;lastCountedTrackRef.current=null;
+    if (!track || !includeLibraryTrack(track, libraryFiltersRef.current)) return;
     const id=++loadIdRef.current;
+    try { await writeToEngine('STOP'); } catch (_) {}
+    if (id!==loadIdRef.current) return;
+    currentTimeRef.current=0;lastCountedTrackRef.current=null;setDuration(track.duration || 0);
     setCurrentTrack(track);setIsPlaying(false);setCurrentTime(0);setTrackTitle(track.name);setTrackArtist(track.artist);
     setDetectedProfile(null);detectedProfileRef.current=null;setLyrics(track.lyrics?.length?track.lyrics:[]);
-    setAlbumArt(prev=>{if(prev) URL.revokeObjectURL(prev);return null;});
+    setAlbumArt(prev=>{if(prev?.startsWith('blob:')) URL.revokeObjectURL(prev);return track.thumb || null;});
     try{
-      await Promise.all([
-        writeToEngine(`VOLUME ${volumeRef.current}`),writeToEngine('REMASTER 0'),writeToEngine('COMPRESS 0'),
-        writeToEngine('UPSCALE 0'),writeToEngine('WIDEN 1.0'),writeToEngine('3D 0'),writeToEngine('REVERB 0'),
-        writeToEngine(`BASS ${bassLevelRef.current}`),
-        writeToEngine(`TREBLE ${trebleLevelRef.current}`),
-        writeToEngine(`LIMITER ${speakerModeRef.current==='NONE'?0:speakerModeRef.current==='LOW'?0.3:speakerModeRef.current==='MED'?0.6:1.0}`),
-        writeToEngine(`FIRGAIN ${FIR_GAINS.DEFAULT[0].toFixed(3)} ${FIR_GAINS.DEFAULT[1].toFixed(3)} ${FIR_GAINS.DEFAULT[2].toFixed(3)}`),
-        writeToEngine(`ANDROID_SPEAKER ${isPhoneSpeakerRef.current ? 1 : 0}`),
-          writeToEngine(`SPEAKER9D ${is9DStageOnRef.current ? 'ON' : 'OFF'}`),
-          writeToEngine(`SPEAKER9D_BASS ${is9DBassRoomRef.current ? 'ROOM' : 'STEREO'}`),
-          (async () => {
-            const hpId = selectedHeadphoneModelRef.current;
-            if (hpId && hpId !== 'NONE') {
-              const hm = HEADPHONE_MODELS.find(h => h.id === hpId);
-              if (hm && hm.path) {
-                try {
-                  const p = await invoke<string>('extract_and_load_ir', { assetPath: hm.path });
-                  await writeToEngine(`HEADPHONE_CORRECTION ${p}`);
-                } catch (_) {}
-              }
-            }
-          })()
-      ]);
       if(id!==loadIdRef.current) return;
       await writeToEngine(`LOAD ${track.path}`);
       if(id!==loadIdRef.current) return;
@@ -1001,113 +897,39 @@ function App() {
       setTimeout(async()=>{
         if(id!==loadIdRef.current) return;
         try{
-          // 1. ELEVATED SCOPE: Declared here so they survive the OS branch
-          let meta;
-          let title = track.name;
-          let artist = track.artist;
-
-          if (IS_ANDROID) {
-              // ==============================================================
-              // ANDROID PIPELINE: 256KB buffer + Rust C++ Extractor
-              // ==============================================================
-              const raw = await invoke<string>('read_file_head', { path: track.path, maxBytes: 256000 });
-              if (id !== loadIdRef.current) return;
-              const bin = atob(raw);
-              const fileData = new Uint8Array(bin.length);
-              for (let i = 0; i < bin.length; i++) fileData[i] = bin.charCodeAt(i);
-
-              meta = await mm.parseBuffer(fileData, { mimeType: getMime(track.path) }, { skipCovers: true });
-              if (id !== loadIdRef.current) return;
-              
-              title = meta.common.title || track.name; 
-              artist = meta.common.artist || track.artist;
-              setTrackTitle(title); setTrackArtist(artist);
-              
-              const uniqueString = (meta.common.album || track.album || 'unknown') + "_" + title;
-              const safeAlbum = uniqueString.replace(/[^a-z0-9]/gi, '_');
-
+          const native = await extractTrackMetadata(track);
+          if (id !== loadIdRef.current) return;
+          const title = native.name;
+          const artist = native.artist;
+          setTrackTitle(title); setTrackArtist(artist);
+          if (native.duration && native.duration > 0) setDuration(native.duration);
+          if (native.thumb) {
+            let image = native.thumb;
+            if (native.artPath) {
               try {
-                  const rustExtractedPath = await invoke<string>('extract_and_cache_art', { path: track.path, safeAlbum: safeAlbum });
-                  if (rustExtractedPath) {
-                      // THE CORS FIX: Read the file natively into a Blob to bypass Canvas security
-                      const imgData = await readFile(rustExtractedPath);
-                      const blob = new Blob([imgData], { type: 'image/jpeg' });
-                      const imgUrl = URL.createObjectURL(blob);
-                      
-                      if(id !== loadIdRef.current) return;
-                      setAlbumArt(imgUrl);
-                      
-                      try{
-                        const [facColor, palette] = await Promise.all([
-                          fac.getColorAsync(imgUrl, { algorithm: 'dominant' }).catch(() => null),
-                          getPalette(imgUrl)
-                        ]);
-                        if(id === loadIdRef.current){
-                          setBlobColors(palette);
-                          const dom = (facColor && !facColor.error) ? facColor.hex : (palette[1] || '#c8222a');
-                          setThemeColor(dom);
-                          setThemeText(isHexDark(dom) ? '#ffffff' : '#111111');
-                        }
-                      }catch(_){}
-                  }
-              } catch(e) { /* Suppress Symphonia missing feature spam */ }
-
-          } else {
-              // ==============================================================
-              // WINDOWS PIPELINE: 5MB buffer + JS extraction (UNTOUCHED)
-              // ==============================================================
-              const raw = await invoke<string>('read_file_head', { path: track.path, maxBytes: 5242880 });
-              if (id !== loadIdRef.current) return;
-              const bin = atob(raw);
-              const fileData = new Uint8Array(bin.length);
-              for (let i = 0; i < bin.length; i++) fileData[i] = bin.charCodeAt(i);
-
-              meta = await mm.parseBuffer(fileData, { mimeType: getMime(track.path) });
-              if (id !== loadIdRef.current) return;
-              
-              title = meta.common.title || track.name; 
-              artist = meta.common.artist || track.artist;
-              setTrackTitle(title); setTrackArtist(artist);
-              
-              if(meta.common.picture?.length){
-                const pic = meta.common.picture[0];
-                const uniqueString = (meta.common.album || track.album || 'unknown') + "_" + title;
-                const safeAlbum = uniqueString.replace(/[^a-z0-9]/gi, '_');
-                const ext = pic.format.includes('png') ? 'png' : 'jpg';
-                const fileName = `art_${safeAlbum}.${ext}`;
-                
-                try {
-                    await invoke<string>('save_art_to_cache', { fileName: fileName, data: Array.from(new Uint8Array(pic.data)) });
-                } catch(e) { console.error("Windows disk cache failed:", e); }
-                
-                const blob = new Blob([new Uint8Array(pic.data)], { type: pic.format || 'image/jpeg' });
-                const imgUrl = URL.createObjectURL(blob);
-                if(id !== loadIdRef.current) return;
-                
-                setAlbumArt(imgUrl);
-                
-                try{
-                  const [facColor, palette] = await Promise.all([
-                    fac.getColorAsync(imgUrl, { algorithm: 'dominant' }).catch(() => null),
-                    getPalette(imgUrl)
-                  ]);
-                  if(id === loadIdRef.current){
-                    setBlobColors(palette);
-                    const dom = (facColor && !facColor.error) ? facColor.hex : (palette[1] || '#c8222a');
-                    setThemeColor(dom);
-                    setThemeText(isHexDark(dom) ? '#ffffff' : '#111111');
-                  }
-                }catch(_){}
+                const bytes = await readFile(native.artPath);
+                const type = native.artPath.endsWith('.png') ? 'image/png' : native.artPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+                image = URL.createObjectURL(new Blob([bytes], { type }));
+              } catch {}
+            }
+            if (id !== loadIdRef.current) { if (image.startsWith('blob:')) URL.revokeObjectURL(image); return; }
+            setAlbumArt(image);
+            try {
+              const color = await fac.getColorAsync(image, { algorithm: 'dominant' });
+              if (id === loadIdRef.current && !color.error) {
+                setThemeColor(color.hex); setThemeText(isHexDark(color.hex) ? '#ffffff' : '#111111');
+                const palette = await getPalette(image);
+                if (id === loadIdRef.current) setBlobColors(palette);
               }
+            } catch {}
           }
 
 
           // 2. SHARED LOGIC: LRC Loader and DB Sync (Uses elevated title/artist)
           try {
             let lrcText = null;
-            if (IS_ANDROID) {
-              lrcText = await vaultGet(`lrc_${track.path}`);
-            } else {
+            lrcText = await vaultGet(`lrc_${track.path}`);
+            if (!lrcText && !track.path.startsWith('content://')) {
               const lrcPath = track.path.substring(0, track.path.lastIndexOf('.')) + '.lrc';
               lrcText = await readTextFile(lrcPath);
             }
@@ -1116,18 +938,19 @@ function App() {
             }
           } catch (_) {}
           
-          if(title!==track.name||artist!==track.artist||(meta.format.duration&&meta.format.duration!==track.duration)){
-            const upd:Track={...track,name:title,artist,album:meta.common.album||track.album,year:meta.common.year?.toString()||track.year,quality:meta.format.bitrate?`${Math.round(meta.format.bitrate/1000)} kbps`:track.quality,duration:meta.format.duration||track.duration, thumb: track.thumb};
-            setPlaylist(playlistRef.current.map(t=>t.path===track.path?upd:t));
-            invoke('add_to_library', { track: upd }).catch(console.error);
-          }
+          if (id !== loadIdRef.current) return;
+          const current = playlistRef.current.find(t => t.path === track.path) || track;
+          const updated = { ...current, ...native };
+          playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updated : t);
+          setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, ...native } : t));
+          await invoke('add_to_library', { track: updated });
         } catch(err) {
             console.error(`GLOBAL METADATA CRASH:`, err);
         }
       },300);
 
       const cachedProfile=track.profile?PROFILES.find(p=>p.id===track.profile):null;
-      if(cachedProfile){setDetectedProfile(cachedProfile);detectedProfileRef.current=cachedProfile;await applySmartSettings(cachedProfile,smartTasteRef.current);}
+      if(cachedProfile){setDetectedProfile(cachedProfile);detectedProfileRef.current=cachedProfile;}
       else{setTimeout(async()=>{
         if(id!==loadIdRef.current) return;setIsAnalyzing(true);
         try{
@@ -1135,23 +958,24 @@ function App() {
           if(fpLine.startsWith("FINGERPRINT ")){
             const parts=fpLine.split(' ');
             const profile=classifyAudio(parseFloat(parts[1])||0,parseFloat(parts[2])||10,parseFloat(parts[3])||0.1,parseFloat(parts[4])||0.1);
-            setDetectedProfile(profile);detectedProfileRef.current=profile;await applySmartSettings(profile,smartTasteRef.current);
-            const upd={...track,profile:profile.id};const nl=playlistRef.current.map(t=>t.path===track.path?upd:t);setPlaylist(nl);
+            setDetectedProfile(profile);detectedProfileRef.current=profile;
+            const nl=playlistRef.current.map(t=>t.path===track.path?{...t,profile:profile.id}:t);setPlaylist(nl);
+            await invoke('update_profile', { path: track.path, profile: profile.id });
             vaultSet("user_playlist", nl);          }
         }catch(_){}finally{setIsAnalyzing(false);}
       },2000);}
-    }catch(_){if(id===loadIdRef.current){try{await writeToEngine(`LOAD ${track.path}`);await writeToEngine('PLAY');setIsPlaying(true);}catch(_){}}}
+    }catch(error){if(id===loadIdRef.current) setIsPlaying(false); console.error('Track playback failed:', error);}
   };
-//AIzaSyAoOyi6NwaoVzcSIplFsTk3zHopfCl0WWg
 
   const finalizeLyrics = async (track: Track, lrc: string) => {
     const parsed = parseLRC(lrc);
-    setLyrics(parsed);
+    if (!parsed.length) throw new Error('No valid synced lyrics received');
+    if (stateRefs.current.currentTrack?.path === track.path) setLyrics(parsed);
     setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, lyrics: parsed } : t));
 
     try {
-      if (IS_ANDROID) {
-        await vaultSet(`lrc_${track.path}`, lrc);
+      await vaultSet(`lrc_${track.path}`, lrc);
+      if (IS_ANDROID || track.path.startsWith('content://')) {
         console.log(`%c[Persistence] Lyrics vaulted for: ${track.name}`, "color: #ffeb3b;");
       }else {
         // DESKTOP: Create the physical .lrc sidecar file
@@ -1170,6 +994,7 @@ function App() {
   
   const createPlaylist = async (name: string) => {
     const newPl: CustomPlaylist = { id: Date.now().toString(), name, trackPaths: [] };
+    await invoke('save_playlist', { playlist: newPl });
     const updated = [...customPlaylists, newPl];
     setCustomPlaylists(updated);
     await vaultSet("user_playlists", updated);
@@ -1177,6 +1002,7 @@ function App() {
 
   const deletePlaylist = async (id: string) => {
     if (!confirm("Delete this playlist?")) return;
+    await invoke('delete_playlist', { id });
     const updated = customPlaylists.filter(pl => pl.id !== id);
     setCustomPlaylists(updated);
     await vaultSet("user_playlists", updated);
@@ -1187,6 +1013,8 @@ function App() {
 
   const addToPlaylist = async (playlistId:string) => {
     const updated=customPlaylists.map(pl=>pl.id===playlistId?{...pl,trackPaths:[...pl.trackPaths,...playlistModalTracks.filter(p=>!pl.trackPaths.includes(p))]}:pl);
+    const target = updated.find(p => p.id === playlistId);
+    if (target) await invoke('save_playlist', { playlist: target });
     setCustomPlaylists(updated);setPlaylistModalTracks([]);setIsSelectionMode(false);setSelectedTracks(new Set());
     await vaultSet("user_playlists", updated);
   };
@@ -1207,7 +1035,7 @@ function App() {
     });
   }, []);
   const handlePlayPause = async () => {
-    try{if(isPlaying){await writeToEngine('PAUSE');setIsPlaying(false);}else{await writeToEngine('PLAY');setIsPlaying(true);}}catch(_){}
+    try{if(isPlaying){await writeToEngine('PAUSE');setIsPlaying(false);}else{await writeToEngine('PLAY_USER');setIsPlaying(true);}}catch(_){}
   };
   const isCurrentFavorite = currentTrack?favorites.includes(currentTrack.path):false;
 
@@ -1257,12 +1085,12 @@ function App() {
 
   const safeNavView = currentView.startsWith('ALBUM_') ? 'ALBUMS' : 
                       currentView.startsWith('ARTIST_') ? 'ARTIST' :
-                      (currentView.startsWith('PLAYLIST_') || currentView === 'FAVOURITES' || currentView === 'TOPTRACKS') ? 'PLAYLIST_GALLERY' : 
+                      currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' :
                       currentView;
 
   // MASSIVE HEADER RESOLVER
   const headerInfo = useMemo(() => {
-    const getSafeName = (name: string) => name.replace(/[^a-zA-Z0-9]/g, '_');
+    const getSafeName = artistCacheKey;
     if (currentView === 'FAVOURITES') return { type: 'FAVOURITES', title: 'Favourite Tracks', subtitle: `${displayedTracks.length} tracks`, isCircle: false, image: null, isMassive: true };
     if (currentView === 'TOPTRACKS') return { type: 'MOST PLAYED', title: 'Top Ranked Tracks', subtitle: `${displayedTracks.length} tracks by listen time`, isCircle: false, image: null, isMassive: true };
     if (activeArtistName) {
@@ -1290,7 +1118,7 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // 1. Ignore if typing in Search Bar or any input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLElement && (e.target.closest('input,textarea,select,button,[contenteditable="true"]'))) return;
       if (e.repeat) return; // Prevent OS auto-repeat from spamming timeouts
 
       switch(e.key.toLowerCase()) {
@@ -1447,6 +1275,13 @@ function App() {
 
   return (
     <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
+      {audio.error && <div className="audio-global-error" role="alert">{audio.error}</div>}
+      {showSettings && <SettingsModal apiKey={geminiApiKey} setApiKey={setGeminiApiKey} filters={libraryFilters} onClose={() => setShowSettings(false)} onSave={async filters => {
+        await invoke('set_setting', { key: 'gemini_api_key', value: geminiApiKey.trim() });
+        await invoke('set_setting', { key: 'library_filters', value: JSON.stringify(filters) });
+        setLibraryFilters(filters);
+        setShowSettings(false);
+      }} />}
       
       {showFolderModal&&<FolderModal onClose={()=>setShowFolderModal(false)} onScan={scanAndAdd}/>}
       {playlistModalTracks.length>0&&<PlaylistPopup playlists={customPlaylists} newPlaylistName={newPlaylistName} setNewPlaylistName={setNewPlaylistName} onClose={()=>setPlaylistModalTracks([])} onCreate={createPlaylist} onAdd={id=>addToPlaylist(id)}/>}
@@ -1525,10 +1360,10 @@ function App() {
           currentView={safeNavView} setCurrentView={setCurrentView}
           handleAddFolder={handleAddFolder} 
           handleClearLibrary={handleClearLibrary} 
-          isLoading={isLoading}
+          isLoading={!isBooted || isLoading}
           mobileSearchOpen={mobileSearchOpen} setMobileSearchOpen={setMobileSearchOpen}
           toggleTheme={toggleTheme}
-          onOpenSettings={() => {}}
+          onOpenSettings={() => setShowSettings(true)}
         />
         <BulkScanner 
           playlist={playlist} bulkScanActive={bulkScanActive} bulkScanPaused={bulkScanPaused}
@@ -1540,7 +1375,8 @@ function App() {
         {scanProgress && (
           <div className="scan-progress fade-in" style={{ zIndex: 100 }}>
             <span className="dot-pulse" style={{ marginRight: '8px', display: 'inline-block' }}></span>
-            {scanProgress}
+            <span role="status" style={{ flex: 1, minWidth: 0 }}>{scanProgress}</span>
+            <button type="button" aria-label="Dismiss scan message" onClick={() => setScanProgress('')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '36px', height: '36px', border: 0, borderRadius: '6px', background: 'transparent', color: 'inherit', cursor: 'pointer' }}><X size={18} /></button>
           </div>
         )}
 
@@ -1606,14 +1442,14 @@ function App() {
               />
             ) : currentView === 'PLAYLIST_GALLERY' ? (
               <PlaylistGalleryView 
-                playlist={playlist} favoritesSet={favoritesSet} customPlaylists={customPlaylists} albumArt={albumArt}
+                playlist={visiblePlaylist} favoritesSet={favoritesSet} customPlaylists={customPlaylists} albumArt={albumArt}
                 setCurrentView={setCurrentView} createPlaylist={createPlaylist} deletePlaylist={deletePlaylist}
               />
             ) : currentView === 'ARTIST' ? (
-              <ArtistGalleryView playlist={playlist} setCurrentView={setCurrentView} />
+              <ArtistGalleryView playlist={visiblePlaylist} setCurrentView={setCurrentView} />
             ) : currentView === 'ALBUMS' ? (
               /* 2. THE NEW BENTO BOX ALBUM GRID */
-              <AlbumGalleryView playlist={playlist} setCurrentView={setCurrentView}/>
+              <AlbumGalleryView playlist={visiblePlaylist} setCurrentView={setCurrentView}/>
               
             ) : (
               <>
@@ -1873,7 +1709,7 @@ function App() {
             willChange: 'opacity, transform',
             zIndex: 3000
           }}>
-            {IS_ANDROID ? (
+            {IS_MOBILE ? (
               <MobileExpandedPlayer 
                 is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
                 is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
@@ -1923,6 +1759,7 @@ function App() {
                 onSeekDrag={handleSeekDrag}
                 onSeekCommit={handleSeekCommit}
                 onTasteChange={handleTasteChange}
+                lyricsSearch={currentTrack ? <LyricsSearch key={currentTrack.path} track={playlist.find(t => t.path === currentTrack.path) || currentTrack} onLyrics={finalizeLyrics} /> : undefined}
                 onFetchLyrics={async () => {
                   if (currentTrack) {
                     const lrc = await fetchLyricsOnline(currentTrack, setScanProgress);
@@ -1977,155 +1814,16 @@ function App() {
                       }
                     }}
                   >
-                    {React.createElement(detectedProfile.icon as any, {size: 16})} {detectedProfile.label} {!isProfileActive && '(Raw)'}
+                    {React.createElement(detectedProfile.icon as any, {size: 16})} {detectedProfile.label} {!isProfileActive && '(Manual)'}
                   </div>
                 )}
                 <button className={`ep-icon-btn ${showOptionsMenu?'active-glow':''}`} onClick={e=>{e.stopPropagation();setShowOptionsMenu(!showOptionsMenu);}}>⋮</button>
                 {showOptionsMenu&&(
                   <>
                     <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:99}} onClick={e=>{e.stopPropagation();setShowOptionsMenu(false);}}/>
-                    <div className="glass-options-menu fade-in" onClick={e=>e.stopPropagation()}>
-                      <div className="glass-menu-header">Track Options</div>
-                      <div className="glass-menu-section">
-                        <div className="glass-label-row"><span>Subwoofer Bass</span><span style={{color:'var(--theme-color)',fontWeight:600}}>{Math.round(bassLevel*100)}%</span></div>
-                        <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={bassLevel} onChange={e=>{const v=parseFloat(e.target.value);setBassLevel(v);bassLevelRef.current=v;writeToEngine(`BASS ${v}`);}}/>
-                        <div className="glass-label-row" style={{marginTop: 10}}><span>Crystal Treble</span><span style={{color:'var(--theme-color)',fontWeight:600}}>{Math.round(trebleLevel*100)}%</span></div>
-                        <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={trebleLevel} onChange={e=>{const v=parseFloat(e.target.value);setTrebleLevel(v);trebleLevelRef.current=v;writeToEngine(`TREBLE ${v}`);}}/>
-                      </div>
-                      <div className="glass-menu-section" style={{marginTop:14}}>
-                        <div className="glass-label-row" style={{marginBottom:10}}><span>Speaker Boost</span><span style={{color:speakerMode==='NONE'?'var(--text-secondary)':speakerMode==='LOW'?'#4fc3f7':speakerMode==='MED'?'#ff9800':'#ff3b30',fontWeight:600,fontSize:'0.8rem',transition:'color 0.2s'}}>{speakerMode==='NONE'?'Off':speakerMode==='LOW'?'30%':speakerMode==='MED'?'60%':'100%'}</span></div>
-                        <div className="glass-boost-grid">
-                          {(['NONE','LOW','MED','HIGH'] as const).map(mode=>(
-                            <button key={mode} className={`glass-boost-btn ${speakerMode===mode?'active':''}`}
-                              style={speakerMode===mode?{background:mode==='NONE'?'rgba(255,255,255,0.18)':mode==='LOW'?'rgba(79,195,247,0.25)':mode==='MED'?'rgba(255,152,0,0.25)':'rgba(255,59,48,0.28)',borderColor:mode==='NONE'?'rgba(255,255,255,0.35)':mode==='LOW'?'rgba(79,195,247,0.5)':mode==='MED'?'rgba(255,152,0,0.5)':'rgba(255,59,48,0.55)',color:mode==='NONE'?'#fff':mode==='LOW'?'#4fc3f7':mode==='MED'?'#ff9800':'#ff3b30'}:undefined}
-                              onClick={()=>{setSpeakerMode(mode);writeToEngine(`LIMITER ${mode==='NONE'?0:mode==='LOW'?0.3:mode==='MED'?0.6:1.0}`);}}
-                            >{mode==='NONE'?'None':mode==='LOW'?'Low':mode==='MED'?'Med':'High'}</button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="glass-menu-section" style={{marginTop:14}}>
-                        <div className="glass-label-row" style={{marginBottom:10}}><span>Background Visualizer</span><span style={{color:'var(--text-secondary)',fontSize:'0.75rem'}}>{visMode==='ORBIT'?'Lava Lamps': (IS_ANDROID ? '🎱 8B Fast' : '📡 Spatial Radar')}</span></div>
-                        <div className="glass-boost-grid">
-                          <button className={`glass-boost-btn ${visMode==='ORBIT'?'active':''}`} style={visMode==='ORBIT'?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined} onClick={()=>setVisMode('ORBIT')}>🫧 Orbit</button>
-                          <button className={`glass-boost-btn ${visMode==='RADAR'?'active':''}`} style={visMode==='RADAR'?{background:'rgba(200,34,42,0.25)',borderColor:'var(--theme-color)',color:'var(--theme-color)'}:undefined} onClick={()=>setVisMode('RADAR')}>{IS_ANDROID ? '🎱 8B' : '📡 Spatial'}</button>
-                        </div>
-                      </div>
-                      {/* 9D VIRTUAL SPEAKERS (CINEMA STAGE) */}
-                        <div className="glass-menu-section" style={{marginTop:14}}>
-                          <div className="glass-label-row" style={{marginBottom:6}}>
-                            <span>9D Cinema Stage</span>
-                            <span style={{color:is9DStageOn?'#00e5ff':'var(--text-secondary)',fontWeight:600,fontSize:'0.8rem'}}>
-                              {is9DStageOn ? '9.1 Stage ON' : 'Stereo OFF'}
-                            </span>
-                          </div>
-                          <p style={{fontSize:'0.7rem',color:'var(--text-secondary)',margin:'0 0 10px 0',lineHeight:1.4}}>
-                            Intelligent 9-direction speaker separation with front/center vocal anchoring & 360° height ambience.
-                          </p>
-                          <div className="glass-boost-grid">
-                            <button
-                              className={`glass-boost-btn ${!is9DStageOn?'active':''}`}
-                              style={!is9DStageOn?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined}
-                              onClick={async ()=>{
-                                setIs9DStageOn(false);
-                                await writeToEngine('SPEAKER9D OFF');
-                              }}
-                            >
-                              Standard Stereo
-                            </button>
-                            <button
-                              className={`glass-boost-btn ${is9DStageOn?'active':''}`}
-                              style={is9DStageOn?{background:'rgba(0,229,255,0.22)',borderColor:'#00e5ff',color:'#00e5ff'}:undefined}
-                              onClick={async ()=>{
-                                setIs9DStageOn(true);
-                                await writeToEngine('SPEAKER9D ON');
-                              }}
-                            >
-                              9D Cinema Stage
-                            </button>
-                          </div>
-
-                          {/* 9D Bass Routing Mode Selector */}
-                          {is9DStageOn && (
-                            <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
-                              <div className="glass-label-row" style={{marginBottom:6}}>
-                                <span style={{fontSize:'0.75rem',fontWeight:600}}>9D Bass Routing</span>
-                                <span style={{fontSize:'0.72rem',color:is9DBassRoom?'#ff79c6':'#50fa7b',fontWeight:600}}>
-                                  {is9DBassRoom ? '3D Room Bass' : 'Direct Stereo Bass'}
-                                </span>
-                              </div>
-                              <div className="glass-boost-grid" style={{marginBottom:6}}>
-                                <button
-                                  className={`glass-boost-btn ${!is9DBassRoom?'active':''}`}
-                                  title="Direct Stereo Bass (Punch Focus): Sub-bass (<180Hz) stays anchored in dry, fast stereo for maximum kick-drum punch, raw transient speed, and visceral weight."
-                                  style={!is9DBassRoom?{background:'rgba(80,250,123,0.2)',borderColor:'#50fa7b',color:'#50fa7b'}:undefined}
-                                  onClick={async ()=>{
-                                    setIs9DBassRoom(false);
-                                    await writeToEngine('SPEAKER9D_BASS STEREO');
-                                  }}
-                                >
-                                  ⚡ Direct Bass (Punch)
-                                </button>
-                                <button
-                                  className={`glass-boost-btn ${is9DBassRoom?'active':''}`}
-                                  title="Full 3D Room Bass (Spatial Immersion): Low-end enters the 9.1 virtual speaker array with physical front-stage room projection, creating a cohesive concert hall atmosphere."
-                                  style={is9DBassRoom?{background:'rgba(255,121,198,0.22)',borderColor:'#ff79c6',color:'#ff79c6'}:undefined}
-                                  onClick={async ()=>{
-                                    setIs9DBassRoom(true);
-                                    await writeToEngine('SPEAKER9D_BASS ROOM');
-                                  }}
-                                >
-                                  🌐 3D Room Bass (Immersive)
-                                </button>
-                              </div>
-                              <p style={{fontSize:'0.68rem',color:'var(--text-secondary)',margin:0,lineHeight:1.35}}>
-                                {!is9DBassRoom 
-                                  ? "• Direct Stereo Bass: Sub-bass (<180Hz) is kept dry & centered in stereo for fast, high-impact kick punch." 
-                                  : "• 3D Room Bass: Full low-end enters the 9 virtual speakers, externalizing the bass into the 3D room."}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="glass-menu-section" style={{marginTop:14}}>
-                        <div className="glass-label-row" style={{marginBottom:6}}><span>Audiophile EQ</span><span style={{fontSize:'0.72rem',fontWeight:600,color:isFIRMode?'#a5d6a7':'var(--text-secondary)',transition:'color 0.2s'}}>{isFIRMode?'✦ Linear Phase':'Standard IIR'}</span></div>
-                        <p style={{fontSize:'0.7rem',color:'var(--text-secondary)',margin:'0 0 10px 0',lineHeight:1.4}}>Zero phase smearing on cymbals & hi-hats. Uses FIR convolution — sounds best on headphones.</p>
-                        <div className="glass-boost-grid">
-                          <button className={`glass-boost-btn ${!isFIRMode?'active':''}`} style={!isFIRMode?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined} onClick={()=>{setIsFIRMode(false);writeToEngine('FIRMODE 0');}}>Standard</button>
-                          <button className={`glass-boost-btn ${isFIRMode?'active':''}`} style={isFIRMode?{background:'rgba(165,214,167,0.2)',borderColor:'#a5d6a7',color:'#a5d6a7'}:undefined} onClick={()=>{setIsFIRMode(true);writeToEngine('FIRMODE 1');}}>✦ Audiophile</button>
-                        </div>
-                        {/* NEW: HARDWARE OUTPUT TOGGLE */}
-                      <div className="glass-menu-section" style={{marginTop:14}}>
-                        <div className="glass-label-row" style={{marginBottom:10}}>
-                          <span>Hardware Output</span>
-                          <span style={{color:'var(--theme-color)',fontWeight:600,fontSize:'0.8rem'}}>
-                            {isPhoneSpeaker ? (IS_ANDROID ? 'Phone Speaker' : 'Laptop Speaker') : 'Headphones'}
-                          </span>
-                        </div>
-                        <div className="glass-boost-grid">
-                          <button 
-                            className={`glass-boost-btn ${!isPhoneSpeaker?'active':''}`}
-                            style={!isPhoneSpeaker?{background:'rgba(255,255,255,0.18)',borderColor:'rgba(255,255,255,0.35)',color:'#fff'}:undefined}
-                            onClick={()=>{
-                              setIsPhoneSpeaker(false);
-                              writeToEngine('ANDROID_SPEAKER 0');
-                            }}
-                          >
-                            🎧 Headphones
-                          </button>
-                          
-                          <button 
-                            className={`glass-boost-btn ${isPhoneSpeaker?'active':''}`}
-                            style={isPhoneSpeaker?{background:'rgba(255,59,48,0.28)',borderColor:'rgba(255,59,48,0.55)',color:'#ff3b30'}:undefined}
-                            onClick={()=>{
-                              setIsPhoneSpeaker(true);
-                              writeToEngine('ANDROID_SPEAKER 1');
-                            }}
-                          >
-                            📱 {IS_ANDROID ? 'Phone Speaker' : 'Laptop Speaker'}
-                          </button>
-                        </div>
-                      </div>
-                      </div>
+                    <div className="glass-options-menu player-track-menu fade-in" onClick={e=>e.stopPropagation()}>
+                      <TrackOptions visMode={visMode} setVisMode={setVisMode}
+                        onManualEdit={() => { setIsManualOverride(true); setSmartTaste('ORIGINAL'); }} />
                     </div>
                   </>
                 )}
@@ -2165,35 +1863,7 @@ function App() {
                     {lyrics.length > 0 ? (
                       lyrics.map((line,i) => <p key={i} className={`lyric-line ${i===activeLyricIndex?'active':''}`}>{line.text}</p>)
                     ) : (
-                      <div style={{display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:'16px'}}>
-                        <p style={{margin:0, opacity:0.5, fontSize:'1.1rem'}}>No synced lyrics available.</p>
-                        <button 
-                          className="dsp-btn" 
-                          style={{
-                            padding:'10px 24px', 
-                            borderRadius:'24px', 
-                            background:'var(--theme-color)', 
-                            color:'#fff', 
-                            border:'none', 
-                            fontWeight:600,
-                            opacity: scanProgress ? 0.7 : 1,
-                            pointerEvents: scanProgress ? 'none' : 'auto',
-                            transition: 'all 0.2s',
-                            maxWidth: '85%',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                          onClick={async () => {
-                            if (currentTrack) {
-                              const lrc = await fetchLyricsOnline(currentTrack, setScanProgress);
-                              if (lrc) finalizeLyrics(currentTrack, lrc);
-                            }
-                          }}
-                        >
-                          {scanProgress ? `⏳ ${scanProgress}` : '🔍 Fetch Lyrics Online'}
-                        </button>
-                      </div>
+                      currentTrack && <LyricsSearch key={currentTrack.path} track={playlist.find(t => t.path === currentTrack.path) || currentTrack} onLyrics={finalizeLyrics} />
                     )}
                   </div>
                 )}

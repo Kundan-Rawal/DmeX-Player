@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Track } from '../types';
-import { buildArtistDictionary } from '../utils/artistEngine';
+import { buildArtistDictionary, artistCacheKey } from '../utils/artistEngine';
 import { X, Search, Trash2, Pause, RefreshCw } from 'lucide-react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 
@@ -56,7 +56,7 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
     }
   };
 
-  const getSafeName = (name: string) => name.replace(/[^a-zA-Z0-9]/g, '_');
+  const getSafeName = artistCacheKey;
 
   useEffect(() => {
     invoke<Record<string, string>>('get_all_artist_images')
@@ -95,7 +95,7 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
         }
       }
 
-      if (isSyncingRef.current && active && syncProgress >= allArtists.length - 1) {
+      if (isSyncingRef.current && active) {
         setIsSyncing(false);
       }
     };

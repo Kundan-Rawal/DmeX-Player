@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "target": "DmeX regularized target approximation v1",
+  "measurementProvenance": "Unverified bundled responses, not certified calibration",
+  "sourceLicense": "Not established by this audit; confirm before public redistribution",
+  "filters": [
+    {
+      "model": "AppleAirPods",
+      "file": "AppleAirPods_harman_inv.wav",
+      "sourceFiles": [
+        "AppleAirPods.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "41b4fa4677658e061d482f470309b83ee0191d445aae31e9520b0726231d3169",
+      "peakCoefficient": 0.4417375922203064,
+      "maximumResponseDb": 2.821371078491211,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "AppleEarPods",
+      "file": "AppleEarPods_harman_inv.wav",
+      "sourceFiles": [
+        "AppleEarPods.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "ec67e6cab7fd4ed272b5d2c16cd0b407fb7dbbf550e7d23584d8e934bf507e22",
+      "peakCoefficient": 0.4819428026676178,
+      "maximumResponseDb": 3.138423442840576,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "Sony_WH1000XM2",
+      "file": "Sony_WH1000XM2_harman_inv.wav",
+      "sourceFiles": [
+        "Sony_WH1000XM2L.wav",
+        "Sony_WH1000XM2R.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "4b216a42bee92c67c5c2ef00081a58bf97eabe00b88f90ef17f01d898a1d152a",
+      "peakCoefficient": 0.46130281686782837,
+      "maximumResponseDb": 3.1066365242004395,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "SennheiserHD",
+      "file": "SennheiserHD_harman_inv.wav",
+      "sourceFiles": [
+        "SennheiserHD.wav"
+      ],
+      "sampleRate": 48000,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "28113ed99651915c8166acdc2f4a06ba2af8177239bf40c3a057dc44ff9e9aaf",
+      "peakCoefficient": 0.4630638062953949,
+      "maximumResponseDb": 1.5538840293884277,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "AKGK240",
+      "file": "AKGK240_harman_inv.wav",
+      "sourceFiles": [
+        "AKGK240.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "9c88ffb4ecceb69ae961f15e0e3217d715ccbb652675602de7a7d0f5b7d0e7a4",
+      "peakCoefficient": 0.3530179560184479,
+      "maximumResponseDb": 2.712303400039673,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "AKGK701",
+      "file": "AKGK701_harman_inv.wav",
+      "sourceFiles": [
+        "AKGK701L.wav",
+        "AKGK701R.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "a5529c315c4f620f16699c561b6b704cc1236428280d45ad11c6d2bd791976af",
+      "peakCoefficient": 0.5274771451950073,
+      "maximumResponseDb": 3.4705629348754883,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "HyperXCloudalpha",
+      "file": "HyperXCloudalpha_harman_inv.wav",
+      "sourceFiles": [
+        "HyperXCloudalpha.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "78eb8e089e9b97ee1a2859c1dcbf3da88f3157f8fc417fe2d9e18328418ec706",
+      "peakCoefficient": 0.4863037168979645,
+      "maximumResponseDb": 1.4439053535461426,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "OppoPM3",
+      "file": "OppoPM3_harman_inv.wav",
+      "sourceFiles": [
+        "OppoPM3.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "1539e5a8fb789603243350dbd38963190b10c0846d0cd8d822a58bf44814b0d6",
+      "peakCoefficient": 0.3752283751964569,
+      "maximumResponseDb": 2.5064456462860107,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "SteelSeriesArctic9X",
+      "file": "SteelSeriesArctic9X_harman_inv.wav",
+      "sourceFiles": [
+        "SteelSeriesArctic9X.wav"
+      ],
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "f870b441789f0d7e4163d8415fb8396af4ef708a3250b7747462713d6fb1fd29",
+      "peakCoefficient": 0.5792773365974426,
+      "maximumResponseDb": 1.7446112632751465,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    },
+    {
+      "model": "xiaomipiston2",
+      "file": "xiaomipiston2_harman_inv.wav",
+      "sourceFiles": [
+        "xiaomipiston2.wav"
+      ],
+      "sampleRate": 48000,
+      "channels": 2,
+      "frames": 1024,
+      "encoding": "IEEE float32",
+      "sha256": "1d5e55eba221ccd922d220e1ea2c9fdaa984dc9a69057ab92bae5008e5d265c9",
+      "peakCoefficient": 0.4175696074962616,
+      "maximumResponseDb": 5.594524383544922,
+      "roundTripError": 0.0,
+      "order": "After spatial/reverb, before final limiter"
+    }
+  ]
+}

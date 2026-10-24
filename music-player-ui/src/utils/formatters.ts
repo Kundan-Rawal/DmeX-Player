@@ -11,15 +11,17 @@ export const parseLRC = (lrc: string): LyricLine[] => {
   if (!lrc) return [];
   const lines = lrc.split('\n');
   const parsed: LyricLine[] = [];
-  const regex = /\[(\d{2}):(\d{2}\.\d{2,3})\](.*)/;
+  const regex = /\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]/g;
+  const offset = Number(lrc.match(/\[offset:([+-]?\d+)\]/i)?.[1] || 0) / 1000;
   
   for (const line of lines) {
-    const match = line.match(regex);
-    if (match) {
+    const matches = [...line.matchAll(regex)];
+    const text = line.replace(regex, '').trim();
+    for (const match of matches) {
       const m = parseInt(match[1], 10);
       const s = parseFloat(match[2]);
-      parsed.push({ time: m * 60 + s, text: match[3].trim() });
+      if (s < 60) parsed.push({ time: Math.max(0, m * 60 + s + offset), text });
     }
   }
-  return parsed;
+  return parsed.sort((a, b) => a.time - b.time);
 };

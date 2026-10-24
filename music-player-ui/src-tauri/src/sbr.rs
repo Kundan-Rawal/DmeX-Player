@@ -1,5 +1,4 @@
 use rustfft::{FftPlanner, num_complex::Complex};
-use std::f32::consts::TAU;
 
 // A simple PRNG to avoid bringing in the rand crate if not needed
 fn next_rand(seed: &mut u32) -> f32 {
@@ -41,7 +40,7 @@ pub fn detect_cutoff_stable(frames: &[Vec<f32>], sr: u32, n: usize) -> Option<f3
     let mut hits: Vec<f32> = frames.iter()
         .filter_map(|f| detect_cutoff(f, sr, n))
         .collect();
-    if hits.len() < frames.len() / 5 { return None; }   // fewer than 20% agree -> no
+    if hits.is_empty() || hits.len() < (frames.len() + 4) / 5 { return None; }
     hits.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = hits[hits.len() / 2];
     if median >= 19_000.0 { None } else { Some(median) }
@@ -58,7 +57,7 @@ pub fn replicate_band(
     let bin_hz = sample_rate as f32 / fft_size as f32;
     let cutoff_bin = (cutoff_hz / bin_hz) as usize;
     let nyquist_bin = fft_size / 2;
-    if cutoff_bin == 0 || cutoff_bin * 2 > nyquist_bin { return; }
+    if cutoff_bin == 0 || cutoff_bin >= nyquist_bin { return; }
 
     // --- Envelope slope over the octave below the cutoff ---
     let lo = cutoff_bin / 4;
@@ -128,7 +127,8 @@ pub fn apply_sbr_offline(samples: &mut [f32], channels: u32, sample_rate: u32) -
     let fft = planner.plan_fft_forward(fft_size);
     let ifft = planner.plan_fft_inverse(fft_size);
 
-    let num_frames = (samples.len() / channels as usize - fft_size) / hop_size;
+    let source_frames = samples.len() / channels as usize;
+    let num_frames = (source_frames + hop_size - 1) / hop_size;
     if num_frames == 0 { return None; }
 
         
@@ -146,7 +146,8 @@ pub fn apply_sbr_offline(samples: &mut [f32], channels: u32, sample_rate: u32) -
         let mut frame_complex = vec![Complex::new(0.0, 0.0); fft_size];
         let offset = f * hop_size * channels as usize;
         for i in 0..fft_size {
-            frame_complex[i] = Complex::new(samples[offset + i * channels as usize] * hann_window[i], 0.0);
+            let index = offset + i * channels as usize;
+            frame_complex[i] = Complex::new(samples.get(index).copied().unwrap_or(0.0) * hann_window[i], 0.0);
         }
         fft.process(&mut frame_complex);
         let mut db_spec = vec![0.0f32; fft_size / 2];
@@ -164,12 +165,13 @@ pub fn apply_sbr_offline(samples: &mut [f32], channels: u32, sample_rate: u32) -
     }
 
     // Now we do the actual processing
-    let mut seed = 12345;
     
     // We need an output buffer to overlap-add into
     let mut out_buffer = vec![0.0f32; samples.len()];
+    let mut weights = vec![0.0f32; source_frames];
     
     for ch in 0..channels as usize {
+        let mut seed = 12345;
         let mut prev_spectrum = vec![0.0f32; fft_size / 2];
         
         for f in 0..num_frames {
@@ -177,7 +179,8 @@ pub fn apply_sbr_offline(samples: &mut [f32], channels: u32, sample_rate: u32) -
             let offset = f * hop_size * channels as usize;
             
             for i in 0..fft_size {
-                frame_complex[i] = Complex::new(samples[offset + i * channels as usize] * hann_window[i], 0.0);
+                let index = offset + i * channels as usize + ch;
+                frame_complex[i] = Complex::new(samples.get(index).copied().unwrap_or(0.0) * hann_window[i], 0.0);
             }
             
             fft.process(&mut frame_complex);
@@ -210,8 +213,11 @@ pub fn apply_sbr_offline(samples: &mut [f32], channels: u32, sample_rate: u32) -
                 // but since we just modified it, we can just overlap add and the energy should be preserved
                 // Wait, standard OLA with Hann window and 75% overlap requires a specific gain.
                 // Sum of 4 shifted Hann windows is 1.5. So we divide by 1.5.
-                let ola_scale = scale / 2.0;
-                out_buffer[offset + i * channels as usize] += frame_complex[i].re * hann_window[i] * ola_scale;
+                let index = offset + i * channels as usize + ch;
+                if index < samples.len() {
+                    out_buffer[index] += frame_complex[i].re * hann_window[i] * scale;
+                    if ch == 0 { weights[f * hop_size + i] += hann_window[i] * hann_window[i]; }
+                }
             }
             
             prev_spectrum = curr_spectrum;
@@ -220,11 +226,32 @@ pub fn apply_sbr_offline(samples: &mut [f32], channels: u32, sample_rate: u32) -
     
     // Copy back
     // Note: the overlap-add will leave the edges slightly faded, we can copy just the processed part
-    let start_idx = fft_size * channels as usize;
-    let end_idx = num_frames * hop_size * channels as usize;
-    for i in start_idx..end_idx {
-        samples[i] = out_buffer[i];
+    for frame in 0..source_frames {
+        if weights[frame] > 0.05 {
+            for ch in 0..channels as usize {
+                let index = frame * channels as usize + ch;
+                samples[index] = out_buffer[index] / weights[frame];
+            }
+        }
     }
     
     Some(cutoff_hz)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn short_full_band_detection_never_indexes_empty_hits() {
+        for count in 0..5 {
+            assert_eq!(detect_cutoff_stable(&vec![vec![0.0;2048];count],48000,4096),None);
+        }
+    }
+    #[test]
+    fn full_band_stereo_is_not_changed() {
+        let mut input:Vec<f32>=(0..8192).flat_map(|i| [if i==100 {1.0}else{0.0},if i==200 {-0.5}else{0.0}]).collect();
+        let original=input.clone();
+        assert_eq!(apply_sbr_offline(&mut input,2,48000),None);
+        assert_eq!(input,original);
+    }
 }

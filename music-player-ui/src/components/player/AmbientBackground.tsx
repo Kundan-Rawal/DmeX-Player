@@ -42,6 +42,7 @@ export const AmbientBackground = ({
   const ripple2Ref = useRef<HTMLDivElement>(null);
   const ripple3Ref = useRef<HTMLDivElement>(null);
   const dustCanvasRef   = useRef<HTMLCanvasElement>(null);
+  const canvasDensity = useRef(1);
   const artifactRefs    = useRef<(HTMLDivElement|null)[]>([]);
 
   const rippleState = useRef([
@@ -71,43 +72,56 @@ export const AmbientBackground = ({
   const dustState = useRef([...Array(DUST_COUNT)].map(()=>({ active:false,x:0,y:0,vx:0,vy:0,scale:0,opacity:0,isLeft:true })));
 
   useEffect(() => {
-    const resize = () => { if (dustCanvasRef.current) { dustCanvasRef.current.width=window.innerWidth; dustCanvasRef.current.height=window.innerHeight; } };
-    window.addEventListener('resize', resize); resize();
-    return () => window.removeEventListener('resize', resize);
-  }, []);
+    const canvas = dustCanvasRef.current;
+    if (!canvas) return;
+    const resize = () => {
+      canvasDensity.current = window.devicePixelRatio || 1;
+      const width = Math.round(canvas.clientWidth * canvasDensity.current);
+      const height = Math.round(canvas.clientHeight * canvasDensity.current);
+      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas); window.addEventListener('resize', resize); resize();
+    return () => { observer.disconnect(); window.removeEventListener('resize', resize); };
+  }, [visMode]);
 
   useEffect(() => {
     const rBx={v:0},rBs={v:0},rMx={v:0},rMw={v:0},rMs={v:0},rTx={v:0},rTw={v:0},rTs={v:0},rOx={v:0},rOw={v:0},rOs={v:0};
     const glowSpriteDark  = document.createElement('canvas'); glowSpriteDark.width=64;  glowSpriteDark.height=64;
     const glowSpriteLight = document.createElement('canvas'); glowSpriteLight.width=64; glowSpriteLight.height=64;
     let lastSpriteColor = '';
+    const cornerRefs = [cornerTLRef, cornerBRRef, cornerTRRef, cornerBLRef, blob5Ref, blob6Ref, blob7Ref, blob8Ref];
+    const rippleRefs = [ripple1Ref, ripple2Ref, ripple3Ref];
+    let previousTime = 0;
 
     let rafId: number;
     const tick = (timestamp: number) => {
-      if (IS_ANDROID && !isExpandedRef.current) { 
+      if (!isExpandedRef.current || document.hidden) {
+        previousTime = timestamp;
         rafId = requestAnimationFrame(tick); 
         return; 
       }
 
       const now = timestamp * 0.001;
+      const step = previousTime ? Math.min((timestamp - previousTime) / (1000 / 60), 3) : 1;
+      previousTime = timestamp;
       const wallTime = Date.now();   
       const lvl = audioLevelRef.current;
       const speedMult = IS_ANDROID ? 3.5 : 1.0;
       const activeLvl = IS_ANDROID ? 0 : lvl; 
 
-      const cRefs = [cornerTLRef, cornerBRRef, cornerTRRef, cornerBLRef, blob5Ref, blob6Ref, blob7Ref, blob8Ref];
       blobState.current.forEach((b, i) => {
         const x = Math.sin(now * (b.sx * speedMult) + b.px) * 15 + Math.sin(now * (b.sx * 0.8 * speedMult) + b.py) * 8;
         const y = Math.cos(now * (b.sy * speedMult) + b.py) * 15 + Math.cos(now * (b.sy * 0.7 * speedMult) + b.px) * 8;
-        if (cRefs[i].current) {
-          cRefs[i].current!.style.transform = `translate(${x}vw, ${y}vh) scale(${1.0 + activeLvl * 0.15}) translateZ(0)`;
+        if (cornerRefs[i].current) {
+          cornerRefs[i].current!.style.transform = `translate(${x}vw, ${y}vh) scale(${1.0 + activeLvl * 0.15}) translateZ(0)`;
         }
       });
 
       if (!IS_ANDROID && visModeRef.current === 'RADAR') {
         const d = spatialData.current;
         const lerp = (cur: number, tgt: number, k: number) => cur + (tgt - cur) * k;
-        const K_fast = 0.15, K_slow = 0.035;
+        const K_fast = 1 - Math.pow(0.85, step), K_slow = 1 - Math.pow(0.965, step);
 
         if (themeColorRef.current !== lastSpriteColor) {
           lastSpriteColor = themeColorRef.current;
@@ -128,10 +142,10 @@ export const AmbientBackground = ({
         }
         lastBassLevel.current = d.bLvl;
 
-        [ripple1Ref, ripple2Ref, ripple3Ref].forEach((ref, idx) => {
+        rippleRefs.forEach((ref, idx) => {
           const rip = rippleState.current[idx];
           if (rip.active) {
-            rip.scale += 0.06; rip.opacity -= 0.006;
+            rip.scale += 0.06 * step; rip.opacity -= 0.006 * step;
             if (rip.opacity <= 0) { rip.active = false; rip.opacity = 0; }
             if (ref.current) {
               ref.current.style.transform = `translate(calc(-50% + ${rBx.v}vw), -50%) scale(${rip.scale})`;
@@ -171,8 +185,7 @@ export const AmbientBackground = ({
 
         const canvas = dustCanvasRef.current;
         if (canvas) {
-          const dpr = window.devicePixelRatio || 1, dw = canvas.clientWidth, dh = canvas.clientHeight;
-          if (canvas.width !== dw * dpr || canvas.height !== dh * dpr) { canvas.width = dw * dpr; canvas.height = dh * dpr; }
+          const dpr = canvasDensity.current;
           const ctx = canvas.getContext('2d', { alpha: true });
           if (ctx) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -181,7 +194,7 @@ export const AmbientBackground = ({
             const sprite = isDarkModeRef.current ? glowSpriteDark : glowSpriteLight;
             dustState.current.forEach(p => {
               if (p.active) {
-                p.vx += (Math.random() - 0.5) * 0.08; p.vy -= 0.015; p.vx *= 0.96; p.vy *= 0.96; p.x += p.vx; p.y += p.vy; p.opacity -= 0.008;
+                p.vx += (Math.random() - 0.5) * 0.08 * Math.sqrt(step); p.vy -= 0.015 * step; p.vx *= Math.pow(0.96, step); p.vy *= Math.pow(0.96, step); p.x += p.vx * step; p.y += p.vy * step; p.opacity -= 0.008 * step;
                 if (p.opacity <= 0) { p.active = false; } else { ctx.globalAlpha = p.opacity; const ds = (p.scale * dpr) * 70; ctx.drawImage(sprite, (cx + p.x * vw) - ds / 2, (cy + p.y * vh) - ds / 2, ds, ds); }
               }
             });
@@ -194,7 +207,7 @@ export const AmbientBackground = ({
         }
         artifactState.current.forEach((art, i) => {
           if (art.active) {
-            art.scale += 0.025; const as = 0.5 + Math.sin(art.scale) * 0.6; art.opacity = Math.max(0, 1.0 - (art.scale / 3.14));
+            art.scale += 0.025 * step; const as = 0.5 + Math.sin(art.scale) * 0.6; art.opacity = Math.max(0, 1.0 - (art.scale / 3.14));
             if (art.scale >= 3.14) { art.active = false; art.opacity = 0; }
             const el = artifactRefs.current[i]; if (el) { el.style.transform = `translate(calc(-50% + ${art.x}vw), calc(-50% + ${art.y}vh)) scale(${as})`; el.style.opacity = `${art.opacity}`; }
           }

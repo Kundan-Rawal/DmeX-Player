@@ -6,24 +6,26 @@
 #include <mutex>
 
 extern std::atomic<float> g_audioLevel;
-extern float g_bassGain;
-extern float g_trebleGain;
-extern bool g_isAdaptiveLoudnessOn;
-extern float g_masterVolume;
-extern float g_trebleGain;
-extern bool g_isAdaptiveLoudnessOn;
-extern float g_masterVolume;
+extern std::atomic<float> g_bassGain;
+extern std::atomic<float> g_subBassHz;
+extern std::atomic<float> g_trebleGain;
+extern std::atomic<float> g_outputGain;
+extern std::atomic<bool> g_isAdaptiveLoudnessOn;
+extern std::atomic<float> g_bassField;
+extern std::atomic<bool> g_roomBass;
+extern std::atomic<float> g_bassMotionHz;
 extern std::mutex g_irMutex;
-extern bool g_isConvolutionOn;
-extern bool g_isFIRModeOn;
-extern bool g_isRemasterOn;
-extern bool g_isUpscaleOn;
-extern bool g_isWidenOn;
-extern bool g_isCompressOn;
-extern bool g_isReverbOn;
-extern bool g_isAndroidSpeaker;
-extern bool g_isLaptopSpeaker;
-extern bool g_is8DModeOn;
+extern std::atomic<bool> g_isConvolutionOn;
+extern std::atomic<bool> g_isFIRModeOn;
+extern std::atomic<bool> g_isRemasterOn;
+extern std::atomic<bool> g_isUpscaleOn;
+extern std::atomic<bool> g_isWidenOn;
+extern std::atomic<bool> g_isCompressOn;
+extern std::atomic<bool> g_isReverbOn;
+extern std::atomic<bool> g_isAndroidSpeaker;
+extern std::atomic<bool> g_isLaptopSpeaker;
+extern std::atomic<bool> g_is8DModeOn;
+extern std::atomic<bool> g_ecoMode;
 
 // ================================================================
 // ALLPASS FUNCTIONS
@@ -32,63 +34,52 @@ extern bool g_is8DModeOn;
 void ap_init(AllPassFilter *a, int sz, float fb)
 {
     memset(a->buf, 0, sizeof(a->buf));
-    a->size = sz;
+    a->size = (std::max)(1, (std::min)(sz, MAX_AP_BUF));
     a->idx = 0;
     a->feedback = fb;
 }
 
-static float ap_tick(AllPassFilter *a, float in)
+float ap_tick(AllPassFilter *a, float in)
 {
     float b = a->buf[a->idx];
-    a->buf[a->idx] = in + b * a->feedback;
+    const float state = in + b * a->feedback;
+    a->buf[a->idx] = state;
     a->idx = (a->idx + 1) % a->size;
-    return b - in;
+    return b - a->feedback * state;
 }
 
 // ================================================================
 // STUDIO AURAL EXCITER
 // ================================================================
-static void exciter_process(ma_node* pNode, const float** ppIn, ma_uint32* pFrameCountIn,
-                            float** ppOut, ma_uint32* pFrameCountOut)
+static void exciter_process(ma_node* node, const float** input, ma_uint32* countIn, float** output, ma_uint32* countOut)
 {
-    StudioExciterNode* n = (StudioExciterNode*)pNode;
-    const float* in  = ppIn[0];
-    float*       out = ppOut[0];
-    ma_uint32    N   = *pFrameCountOut = *pFrameCountIn;
-
-    if (!g_isUpscaleOn) { memcpy(out, in, sizeof(float) * N * 2); return; }
-
-    for (ma_uint32 i = 0; i < N; ++i) {
-        float drive = n->drive.next();
-
-        float L = in[i*2], R = in[i*2 + 1];
-
-        n->hpStateL += (L - n->hpStateL) * n->hpCoef;
-        n->hpStateR += (R - n->hpStateR) * n->hpCoef;
-        float hpL = L - n->hpStateL;
-        float hpR = R - n->hpStateR;
-
-        float up[8];
-        n->os.upsample(hpL, hpR, up);
-        for (int k = 0; k < 4; ++k) {
-            float a = up[k*2], b = up[k*2 + 1];
-            up[k*2]     = a / (1.0f + fabsf(a * drive));
-            up[k*2 + 1] = b / (1.0f + fabsf(b * drive));
+    auto* p = (StudioExciterNode*)node;
+    *countOut = *countIn;
+    const bool sleeping = g_ecoMode.load() && p->drive.target.load() == 0.0f && p->drive.peek() < 1.0e-6f;
+    for (ma_uint32 i = 0; i < *countIn; ++i) {
+        const float L = input[0][2*i], R = input[0][2*i+1], drive = p->drive.next();
+        p->hpStateL += (L - p->hpStateL) * p->hpCoef;
+        p->hpStateR += (R - p->hpStateR) * p->hpCoef;
+        if (sleeping) {
+            p->dryDelayL[p->dryIdx] = L; p->dryDelayR[p->dryIdx] = R;
+            const int rd = (p->dryIdx + 64 - p->dryDelay) % 64;
+            output[0][2*i] = p->dryDelayL[rd]; output[0][2*i+1] = p->dryDelayR[rd];
+            p->dryIdx = (p->dryIdx + 1) % 64;
+            continue;
         }
-        float satL, satR;
-        n->os.downsample(up, &satL, &satR);
-
-        n->dryDelayL[n->dryIdx] = L;
-        n->dryDelayR[n->dryIdx] = R;
-        int rd = n->dryIdx - n->dryDelay; if (rd < 0) rd += 32;
-        float dL = n->dryDelayL[rd], dR = n->dryDelayR[rd];
-        if (++n->dryIdx >= 32) n->dryIdx = 0;
-
-        float wetL = dL + satL * 0.05f;
-        float wetR = dR + satR * 0.05f;
-
-        out[i*2]     = wetL;
-        out[i*2 + 1] = wetR;
+        float wet[8], dry[8];
+        p->os.upsample(L - p->hpStateL, R - p->hpStateR, wet);
+        p->cleanOs.upsample(L - p->hpStateL, R - p->hpStateR, dry);
+        for (float& x : wet) x = tanhf(x * (1.0f + drive * 3.0f));
+        float wetL, wetR, cleanL, cleanR;
+        p->os.downsample(wet, &wetL, &wetR);
+        p->cleanOs.downsample(dry, &cleanL, &cleanR);
+        p->dryDelayL[p->dryIdx] = L;
+        p->dryDelayR[p->dryIdx] = R;
+        const int rd = (p->dryIdx + 64 - p->dryDelay) % 64;
+        output[0][2*i] = p->dryDelayL[rd] + drive * 0.10f * (wetL - cleanL);
+        output[0][2*i+1] = p->dryDelayR[rd] + drive * 0.10f * (wetR - cleanR);
+        p->dryIdx = (p->dryIdx + 1) % 64;
     }
 }
 ma_node_vtable g_exciter_vtable = {exciter_process, NULL, 1, 1, 0};
@@ -114,31 +105,15 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. Binaural Crossfeed (HRTF-lite) to anchor the stereo image
-        // We delay the opposite channel and low-pass it to simulate head-shadowing
-        float crossfeedL = p->delayR[p->delayIdx];
-        float crossfeedR = p->delayL[p->delayIdx];
-
-        p->delayL[p->delayIdx] = L;
-        p->delayR[p->delayIdx] = R;
-        p->delayIdx = (p->delayIdx + 1) % CROSSFEED_DELAY_SAMPLES;
-
-        // Head-shadow low-pass (approx 700Hz)
-        const float HEAD_SHADOW_COEF = 0.1f;
-        p->lpStateL += HEAD_SHADOW_COEF * (crossfeedL - p->lpStateL);
-        p->lpStateR += HEAD_SHADOW_COEF * (crossfeedR - p->lpStateR);
-
-        // Keep delay lines running for legacy inspection, but DO NOT bleed opposite-ear bass
-        float mixL = L;
-        float mixR = R;
+        const float mixL = L, mixR = R;
 
         // 2. Blumlein Shuffler (Bass-Safe Widening)
         float M = (mixL + mixR) * 0.5f;
         float S = (mixL - mixR) * 0.5f;
         
         // Isolate the bass from the Side channel so we don't widen the sub-bass or kick body
-        // 2-Pole steeper slope (12 dB/oct) prevents 100-180Hz from leaking into widening and causing phase hollowing!
-        const float SIDE_HP_COEF = 0.08f; // ~350Hz
+        // 2-Pole steeper slope (12 dB/oct) prevents 0-120Hz from leaking into widening and causing phase hollowing!
+        const float SIDE_HP_COEF = 1.0f - std::exp(-2.0f * static_cast<float>(M_PI) * 150.0f / p->sampleRate);
         p->sideLp += SIDE_HP_COEF * (S - p->sideLp);
         p->sideLp2 += SIDE_HP_COEF * (p->sideLp - p->sideLp2);
         float sideLows = p->sideLp2;     // The bass of the Side channel
@@ -173,12 +148,12 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    float intensity = p->spatialIntensity.next();
+    const bool nineD = g_is8DModeOn.load();
 
-    // Fix double-spatializer conflict: if 9D mode is ON, or spatial intensity is 0, BYPASS!
-    if (g_is8DModeOn || intensity < 0.001f)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], fc * 2 * sizeof(float));
+    // 9D already performs the complete binaural render. A second center/side
+    // matrix here would spatialize the same signal twice and blur localization.
+    if (nineD) {
+        memcpy(pOut, pIn, fc * 2 * sizeof(float));
         return;
     }
 
@@ -186,6 +161,8 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
     {
         float L = pIn[i * 2];
         float R = pIn[i * 2 + 1];
+        const float intensity = p->spatialIntensity.next();
+        const bool skipHaas = intensity < 0.001f;
 
         // 0. Extract Bass (Subwoofer Crossover at 180Hz)
         // Keep 100% of bass out of the Haas delay lines so zero 18ms comb filtering or phase cancellation occurs!
@@ -212,63 +189,57 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
         float sideR  = -sideL; 
         
         // 2. Virtual Center (Front Speaker) 
-        // Zero delay: Keep center vocals and drums 100% upfront without comb filtering!
-        // Dynamic Vocal Compensation: As the 3D room expands, vocals must scale up to remain clear!
         float vocalBoost = 1.0f + (0.18f * intensity);
-        p->centerDelayBuf[p->centerIdx] = center;
-        p->centerIdx = (p->centerIdx + 1) % CENTER_ITD_DELAY;
-        float virtualCenterL = center * vocalBoost;
-        float virtualCenterR = center * vocalBoost;
-
-        // 3. Virtual Rear Decorrelation (Allpass Bank)
-        // Instead of a static Haas delay which causes metallic comb filtering, we use
-        // a 3-stage allpass filter bank to scatter the phase of the side signals.
-        // This creates a diffuse, natural spaciousness that mimics real room reflections!
-        float rearL = ap_tick(&p->rearApL[2], ap_tick(&p->rearApL[1], ap_tick(&p->rearApL[0], sideL)));
-        float rearR = ap_tick(&p->rearApR[2], ap_tick(&p->rearApR[1], ap_tick(&p->rearApR[0], sideR)));
-
-        // Head shadow low-pass on rear speakers: 0.45f (~4.5 kHz) lifts sound UP to ear level
-        // without muffling the vital vocal breath and cymbal clarity in the surround channels!
-        const float REAR_LP_COEF = 0.45f;
-        p->rearLpL += REAR_LP_COEF * (rearL - p->rearLpL);
-        p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
+        float virtualCenterL = center;
+        float virtualCenterR = center;
         
-        // 4. Rear Elevation Pinna Notch (8kHz dip applied ONLY to surround rear channels!)
-        const float TOP_NOTCH_COEF = 0.45f; 
-        p->notchTopL1 += TOP_NOTCH_COEF * (p->rearLpL - p->notchTopL1);
-        p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
-        // 4. Vertical Elevation Split (65% Up / 35% Down)
-        // Up-Cue: 65% depth pinna notch pulls the sound precisely upwards above the head
-        float upCueL = p->rearLpL - (p->rearLpL - p->notchTopL2) * 0.65f;
-
-        p->notchTopR1 += TOP_NOTCH_COEF * (p->rearLpR - p->notchTopR1);
-        p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
-        float upCueR = p->rearLpR - (p->rearLpR - p->notchTopR2) * 0.65f;
+        float virtualRearL = 0.0f;
+        float virtualRearR = 0.0f;
         
-        // Down-Cue: 35% Floor shadow (Deep low-pass to simulate sound traveling through floor/legs)
-        // We use notchTopL2 which is naturally double-low-passed, making it a perfect floor cue!
-        float downCueL = p->notchTopL2;
-        float downCueR = p->notchTopR2;
+        float frontSideL = sideL;
+        float frontSideR = sideR;
 
-        // Keep phase POSITIVE (+) to prevent artificial hollow/phasey bathroom reverb!
-        // We mix exactly 65% Upside and 35% Downside to create a massive vertical "Up & Down" spread at the back of the head!
-        float virtualRearL = (upCueL * 0.65f + downCueL * 0.35f) * intensity;
-        float virtualRearR = (upCueR * 0.65f + downCueR * 0.35f) * intensity;
+        if (!skipHaas) {
+            p->centerDelayBuf[p->centerIdx] = center;
+            p->centerIdx = (p->centerIdx + 1) % CENTER_ITD_DELAY;
+            virtualCenterL = center * vocalBoost;
+            virtualCenterR = center * vocalBoost;
 
-        // 5. Downmix to Binaural Stereo
-        // Sweet spot mid-point (+12% width expansion) for lush, natural front separation
-        float frontSideL = sideL * (1.0f + 0.12f * intensity);
-        float frontSideR = sideR * (1.0f + 0.12f * intensity);
+            // 3. Virtual Rear Decorrelation (Allpass Bank)
+            float rearL = ap_tick(&p->rearApL[2], ap_tick(&p->rearApL[1], ap_tick(&p->rearApL[0], sideL)));
+            float rearR = ap_tick(&p->rearApR[2], ap_tick(&p->rearApR[1], ap_tick(&p->rearApR[0], sideR)));
+
+            const float REAR_LP_COEF = 0.45f;
+            p->rearLpL += REAR_LP_COEF * (rearL - p->rearLpL);
+            p->rearLpR += REAR_LP_COEF * (rearR - p->rearLpR);
+
+            const float TOP_NOTCH_COEF = 0.45f;
+            p->notchTopL1 += TOP_NOTCH_COEF * (p->rearLpL - p->notchTopL1);
+            p->notchTopL2 += TOP_NOTCH_COEF * (p->notchTopL1 - p->notchTopL2);
+            float upCueL = p->rearLpL - (p->rearLpL - p->notchTopL2) * 0.65f;
+
+            p->notchTopR1 += TOP_NOTCH_COEF * (p->rearLpR - p->notchTopR1);
+            p->notchTopR2 += TOP_NOTCH_COEF * (p->notchTopR1 - p->notchTopR2);
+            float upCueR = p->rearLpR - (p->rearLpR - p->notchTopR2) * 0.65f;
+
+            float downCueL = p->notchTopL2;
+            float downCueR = p->notchTopR2;
+
+            // Apply 3D depth to the rear channels so it physically pushes sound deeper backwards
+            float depthExpand = 1.0f + (depth * 0.5f);
+            virtualRearL = (upCueL * 0.65f + downCueL * 0.35f) * intensity * depthExpand;
+            virtualRearR = (upCueR * 0.65f + downCueR * 0.35f) * intensity * depthExpand;
+
+            // 5. Downmix to Binaural Stereo
+            frontSideL = sideL * (1.0f + 0.12f * intensity);
+            frontSideR = sideR * (1.0f + 0.12f * intensity);
+        }
         
         float outL = virtualCenterL + frontSideL + virtualRearL;
         float outR = virtualCenterR + frontSideR + virtualRearR;
 
-        // 6. Sum Acoustic Room-Compensated Bass
-        // When intensity > 0 (Immersive Mode), the 3D soundstage expands. We apply a clean, phase-perfect 
-        // room presence compensation so the bass scales cleanly with the room without overdriving IEM drivers!
-        float roomBassComp = 1.0f + (0.15f * intensity);
-        pOut[i * 2] = outL + (bassL * roomBassComp);
-        pOut[i * 2 + 1] = outR + (bassR * roomBassComp);
+        pOut[i * 2] = L + (outL - nonBassL);
+        pOut[i * 2 + 1] = R + (outR - nonBassR);
     }
 }
 ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0};
@@ -282,110 +253,45 @@ ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0}
 // ================================================================
 // AUDIOPHILE EQ (True Parallel Full-Spectrum Architecture)
 // ================================================================
-static void audiophile_eq_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 *countIn, float **output, ma_uint32 *countOut)
 {
-    AudiophileEQNode *p = (AudiophileEQNode *)pNode;
-    float tb = p->targetBass.next();
-    float tm = p->targetMid.next();
-    float th = p->targetHigh.next();
+    auto* p = (AudiophileEQNode*)node;
+    *countOut = *countIn;
+    const float bassDb = (std::min)(0.0f, g_bassGain.load());
+    p->targetBass.set(bassDb);
+    p->targetHigh.set(g_trebleGain.load());
+    p->targetMid.set(g_presenceBoost.load());
+    p->iso226.enabled.set(g_isAdaptiveLoudnessOn.load());
+    p->iso226.volume.set((std::clamp)(g_outputGain.load(), 0.0f, 1.0f));
+    for (ma_uint32 i = 0; i < *countIn; ++i) {
+        const float L = input[0][2*i], R = input[0][2*i+1];
 
-    if (!g_isRemasterOn && fabsf(g_trebleGain) < 0.001f && 
-        (!g_isFIRModeOn || (fabsf(tb - 1.0f) < 0.005f && fabsf(tm - 1.0f) < 0.005f && fabsf(th - 1.0f) < 0.005f)))
-    {
-        
-        
-        
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
-
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
-
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        
-        
-        
-
-        float L = pIn[i * 2], R = pIn[i * 2 + 1];
-
-        // 1. Isolate the full Bass band up to 180Hz (Sub-bass + Kick Punch + Bass Guitar)
-        float bassBandL, nonBassL, bassBandR, nonBassR;
-        p->crossMidBassL.process(L, bassBandL, nonBassL);
-        p->crossMidBassR.process(R, bassBandR, nonBassR);
-
-        // 2. Isolate the Mids from the Treble (8000Hz LR4 Crossover)
-        float midL, trebleL, midR, trebleR;
-        p->crossTrebleL.process(nonBassL, midL, trebleL);
-        p->crossTrebleR.process(nonBassR, midR, trebleR);
-
-        // 3. VOCAL PROCESSING (180Hz - 8kHz)
-        // Only apply vocal saturation & upward compression if Remaster is ON or Mid slider is actively tuned
-        if (g_isRemasterOn || fabsf(tm - 1.0f) > 0.01f)
-        {
-#ifndef __ANDROID__
-            // A. Psychoacoustic Vocal Exciter (Harmonic Bite)
-            float satMidL = midL / (1.0f + fabsf(midL));
-            float satMidR = midR / (1.0f + fabsf(midR));
-            midL = midL + (satMidL * 0.05f);
-            midR = midR + (satMidR * 0.05f);
-#endif
-
-            // B. Mid/Side Stereo Widening (3% Side Boost)
-            float midM = (midL + midR) * 0.5f;
-            float midS = (midL - midR) * 0.5f;
-            midS *= 1.03f;
-            midL = midM + midS;
-            midR = midM - midS;
-
-            // C. Upward Vocal Compression (The Intimacy Algorithm)
-            float midMonoEnv = fabsf(midM);
-            p->envUpwardL += 0.001f * (midMonoEnv - p->envUpwardL);
-            float upwardGain = 1.0f + 0.15f * (1.0f - fminf(p->envUpwardL * 2.0f, 1.0f));
-            midL *= upwardGain;
-            midR *= upwardGain;
-
-#ifndef __ANDROID__
-            // D. Fletcher-Munson Presence EQ (2.5kHz)
-            midL = p->presenceL.process(midL);
-            midR = p->presenceR.process(midR);
-#endif
-        }
-
-        // 4. Absolute Gains
-        float gBass = tb;
-        float gMid = tm;
-        float gTreble = th + g_trebleGain;
-
-        // 5. Parallel Summation
-        // Because LR4 crossovers sum perfectly flat, re-combining these bands 
-        // with their respective gains yields a completely zero-phase, distortion-free output.
-#ifdef __ANDROID__
-        // Android DACs hard-clip at 0 dBFS. Lower the master volume by ~3dB (-30%) to give
-        // the saturated bass and the excited trebles room to breathe without distorting.
-        // If playing on the internal phone speaker, keep it at 1.0f so it stays loud.
-        float MASTER_GAIN = g_isAndroidSpeaker ? 1.0f : 0.707f;
-#else
-        const float MASTER_GAIN = 1.0f;
-#endif
-
-        float outMixL = (bassBandL * gBass) + (midL * gMid) + (trebleL * gTreble);
-        float outMixR = (bassBandR * gBass) + (midR * gMid) + (trebleR * gTreble);
-
-        if (g_isAdaptiveLoudnessOn) {
-            // Update filter using the master volume
-            if (i == 0) {
-                p->iso226.update(g_masterVolume);
+        const float bass = p->targetBass.next(), high = p->targetHigh.next();
+        const float presence = p->targetMid.next();
+        if ((p->coefficientCounter++ & 31u) == 0) {
+            if (fabsf(presence - p->lastPresence) > 0.0001f) {
+                p->presenceL.update_coeffs(p->sampleRate, 2500.0f, 0.8f, 6.0f * presence);
+                p->presenceR.update_coeffs(p->sampleRate, 2500.0f, 0.8f, 6.0f * presence);
+                p->lastPresence = presence;
             }
-            p->iso226.process(outMixL, outMixR);
+            if (fabsf(bass - p->lastBassDb) > 0.0001f) {
+                p->bassShelfL.update_shelf(p->sampleRate, 180.0f, bass, false);
+                p->bassShelfR.update_shelf(p->sampleRate, 180.0f, bass, false);
+                p->lastBassDb = bass;
+            }
+            if (fabsf(high - p->lastTrebleDb) > 0.0001f) {
+                p->trebleShelfL.update_shelf(p->sampleRate, 8000.0f, high, true);
+                p->trebleShelfR.update_shelf(p->sampleRate, 8000.0f, high, true);
+                p->lastTrebleDb = high;
+            }
         }
-
-        pOut[i * 2] = outMixL * MASTER_GAIN;
-        pOut[i * 2 + 1] = outMixR * MASTER_GAIN;
+        float outL = p->trebleShelfL.process(p->bassShelfL.process(L));
+        float outR = p->trebleShelfR.process(p->bassShelfR.process(R));
+        outL = p->presenceL.process(outL);
+        outR = p->presenceR.process(outR);
+        p->iso226.process(outL, outR);
+        output[0][2*i] = outL;
+        output[0][2*i+1] = outR;
     }
 }
 ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
@@ -402,7 +308,7 @@ ma_node_vtable g_audiophile_eq_vtable = {audiophile_eq_process, NULL, 1, 1, 0};
 void comb_init(CombFilter *c, int sz, float fb, float dp)
 {
     memset(c->buf, 0, sizeof(c->buf));
-    c->size = sz;
+    c->size = (std::max)(1, (std::min)(sz, MAX_COMB_BUF));
     c->idx = 0;
     c->feedback = fb;
     c->damp = dp;
@@ -442,51 +348,44 @@ static float comb_tick(CombFilter *c, float in)
 static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     ReverbNode *r = (ReverbNode *)pNode;
-    if (!g_isReverbOn)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
+    r->enabled.set(g_isReverbOn.load());
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
-    float dry = 1.0f - r->wetMix.next();
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float iL = pIn[i * 2], iR = pIn[i * 2 + 1];
 
-        // 1. Calculate the High-Passed Signal
+        // Keep low bass out of the room so kick weight remains direct and localizable.
         float hpL = r->hpfL.process(iL);
         float hpR = r->hpfR.process(iR);
+        const float room = r->roomSize.next(), damping = r->damp.next();
 
-        // 2. The 15% Bass Bleed Algorithm (85% HPF + 15% RAW) - gently reduced from 20% to keep low-end body full & punchy
-        float bleedL = (hpL * 0.85f) + (iL * 0.15f);
-        float bleedR = (hpR * 0.85f) + (iR * 0.15f);
-
-        // 3. Feed the calculated bleed into the reverb combs
-        float feed = ((bleedL + bleedR) * 0.5f) * 0.2f + ((bleedL - bleedR) * 0.5f) * 0.8f;
+        // Feed both channels independently, including centered sources, while
+        // crossfeeding enough energy to create a room around the stereo image.
+        const float feedL = 0.70f * hpL + 0.30f * hpR;
+        const float feedR = 0.70f * hpR + 0.30f * hpL;
 
         float oL = 0, oR = 0;
         for (int j = 0; j < 4; ++j)
         {
-            oL += comb_tick(&r->combL[j], feed);
-            oR += comb_tick(&r->combR[j], feed);
+            r->combL[j].feedback = r->combR[j].feedback = room;
+            r->combL[j].damp = r->combR[j].damp = damping;
+            oL += comb_tick(&r->combL[j], feedL);
+            oR += comb_tick(&r->combR[j], feedR);
         }
+        oL = ap_tick(&r->apL[1], ap_tick(&r->apL[0], oL * 0.25f));
+        oR = ap_tick(&r->apR[1], ap_tick(&r->apR[0], oR * 0.25f));
+        oL = tanhf(oL);
+        oR = tanhf(oR);
         
-        // Apply soft clipping to prevent 32-bit float->int wrap distortion on heavy feedback
-        oL = tanhf(oL * 0.25f);
-        oR = tanhf(oR * 0.25f);
-        
-        // 4. Output: Keep 100% of the bass (<180 Hz) at full 1.0x volume so Reverb never attenuates low-end punch!
-        // Only apply the wet/dry crossfade to the mids and highs (>180 Hz).
-        float bassL = iL - hpL;
-        float bassR = iR - hpR;
-        float curWet = r->wetMix.next();
-        float curDry = 1.0f - curWet;
-        pOut[i * 2] = bassL + (hpL * curDry + oL * curWet);
-        pOut[i * 2 + 1] = bassR + (hpR * curDry + oR * curWet);
+        // The room is additive: never turn down the dry kick attack, vocal or stereo image
+        // as the user raises Reverb. The wet scale leaves headroom for the final limiter.
+        float curWet = r->wetMix.next() * r->enabled.next();
+        const float wetGain = curWet * (0.45f + 0.40f * curWet);
+        pOut[i * 2] = iL + oL * wetGain;
+        pOut[i * 2 + 1] = iR + oR * wetGain;
     }
 }
 ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
@@ -494,207 +393,142 @@ ma_node_vtable g_reverb_vtable = {reverb_process, NULL, 1, 1, 0};
 // ================================================================
 // SUBWOOFER NODE (Dynamic Thump Expander & Speaker Protection)
 // ================================================================
-static void subwoofer_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *countIn, float **output, ma_uint32 *countOut)
 {
-    SubwooferNode *p = (SubwooferNode *)pNode;
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
-
-    // Bit-exact zero-cost transparent bypass when bass boost is 0
-    if (g_bassGain < 0.001f)
-    {
-        memcpy(pOut, pIn, fc * 2 * sizeof(float));
-        return;
-    }
-
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        float L = pIn[i * 2], R = pIn[i * 2 + 1];
-
-#ifdef __ANDROID__
-        if (g_isAndroidSpeaker)
-        {
-            // 1. ALWAYS protect the Android speaker, even if bass boost is 0
-            const float HP_COEF = 0.018f; // ~120Hz
-            p->hp1L += HP_COEF * (L - p->hp1L);
-            p->hp1R += HP_COEF * (R - p->hp1R);
-            float safeL = L - p->hp1L;
-            float safeR = R - p->hp1R;
-
-            float harmL = 0.0f, harmR = 0.0f;
-
-            // 2. Only generate psychoacoustic harmonics if the user requested bass
-            if (g_bassGain >= 0.001f)
-            {
-                const float LP_COEF = 0.012f; // ~80Hz
-                p->lp1L += LP_COEF * (L - p->lp1L);
-                p->lp1R += LP_COEF * (R - p->lp1R);
-
-                float drive = g_bassGain * 4.0f;
-                auto waveshape = [](float x)
-                {
-                    float ax = fabsf(x);
-                    if (ax > 1.0f)
-                        ax = 1.0f;
-                    return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
-                };
-                harmL = waveshape(p->lp1L * drive);
-                harmR = waveshape(p->lp1R * drive);
-            }
-
-            // Mix the hallucinated bass back into the safe mids
-            pOut[i * 2] = safeL + harmL;
-            pOut[i * 2 + 1] = safeR + harmR;
-            continue; // Skip the earphone logic
-        }
-#endif
-
-        // ==========================================
-        // NORMAL EARPHONE / WINDOWS MODE
-        // ==========================================
-        if (g_isLaptopSpeaker)
-        {
-            // LAPTOP SPEAKER BASS PROTECTION
-            // High-pass real sub-bass to prevent physical distortion, replace with psychoacoustic harmonics
-            const float HP_COEF = 0.015f; // ~100Hz
-            p->hp1L += HP_COEF * (L - p->hp1L);
-            p->hp1R += HP_COEF * (R - p->hp1R);
-            float safeL = L - p->hp1L;
-            float safeR = R - p->hp1R;
-
-            float harmL = 0.0f, harmR = 0.0f;
-            if (g_bassGain >= 0.001f)
-            {
-                const float LP_COEF = 0.012f; // ~80Hz
-                p->lp1L += LP_COEF * (L - p->lp1L);
-                p->lp1R += LP_COEF * (R - p->lp1R);
-                float drive = g_bassGain * 3.5f; // Slightly tamed for laptop
-                auto waveshape = [](float x)
-                {
-                    float ax = fabsf(x);
-                    if (ax > 1.0f) ax = 1.0f;
-                    return (x > 0 ? 1.0f : -1.0f) * (ax - (ax * ax * ax) / 3.0f);
-                };
-                harmL = waveshape(p->lp1L * drive);
-                harmR = waveshape(p->lp1R * drive);
-            }
-            pOut[i * 2] = safeL + harmL;
-            pOut[i * 2 + 1] = safeR + harmR;
-            continue;
-        }
-
-        // ==========================================
-        // AUDIOPHILE STEREO BASS ENGINE (Clean, Punchy, Zero Rattling)
-        // ==========================================
-        float safeBass = (g_bassGain < 0.0f) ? 0.0f : ((g_bassGain > 1.5f) ? 1.5f : g_bassGain);
-
-        // 1. Isolate the entire bass range below 180Hz
-        float totalBassL, nonBassL, totalBassR, nonBassR;
-        p->crossMidBassL.process(L, totalBassL, nonBassL);
-        p->crossMidBassR.process(R, totalBassR, nonBassR);
-
-        // 2. Subsonic High-Pass Filter (32Hz 2nd-order Butterworth HPF)
-        // Completely strips inaudible sub-sonic DC flutter & diaphragm-rattling (<30Hz)
-        // while preserving 100% of musical punch and sub-bass (50Hz - 180Hz).
-        float cleanBassL = p->subsonicL.process(totalBassL);
-        float cleanBassR = p->subsonicR.process(totalBassR);
-
-        // 3. Split into Sub-Bass (32-80Hz) and Mid-Bass (80-180Hz)
-        float subL, midBassL, subR, midBassR;
-        p->crossBassL.process(cleanBassL, subL, midBassL);
-        p->crossBassR.process(cleanBassR, subR, midBassR);
-
-        // 4. Dual Envelope Ballistics (Real-time sub & mid-bass energy monitoring)
-        float subEnergy = (fabsf(subL) + fabsf(subR)) * 0.5f;
-        float midEnergy = (fabsf(midBassL) + fabsf(midBassR)) * 0.5f;
-        const float ENV_ATTACK  = 0.02f;   // ~5ms fast transient rise
-        const float ENV_RELEASE = 0.0015f; // ~80-100ms smooth release
-        p->env30_60  += (subEnergy > p->env30_60  ? ENV_ATTACK : ENV_RELEASE) * (subEnergy - p->env30_60);
-        p->env90_130 += (midEnergy > p->env90_130 ? ENV_ATTACK : ENV_RELEASE) * (midEnergy - p->env90_130);
-
-        // 5. Active Bi-Peak Fundamental Adaptation (Updated on block boundaries / intervals)
-        float sr = (p->sampleRate > 0) ? p->sampleRate : 44100.0f;
-        if (i == 0 || (i & 31) == 0)
-        {
-            float totalEnergy = p->env30_60 + p->env90_130;
-            if (totalEnergy > 0.0001f)
-            {
-                float midRatio = p->env90_130 / totalEnergy;
-                // Dynamically tracks the kick / tabla / bassline thump:
-                // When sub-heavy, anchors near 95Hz; when acoustic mid-punch hits, sweeps up to 125Hz
-                p->targetFreq = 95.0f + (midRatio * 30.0f);
-            }
-            else
-            {
-                p->targetFreq = 105.0f;
-            }
-
-            // Smooth slew toward target frequency (prevents rapid flutter)
-            p->currentFreq += 0.08f * (p->targetFreq - p->currentFreq);
-
-            // Dynamic headroom compensation: scales boost down slightly on already-massive bass tracks
-            float bassDensity = p->env30_60 * 1.2f + p->env90_130 * 0.8f;
-            float autoHeadroom = 1.0f / (1.0f + bassDensity * 0.35f);
-
-            bool freqShifted = fabsf(p->currentFreq - p->lastTunedFreq) >= 1.0f;
-            bool gainChanged = fabsf(safeBass - p->lastBassGain) > 0.005f;
-
-            if (freqShifted || gainChanged || !p->isHighlightInit)
-            {
-                float subBoostDb = (safeBass * 3.8f) * (0.80f + 0.20f * autoHeadroom);
-                float midBoostDb = (safeBass * 2.8f) * (0.80f + 0.20f * autoHeadroom);
-
-                // Peak 1: Clean, punchy 60.0Hz tactile anchor (+10 Hz higher than old 50Hz)
-                // Concentrates sub impact in the 50-75Hz thump band so it doesn't "hit the brain"
-                p->subPeakL.update_coeffs(sr, 60.0f, 1.15f, subBoostDb);
-                p->subPeakR.update_coeffs(sr, 60.0f, 1.15f, subBoostDb);
-
-                // Peak 2: Dynamic fundamental tracking between 95Hz and 125Hz
-                // Locks onto the kick drum / tabla / bass guitar fundamental actively
-                p->midPeakL.update_coeffs(sr, p->currentFreq, 1.25f, midBoostDb);
-                p->midPeakR.update_coeffs(sr, p->currentFreq, 1.25f, midBoostDb);
-
+    auto* p = (SubwooferNode*)node;
+    *countOut = *countIn;
+    p->drive.set((std::clamp)(g_bassGain.load(), 0.0f, 2.1f));
+    p->field.set((std::clamp)(g_bassField.load(), 0.0f, 1.0f));
+    p->room.set(g_roomBass.load() ? 1.0f : 0.0f);
+    const float subHz = g_subBassHz.load(std::memory_order_relaxed);
+    const float sr = p->sampleRate;
+    const bool smallSpeaker = g_isLaptopSpeaker.load() || g_isAndroidSpeaker.load();
+    const int delayL = (std::min)(2047, (int)(0.0035f * sr));
+    const int delayR = (std::min)(2047, (int)(0.0057f * sr));
+    for (ma_uint32 i = 0; i < *countIn; ++i) {
+        const float L = input[0][2*i], R = input[0][2*i+1];
+        const float drive = p->drive.next(), field = p->field.next(), room = p->room.next();
+        float bassL, nonBassL, bassR, nonBassR;
+        p->crossMidBassL.process(L, bassL, nonBassL);
+        p->crossMidBassR.process(R, bassR, nonBassR);
+        const float cleanL = p->subsonicL.process(bassL);
+        const float cleanR = p->subsonicR.process(bassR);
+        float subL, midL, subR, midR;
+        p->crossBassL.process(cleanL, subL, midL);
+        p->crossBassR.process(cleanR, subR, midR);
+        float low60L, above60L, low60R, above60R;
+        p->analysis60L.process(cleanL, low60L, above60L);
+        p->analysis60R.process(cleanR, low60R, above60R);
+        float bodyL, upperL, bodyR, upperR;
+        p->analysis100L.process(above60L, bodyL, upperL);
+        p->analysis100R.process(above60R, bodyR, upperR);
+        const float lowEnergy = (fabsf(low60L) + fabsf(low60R)) * 0.5f;
+        const float bodyEnergy = (fabsf(bodyL) + fabsf(bodyR)) * 0.5f;
+        const float upperEnergy = (fabsf(upperL) + fabsf(upperR)) * 0.5f;
+        const float subEnergy = lowEnergy + bodyEnergy;
+        const float midEnergy = upperEnergy;
+        const float fullEnergy = (fabsf(L) + fabsf(R)) * 0.5f;
+        const float oldEnergy = p->env30_60 + p->env60_90 + p->env90_130;
+        p->env30_60 += (lowEnergy > p->env30_60 ? p->energyAttack : p->energyRelease) * (lowEnergy - p->env30_60);
+        p->env60_90 += (bodyEnergy > p->env60_90 ? p->energyAttack : p->energyRelease) * (bodyEnergy - p->env60_90);
+        p->env90_130 += (upperEnergy > p->env90_130 ? p->energyAttack : p->energyRelease) * (upperEnergy - p->env90_130);
+        p->fullBandEnv += (fullEnergy > p->fullBandEnv ? p->energyAttack : p->energyRelease) * (fullEnergy - p->fullBandEnv);
+        if ((p->tuneCounter++ & 31u) == 0) {
+            const float total = p->env30_60 + p->env60_90 + p->env90_130;
+            const float tracked = total > 0.0001f
+                ? (50.0f * p->env30_60 + 80.0f * p->env60_90 + 112.0f * p->env90_130) / total
+                : 96.0f;
+            p->targetFreq = (std::clamp)(tracked, 78.0f, 118.0f);
+            p->currentFreq += tauCoef(25.0f, sr / 32.0f) * (p->targetFreq - p->currentFreq);
+            const float density = p->env30_60 + p->env60_90 + p->env90_130 * 0.85f;
+            const float bassRatio = total / (p->fullBandEnv + 0.002f);
+            const float scarcityTarget = (std::clamp)((0.26f - bassRatio) / 0.20f, 0.0f, 1.0f);
+            const float bassActivity = (std::clamp)((total - 0.0005f) / 0.006f, 0.0f, 1.0f);
+            const float scarcityCoef = tauCoef(180.0f, sr / 32.0f);
+            p->bassScarcity += scarcityCoef * (scarcityTarget * bassActivity - p->bassScarcity);
+            if (!p->isHighlightInit || fabsf(p->currentFreq - p->lastTunedFreq) > 0.25f ||
+                subHz != p->lastSubHz ||
+                fabsf(drive - p->lastBassGain) > 0.002f || fabsf(density - p->lastDensity) > 0.01f ||
+                fabsf(p->bassScarcity - p->lastScarcity) > 0.01f) {
+                const float headroom = 0.82f + 0.18f / (1.0f + density * 0.35f);
+                // Use broad anchors with bounded scarcity compensation. This keeps
+                // 50-90 Hz and 100-130 Hz masters emotionally consistent without the
+                // former 10 dB song-to-song jump at one narrow moving frequency.
+                // Very low anchors overlap the subsonic protection slope, so
+                // recover a little weight there without touching the punch band.
+                const float deepAnchorScale = subHz <= 40.0f ? 1.20f : 1.0f;
+                const float subDb = drive * (2.2f + 1.6f * p->bassScarcity) * headroom * deepAnchorScale;
+                const float midDb = drive * (3.0f + 2.4f * p->bassScarcity) * headroom;
+                p->subPeakL.update_coeffs(sr, subHz, 0.70f, subDb);
+                p->subPeakR.update_coeffs(sr, subHz, 0.70f, subDb);
+                p->midPeakL.update_coeffs(sr, p->currentFreq, 0.80f, midDb);
+                p->midPeakR.update_coeffs(sr, p->currentFreq, 0.80f, midDb);
+                p->lastBassGain = drive;
                 p->lastTunedFreq = p->currentFreq;
-                p->lastBassGain = safeBass;
+                p->lastSubHz = subHz;
+                p->lastDensity = density;
+                p->lastScarcity = p->bassScarcity;
                 p->isHighlightInit = true;
             }
         }
+        // Run both anchors as ordinary full-signal peaking EQ and mix back only
+        // their difference. Feeding a crossover branch into the peaks rotates the
+        // delta against the dry signal near 100-130 Hz, which can make high Drive
+        // cancel the exact upper-bass fundamentals it is meant to recover.
+        const float shapedBassL = p->midPeakL.process(p->subPeakL.process(L));
+        const float shapedBassR = p->midPeakR.process(p->subPeakR.process(R));
 
-        // Apply peaking filters in pure phase-coherent stereo
-        float boostedSubL = p->subPeakL.process(subL);
-        float boostedSubR = p->subPeakR.process(subR);
-        float boostedMidL = p->midPeakL.process(midBassL);
-        float boostedMidR = p->midPeakR.process(midBassR);
+        // A linked fast/slow envelope distinguishes a kick onset from sustained bass.
+        // Linking both channels preserves the source's stereo position.
+        const float detector = (std::max)(fabsf(cleanL), fabsf(cleanR));
+        p->transientFast += p->transientFastCoef * (detector - p->transientFast);
+        p->transientSlow += p->transientSlowCoef * (detector - p->transientSlow);
+        const float onset = (std::max)(0.0f, p->transientFast - p->transientSlow);
+        const float onsetRatio = (std::min)(1.0f, onset / (p->transientSlow + 0.015f));
+        const float punchGain = 0.42f * drive * onsetRatio;
+        const float tonalBlend = (std::min)(0.65f, 0.36f + 0.07f * drive + 0.12f * p->bassScarcity);
+        const float tonalDeltaL = (shapedBassL - L) * tonalBlend;
+        const float tonalDeltaR = (shapedBassR - R) * tonalBlend;
 
-        // Calibrated broad low-end linear drive:
-        // Provides clean, unmistakable body across 30Hz-180Hz without overloading headroom:
-        // safeBass = 0.25 -> 1.15x (+1.2 dB)
-        // safeBass = 0.75 -> 1.45x (+3.2 dB)
-        // safeBass = 1.50 -> 1.90x (+5.6 dB)
-        float linearScale = 1.0f + (safeBass * 0.60f);
+        // Remove subsonic content as a difference signal, then add tonal weight and
+        // the short upper-bass attack separately. There is no internal bass clipper;
+        // the downstream lookahead limiter remains the single peak-control stage.
+        const float active = (std::min)(1.0f, drive / 0.02f);
+        float outL = L + active * (cleanL - bassL) + tonalDeltaL + midL * punchGain;
+        float outR = R + active * (cleanR - bassR) + tonalDeltaR + midR * punchGain;
 
-        float combinedBassL = (boostedSubL + boostedMidL) * linearScale;
-        float combinedBassR = (boostedSubR + boostedMidR) * linearScale;
+        // Field receives only upper bass and remains independent from Drive.
+        const float sendL = midL;
+        const float sendR = midR;
+        p->fieldDelayL[p->fieldIndex] = sendL;
+        p->fieldDelayR[p->fieldIndex] = sendR;
+        const float reflectL = p->fieldDelayR[(p->fieldIndex + 2048 - delayL) % 2048];
+        const float reflectR = p->fieldDelayL[(p->fieldIndex + 2048 - delayR) % 2048];
+        p->fieldIndex = (p->fieldIndex + 1) % 2048;
+        const float spatialOnset = (std::max)(0.0f, subEnergy + midEnergy - oldEnergy);
+        const float transientSpace = 1.0f / (1.0f + 6.0f * spatialOnset / (oldEnergy + 0.01f));
+        // Compact Bass is an exact no-reflection mode. Bass Field becomes audible
+        // only when 3D Room is explicitly selected.
+        const float space = field * room * 0.30f * transientSpace;
+        outL += space * reflectL;
+        outR += space * reflectR;
 
-        // Ultra-smooth asymptotic analog saturation curve:
-        // - Completely linear up to 0.85 (zero harmonic distortion for musical transients)
-        // - Smooth soft-knee saturation up to 1.20 with wide continuous transition (0.70)
-        // - PREVENTS square-wave flat-topping and eliminates driver rattling completely!
-        auto softCeiling = [](float b) {
-            float ab = fabsf(b);
-            if (ab <= 0.85f) return b;
-            float over = ab - 0.85f;
-            float compressed = 0.85f + 0.35f * tanhf(over / 0.70f);
-            return (b > 0) ? compressed : -compressed;
-        };
-
-        // Combine pristine untouched non-bass (>180Hz) with clean, punchy, rattle-free bass
-        pOut[i * 2]     = nonBassL + softCeiling(combinedBassL);
-        pOut[i * 2 + 1] = nonBassR + softCeiling(combinedBassR);
+        if (smallSpeaker) {
+            // Protect tiny drivers below 48 Hz without deleting musical sub-bass or
+            // the 80-120 Hz chest-hit band. A transient-weighted second harmonic
+            // makes deep kicks audible without adding a constant fuzzy bass layer.
+            const float protectedL = p->speakerProtectionL.process(outL);
+            const float protectedR = p->speakerProtectionR.process(outR);
+            const float virtualL = p->virtualBassL.process(fabsf(subL));
+            const float virtualR = p->virtualBassR.process(fabsf(subR));
+            const float virtualGain = drive * (0.05f + 0.30f * onsetRatio);
+            outL = protectedL + virtualGain * virtualL;
+            outR = protectedR + virtualGain * virtualR;
+        }
+        output[0][2*i] = outL;
+        output[0][2*i+1] = outR;
     }
-
+    g_bassMotionHz.store(p->currentFreq, std::memory_order_relaxed);
 }
 
 ma_node_vtable g_subwoofer_vtable = {subwoofer_process, NULL, 1, 1, 0};
@@ -713,23 +547,6 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
 {
     ConvolutionNode *p = (ConvolutionNode *)pNode;
     
-    // Garbage collection on the audio thread? 
-    // Usually it's better to push it to a lock-free queue, but since we are told to defer:
-    // If deleteCountdown > 0, we decrement. When 0, we delete.
-    if(p->deleteCountdown > 0) {
-        p->deleteCountdown--;
-        if(p->deleteCountdown == 0) {
-            if(p->pendingDeleteL) { delete p->pendingDeleteL; p->pendingDeleteL = nullptr; }
-            if(p->pendingDeleteR) { delete p->pendingDeleteR; p->pendingDeleteR = nullptr; }
-        }
-    }
-
-    if (!g_isConvolutionOn)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
@@ -738,83 +555,26 @@ static void convolution_process(ma_node *pNode, const float **ppFramesIn, ma_uin
     FFTConvolver* cL = p->convL.load(std::memory_order_acquire);
     FFTConvolver* cR = p->convR.load(std::memory_order_acquire);
     
-    if (!cL || !cR)
-    {
-        for (ma_uint32 i = 0; i < fc * 2; i++) pOut[i] = pIn[i];
+
+    if (p->blockSize != 512) {
+        memmove(pOut, pIn, fc * 2 * sizeof(float));
         return;
     }
-
-    const float wetMix = p->wetMix.next();
-    const float dry = 1.0f - wetMix; // BRIR mode support
-    const float wet = wetMix;
-
-    // We process the incoming interleaved data
-    const float HP_COEF = 0.011f;
-    const float LP_COEF = 0.92f;
-    
     p->blockAdapterL.process(pIn, pOut, fc, [&](const float* inBuf, float* outBuf) {
-        std::vector<float> feedL(p->blockSize);
-        std::vector<float> feedR(p->blockSize);
-        std::vector<float> dryL(p->blockSize);
-        std::vector<float> dryR(p->blockSize);
-
-        for(int i = 0; i < p->blockSize; ++i) {
-            float inL = inBuf[i*2];
-            float inR = inBuf[i*2+1];
-            dryL[i] = inL;
-            dryR[i] = inR;
-
-            float hpL = p->hpfL.process(inL);
-            float hpR = p->hpfR.process(inR);
-
-            // 15% Bass Bleed (gently dialed back from 20% to preserve full low-end body & punch)
-            float fL = (hpL * 0.85f) + (inL * 0.15f);
-            float fR = (hpR * 0.85f) + (inR * 0.15f);
-
-            float currentWet = p->wetMix.next();
-            
-            if (currentWet < 0.99f) {
-                float tempL = fL;
-                // Balanced 20% cross-bleed
-                fL += fR * 0.20f;
-                fR += tempL * 0.20f;
-            }
-            feedL[i] = fL;
-            feedR[i] = fR;
+        if (!cL || !cR || (p->wetMix.target.load() == 0.0f && p->wetMix.peek() < 1.0e-6f)) {
+            std::memcpy(outBuf, inBuf, 512 * 2 * sizeof(float));
+            return;
         }
-        
-        std::vector<float> convLOut(p->blockSize);
-        std::vector<float> convROut(p->blockSize);
-        
-        cL->process(feedL.data(), convLOut.data());
-        cR->process(feedR.data(), convROut.data());
-        
-        for(int i = 0; i < p->blockSize; ++i) {
-            float sumL = convLOut[i];
-            float sumR = convROut[i];
-            float inL = dryL[i];
-            float inR = dryR[i];
-            
-            // Wait, we need the exact dry/wet for this sample to mirror the old code accurately.
-            // But we advanced the wetMix inside the feed loop! We can just use the outer wet and dry for simplicity, 
-            // since block size is 512 samples.
-            // No, the original code used const float dry = 1.0f - p->wetMix.next(); but Wait, wait! 
-            // In the original, dry/wet was sampled once per sample. But here we have block processing.
-            // Let's just use dry and wet from the outer scope, which were defined before the blockAdapter.
-            // Oh, wait, the old code used .next() in a loop. I will just use dry and wet directly.
-
-            p->hpStateL += HP_COEF * (sumL - p->hpStateL);
-            p->hpStateR += HP_COEF * (sumR - p->hpStateR);
-            float wetL = sumL - p->hpStateL;
-            float wetR = sumR - p->hpStateR;
-
-            p->lpStateL += LP_COEF * (wetL - p->lpStateL);
-            p->lpStateR += LP_COEF * (wetR - p->lpStateR);
-            wetL = p->lpStateL;
-            wetR = p->lpStateR;
-
-            outBuf[i*2]   = inL * dry + wetL * wet;
-            outBuf[i*2+1] = inR * dry + wetR * wet;
+        for (int i = 0; i < 512; ++i) {
+            p->feedL[i] = inBuf[2*i];
+            p->feedR[i] = inBuf[2*i+1];
+            p->mix[i] = p->wetMix.next();
+        }
+        cL->process(p->feedL, p->wetL);
+        cR->process(p->feedR, p->wetR);
+        for (int i = 0; i < 512; ++i) {
+            outBuf[2*i] = p->feedL[i] + p->mix[i] * (p->wetL[i] - p->feedL[i]);
+            outBuf[2*i+1] = p->feedR[i] + p->mix[i] * (p->wetR[i] - p->feedR[i]);
         }
     });
 }
@@ -831,22 +591,13 @@ static void headphone_comp_process(ma_node *pNode, const float **ppFramesIn, ma_
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    // Bit-identical zero-cost bypass when disabled
-    if (p->enabled.fullyOff() || p->convL.load(std::memory_order_relaxed) == nullptr)
-    {
-        memcpy(pOut, pIn, fc * 2 * sizeof(float));
-        return;
-    }
-
     FFTConvolver *cL = p->convL.load(std::memory_order_relaxed);
     FFTConvolver *cR = p->convR.load(std::memory_order_relaxed);
-    if (!cL || !cR)
-    {
-        memcpy(pOut, pIn, fc * 2 * sizeof(float));
-        return;
-    }
-
     p->blockAdapterL.process(pIn, pOut, fc, [&](const float *inBuf, float *outBuf) {
+        if (!cL || !cR || p->enabled.fullyOff()) {
+            std::memcpy(outBuf, inBuf, 512 * 2 * sizeof(float));
+            return;
+        }
         float feedL[512];
         float feedR[512];
         int bs = p->blockSize;
@@ -880,17 +631,7 @@ static void headphone_comp_process(ma_node *pNode, const float **ppFramesIn, ma_
         }
     });
 
-    if (p->deleteCountdown > 0)
-    {
-        p->deleteCountdown--;
-        if (p->deleteCountdown == 0)
-        {
-            delete p->pendingDeleteL;
-            delete p->pendingDeleteR;
-            p->pendingDeleteL = nullptr;
-            p->pendingDeleteR = nullptr;
-        }
-    }
+
 }
 ma_node_vtable g_headphone_comp_vtable = {headphone_comp_process, NULL, 1, 1, 0};
 
@@ -901,27 +642,22 @@ ma_node_vtable g_headphone_comp_vtable = {headphone_comp_process, NULL, 1, 1, 0}
 static void multiband_compressor_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
     MultibandCompressorNode *c = (MultibandCompressorNode *)pNode;
-    if (!g_isCompressOn)
-    {
-        memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
-        *pFrameCountOut = *pFrameCountIn;
-        return;
-    }
+    c->enabled.set(g_isCompressOn.load());
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
     *pFrameCountOut = fc;
 
-    float thresh = c->threshold.next();
-    float makeup = c->makeupGain.next();
 
     for (ma_uint32 i = 0; i < fc; ++i)
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        // 1. ISOLATE HIGHS FOR DETECTION (So Subwoofer bass boost doesn't trigger the compressor!)
-        c->lpStateL += 0.015f * (L - c->lpStateL);
-        c->lpStateR += 0.015f * (R - c->lpStateR);
+        const float thresh = c->threshold.next(), makeup = c->makeupGain.next();
+        const float enabled = c->enabled.next();
+        // Detector and processing both address the non-bass band.
+        c->lpStateL += c->detectorCoef * (L - c->lpStateL);
+        c->lpStateR += c->detectorCoef * (R - c->lpStateR);
         float highDetL = L - c->lpStateL;
         float highDetR = R - c->lpStateR;
         float maxHighPeak = fmaxf(fabsf(highDetL), fabsf(highDetR));
@@ -944,24 +680,20 @@ static void multiband_compressor_process(ma_node *pNode, const float **ppFramesI
         }
 
         // 2. DELAY LINE
+        highGain = 1.0f + enabled * (highGain - 1.0f);
         float dL = c->dlyL[c->dlyIdx];
         float dR = c->dlyR[c->dlyIdx];
         c->dlyL[c->dlyIdx] = L;
         c->dlyR[c->dlyIdx] = R;
         c->dlyIdx = (c->dlyIdx + 1) % ((c->delaySamples > 0 && c->delaySamples <= COMP_LOOKAHEAD_SAMPLES) ? c->delaySamples : COMP_LOOKAHEAD_SAMPLES);
 
-        // 3. SPLIT DELAYED SIGNAL INTO LOW AND HIGH (Phase-coherent LR4)
-        float bassL, highL_d, bassR, highR_d;
-        c->crossL.process(dL, bassL, highL_d);
-        c->crossR.process(dR, bassR, highR_d);
-
-        // Keep legacy states updated in case of external inspections
-        c->delayLpStateL = bassL;
-        c->delayLpStateR = bassR;
-
-        // 4. THE FIX: Apply gain ONLY to highs. Bass bypasses compression entirely!
-        pOut[i * 2] = (bassL + (highL_d * highGain)) * makeup;
-        pOut[i * 2 + 1] = (bassR + (highR_d * highGain)) * makeup;
+        // Complementary residual band: changing high gain must not invert a crossover lobe.
+        c->delayLpStateL += c->detectorCoef * (dL - c->delayLpStateL);
+        c->delayLpStateR += c->detectorCoef * (dR - c->delayLpStateR);
+        const float highL_d = dL - c->delayLpStateL;
+        const float highR_d = dR - c->delayLpStateR;
+        pOut[i * 2] = (dL + highL_d * (highGain - 1.0f)) * makeup;
+        pOut[i * 2 + 1] = (dR + highR_d * (highGain - 1.0f)) * makeup;
     }
 }
 ma_node_vtable g_multiband_compressor_vtable = {multiband_compressor_process, NULL, 1, 1, 0};
@@ -972,92 +704,73 @@ ma_node_vtable g_multiband_compressor_vtable = {multiband_compressor_process, NU
 // ================================================================
 // MASTERING SOFT-CLIPPER WITH LOOKAHEAD
 // ================================================================
-static void limiter_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+static void limiter_process(ma_node *node, const float **input, ma_uint32 *countIn, float **output, ma_uint32 *countOut)
 {
-    LimiterNode *p = (LimiterNode *)pNode;
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
+    auto* p = (LimiterNode*)node;
+    *countOut = *countIn;
+    p->master.set((std::clamp)(g_outputGain.load(), 0.0f, 2.0f));
+    constexpr float ceiling = 0.891251f;
+    for (ma_uint32 i = 0; i < *countIn; ++i) {
+        const float control = p->master.next();
+        const float amount = (std::clamp)(control - 1.0f, 0.0f, 1.0f);
+        const float baseVolume = (std::min)(control, 1.0f);
+        const float inL = input[0][2*i], inR = input[0][2*i+1];
 
-#ifdef __ANDROID__
-    if (g_isAndroidSpeaker)
-    {
-        // THE LOUDNESS WAR CLIPPER (Android Speakers Only)
-        for (ma_uint32 i = 0; i < fc; ++i)
-        {
-            float b = p->boost.next();
-            float L = pIn[i * 2] * b;
-            float R = pIn[i * 2 + 1] * b;
+        // Stereo-linked loudness maximizer. A bass-relaxed RMS sidechain keeps
+        // sustained sub energy from pulling vocals and detail down, while the
+        // downstream true-peak limiter remains the absolute safety stage.
+        p->scLpL += p->loudnessSidechainCoef * (inL - p->scLpL);
+        p->scLpR += p->loudnessSidechainCoef * (inR - p->scLpR);
+        const float detectL = (inL - p->scLpL) + 0.35f * p->scLpL;
+        const float detectR = (inR - p->scLpR) + 0.35f * p->scLpR;
+        const float detector = sqrtf(0.5f * (detectL * detectL + detectR * detectR) + 1.0e-12f);
+        const float envCoef = detector > p->loudnessEnv ? p->loudnessAttackCoef : p->loudnessReleaseCoef;
+        p->loudnessEnv = envCoef * p->loudnessEnv + (1.0f - envCoef) * detector;
 
-            auto clip = [](float x)
-            {
-                float ax = fabsf(x);
-                if (ax < 0.70f) return x;
-                float over = ax - 0.70f;
-                float lim = 0.70f + 0.30f * tanhf(over / 0.30f);
-                return (x > 0) ? lim : -lim;
-            };
-
-            pOut[i * 2] = clip(L);
-            pOut[i * 2 + 1] = clip(R);
+        if ((p->loudnessControlCounter++ & 31u) == 0) {
+            p->loudnessThreshold = powf(10.0f, (-12.0f - 4.0f * amount) / 20.0f);
+            p->loudnessRatio = 1.0f + 1.5f * amount;
+            p->loudnessMakeup = powf(10.0f, 8.0f * amount / 20.0f);
         }
-        return; 
-    }
-#endif
+        float compression = 1.0f;
+        if (amount > 0.0001f && p->loudnessEnv > p->loudnessThreshold) {
+            const float compressedLevel = p->loudnessThreshold
+                + (p->loudnessEnv - p->loudnessThreshold) / p->loudnessRatio;
+            compression = compressedLevel / p->loudnessEnv;
+        }
+        const float targetLoudnessGain = baseVolume * p->loudnessMakeup * compression;
+        const float gainCoef = targetLoudnessGain < p->loudnessGain
+            ? p->loudnessGainAttackCoef : p->loudnessGainReleaseCoef;
+        p->loudnessGain = gainCoef * p->loudnessGain + (1.0f - gainCoef) * targetLoudnessGain;
 
-    // -1.0 dBTP. This is the EBU R128 / Apple / Spotify delivery standard.
-    const float CEILING = 0.891251f;   // 10^(-1/20)
-    
-    float sr = p->sr > 0.0f ? p->sr : 44100.0f;
-    float tauCoef = 1.0f - std::exp(-1.0f / (1.5f * 0.001f * sr));
-
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        float boost = p->boost.next();
-        float multiplier = g_isLaptopSpeaker ? 1.3f : 1.0f;
-        float L = pIn[i * 2] * boost * multiplier;
-        float R = pIn[i * 2 + 1] * boost * multiplier;
-
-        // --- TRUE-PEAK DETECTION on a 4x oversampled copy ---
+        const float gain = p->loudnessGain * p->boost.next();
+        float L = inL * gain, R = inR * gain;
+        if (!std::isfinite(L)) L = 0.0f;
+        if (!std::isfinite(R)) R = 0.0f;
         float up[8];
         p->osDetect.upsample(L, R, up);
-        float tp = 0.0f;
-        for (int k = 0; k < 8; ++k) tp = fmaxf(tp, fabsf(up[k]));
-
-        // --- Gain computation ---
-        float targetGain = (tp > CEILING) ? (CEILING / tp) : 1.0f;
-
-        // Asymmetric envelope: instant attack (lookahead absorbs it), smooth release.
-        if (targetGain < p->gainEnv)
-            p->gainEnv = targetGain;                                        // attack
-        else
-            p->gainEnv += (targetGain - p->gainEnv) * p->releaseCoef;       // release
-        
-        p->gainEnv = dmexFlush(p->gainEnv);
-        p->gainSmooth += (p->gainEnv - p->gainSmooth) * tauCoef;
-
-        // --- Lookahead delay so the gain reduction arrives BEFORE the transient ---
-        int w = p->dlyIdx;
+        float peak = (std::max)(fabsf(L), fabsf(R));
+        for (float x : up) peak = (std::max)(peak, fabsf(x));
+        const float target = peak > ceiling ? ceiling / peak : 1.0f;
+        if (target <= p->gainEnv) {
+            p->gainEnv = target;
+            p->holdSamples = p->delaySamples + 32;
+        } else if (p->holdSamples > 0) {
+            --p->holdSamples;
+        } else {
+            p->gainEnv += (target - p->gainEnv) * (1.0f - p->releaseCoef);
+        }
+        p->gainSmooth = p->gainEnv;
+        const int w = p->dlyIdx;
         p->dlyL[w] = L;
         p->dlyR[w] = R;
-        int r = w - p->delaySamples;
-        if (r < 0) r += LIMITER_LOOKAHEAD_SAMPLES;
-        
-        float dL = p->dlyL[r];
-        float dR = p->dlyR[r];
-        if (++p->dlyIdx >= LIMITER_LOOKAHEAD_SAMPLES) p->dlyIdx = 0;
-
-        float oL = dL * p->gainSmooth;
-        float oR = dR * p->gainSmooth;
-
-        // Final hard safety clip.
-        pOut[i * 2] = (oL > 1.0f) ? 1.0f : (oL < -1.0f ? -1.0f : oL);
-        pOut[i * 2 + 1] = (oR > 1.0f) ? 1.0f : (oR < -1.0f ? -1.0f : oR);
+        const int r = (w + LIMITER_LOOKAHEAD_SAMPLES - p->delaySamples) % LIMITER_LOOKAHEAD_SAMPLES;
+        output[0][2*i] = (std::clamp)(p->dlyL[r] * p->gainEnv, -ceiling, ceiling);
+        output[0][2*i+1] = (std::clamp)(p->dlyR[r] * p->gainEnv, -ceiling, ceiling);
+        p->dlyIdx = (w + 1) % LIMITER_LOOKAHEAD_SAMPLES;
     }
-    
     extern std::atomic<float> g_limiterGR;
-    g_limiterGR.store(p->gainSmooth, std::memory_order_relaxed);
+    g_limiterGR.store(p->gainEnv * (std::min)(1.0f, p->loudnessGain), std::memory_order_relaxed);
 }
 ma_node_vtable g_limiter_vtable = {limiter_process, NULL, 1, 1, 0};
 
@@ -1073,13 +786,20 @@ static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn
     *pFrameCountOut = fc;
 
     // Real-time thread-safe toggle
-    p->gate.set(g_is8DModeOn);
+    const bool requested = g_is8DModeOn.load() && p->separationTarget() > 0.0001f;
+    p->gate.set(requested);
 
     // 1. THE ACOUSTIC SHIELD: Absolute bit-identical zero footprint when disabled.
     if (p->gate.fullyOff())
     {
+        p->rendererSleeping = true;
         memcpy(pOut, pIn, fc * 2 * sizeof(float));
         return;
+    }
+
+    if (requested && p->rendererSleeping) {
+        p->upmixer.reset();
+        p->rendererSleeping = false;
     }
 
     for (ma_uint32 i = 0; i < fc; i++)
@@ -1106,84 +826,43 @@ ma_node_vtable g_dynamic_spatializer_vtable = {
     0};
 
 // ================================================================
-// AUDIO RESTORATION (FFT DENOISER & UPSCALER)
+// HARMONIC AIR (oversampled synthesis, not recovery of lost information)
 // ================================================================
-
-static void audio_restoration_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
+static void audio_restoration_process(ma_node *node, const float **input, ma_uint32 *countIn, float **output, ma_uint32 *countOut)
 {
-    AudioRestorationNode *p = (AudioRestorationNode *)pNode;
-    const float *pIn = ppFramesIn[0];
-    float *pOut = ppFramesOut[0];
-    ma_uint32 fc = *pFrameCountIn;
-    *pFrameCountOut = fc;
-
-    if (p->denoiseIntensity < 0.01f && p->upscaleTarget < 0.01f && p->presenceBoost < 0.01f) {
-        memcpy(pOut, pIn, fc * 2 * sizeof(float));
-        return;
-    }
-
-    // Simplified real-time processing loop for Restoration
-    for (ma_uint32 i = 0; i < fc; ++i)
-    {
-        float L = pIn[i * 2];
-        float R = pIn[i * 2 + 1];
-
-        // 1. Perfect 24dB/Octave Crossover Separation
-        // We split the signal at 8000Hz. This GUARANTEES that vocals (which sit below 4000Hz) 
-        // absolutely never touch the exciter, completely eliminating vocal rattling.
-        float lowL = 0, trebleL = 0;
-        p->crossoverL.process(L, lowL, trebleL);
-        float lowR = 0, trebleR = 0;
-        p->crossoverR.process(R, lowR, trebleR);
-
-        // 2. Denoise (Tape Hiss / Artifact Reduction)
-        // We gently attenuate tape hiss without deleting original studio highs (max 15% attenuation instead of 80%)
-        float cleanTrebleL = trebleL * (1.0f - (p->denoiseIntensity * 0.15f));
-        float cleanTrebleR = trebleR * (1.0f - (p->denoiseIntensity * 0.15f));
-
-        // 3. Bitwise Predictive Upscale (Synthesize upper harmonic air)
-        // Mathematically square the treble to generate the exact Octave (2nd Harmonic)
-        // We use a cheap 2x oversampling (linear interpolation) to push aliasing distortion out of the audible band!
-        float midTrebleL = (p->prevTrebleL + trebleL) * 0.5f;
-        float midTrebleR = (p->prevTrebleR + trebleR) * 0.5f;
-        
-        float synthL1 = (p->prevTrebleL * p->prevTrebleL) * 15.0f;
-        float synthR1 = (p->prevTrebleR * p->prevTrebleR) * 15.0f;
-        
-        float synthL2 = (midTrebleL * midTrebleL) * 15.0f;
-        float synthR2 = (midTrebleR * midTrebleR) * 15.0f;
-        
-        // Simple average downsample
-        float synthL = (synthL1 + synthL2) * 0.5f;
-        float synthR = (synthR1 + synthR2) * 0.5f;
-        
-        p->prevTrebleL = trebleL;
-        p->prevTrebleR = trebleR;
-        
-        // High-Pass filter at 10kHz instantly strips the mathematically generated DC offset (0Hz)
-        // and removes IMD difference frequencies, leaving only pure, predictive crisp 16kHz+ air!
-        synthL = p->harmonicFilterL.process(synthL);
-        synthR = p->harmonicFilterR.process(synthR);
-        
-        // 4. Mix
-        // The Linkwitz-Riley filters perfectly sum back together natively (lowL + cleanTrebleL).
-        float harmonicGain = p->upscaleTarget * 2.5f;
-        float presenceGain = 1.0f + (p->presenceBoost * 1.5f);
-        
-        // Soft-clip ONLY the generated harmonics so they don't pierce the ear, 
-        // completely protecting the original audio from master-bus clipping!
-        synthL = tanhf(synthL * harmonicGain);
-        synthR = tanhf(synthR * harmonicGain);
-        
-        L = lowL + (cleanTrebleL * presenceGain) + synthL;
-        R = lowR + (cleanTrebleR * presenceGain) + synthR;
-
-        // 3. Sinc-Interpolation LPF (Smoothing the new harmonics to prevent aliasing)
-        L = p->lowPassSincL.process(L);
-        R = p->lowPassSincR.process(R);
-
-        pOut[i * 2] = L;
-        pOut[i * 2 + 1] = R;
+    auto* p = (AudioRestorationNode*)node;
+    *countOut = *countIn;
+    p->amount.set(g_isUpscaleOn.load() ? (std::clamp)(g_upscaleTarget.load(), 0.0f, 2.0f) : 0.0f);
+    const bool sleeping = g_ecoMode.load() && p->amount.target.load() == 0.0f && p->amount.peek() < 1.0e-6f;
+    for (ma_uint32 i = 0; i < *countIn; ++i) {
+        const float L = input[0][2*i], R = input[0][2*i+1];
+        if (sleeping) {
+            const int w = p->delayIndex, r = (w + 64 - p->delaySamples) % 64;
+            p->dryL[w] = L; p->dryR[w] = R;
+            output[0][2*i] = p->dryL[r]; output[0][2*i+1] = p->dryR[r];
+            p->delayIndex = (w + 1) % 64;
+            continue;
+        }
+        float lowL, highL, lowR, highR;
+        p->crossoverL.process(L, lowL, highL);
+        p->crossoverR.process(R, lowR, highR);
+        float up[8];
+        p->os.upsample(highL, highR, up);
+        for (float& x : up) {
+            const float bounded = tanhf(3.0f * x);
+            x = bounded * bounded;
+        }
+        float wetL, wetR;
+        p->os.downsample(up, &wetL, &wetR);
+        wetL = p->harmonicFilterL.process(wetL);
+        wetR = p->harmonicFilterR.process(wetR);
+        const int w = p->delayIndex, r = (w + 64 - p->delaySamples) % 64;
+        p->dryL[w] = L;
+        p->dryR[w] = R;
+        const float amount = 0.15f * p->amount.next();
+        output[0][2*i] = p->dryL[r] + amount * wetL;
+        output[0][2*i+1] = p->dryR[r] + amount * wetR;
+        p->delayIndex = (w + 1) % 64;
     }
 }
 ma_node_vtable g_restoration_vtable = {audio_restoration_process, NULL, 1, 1, 0};
@@ -1205,6 +884,26 @@ extern std::atomic<float> g_audioLevel;
 void dsp_flush_all_state(void)
 {
     g_headphoneCompNode.reset();
+    g_8DNode.reset();
+    g_8DNode.rendererSleeping = true;
+    g_exciterNode.os.reset();
+    g_exciterNode.cleanOs.reset();
+    std::fill(std::begin(g_exciterNode.dryDelayL), std::end(g_exciterNode.dryDelayL), 0.0f);
+    std::fill(std::begin(g_exciterNode.dryDelayR), std::end(g_exciterNode.dryDelayR), 0.0f);
+    g_exciterNode.dryIdx = 0;
+    g_audiophileEQNode.bassShelfL.reset(); g_audiophileEQNode.bassShelfR.reset();
+    g_audiophileEQNode.trebleShelfL.reset(); g_audiophileEQNode.trebleShelfR.reset();
+    g_audiophileEQNode.presenceL.reset(); g_audiophileEQNode.presenceR.reset();
+    g_audiophileEQNode.iso226.lowShelfL.reset(); g_audiophileEQNode.iso226.lowShelfR.reset();
+    g_audiophileEQNode.iso226.highShelfL.reset(); g_audiophileEQNode.iso226.highShelfR.reset();
+    g_subwooferNode.crossBassL.reset(); g_subwooferNode.crossBassR.reset();
+    g_subwooferNode.crossMidBassL.reset(); g_subwooferNode.crossMidBassR.reset();
+    g_subwooferNode.fieldIndex = 0;
+    std::fill(std::begin(g_subwooferNode.fieldDelayL), std::end(g_subwooferNode.fieldDelayL), 0.0f);
+    std::fill(std::begin(g_subwooferNode.fieldDelayR), std::end(g_subwooferNode.fieldDelayR), 0.0f);
+    g_reverbNode.hpfL.reset(); g_reverbNode.hpfR.reset();
+    g_spatializerNode.crossSubwooferL.reset(); g_spatializerNode.crossSubwooferR.reset();
+    g_spatializerNode.bandsMid.reset(); g_spatializerNode.bandsSide.reset();
     {
         std::lock_guard<std::mutex> lk(g_irMutex);
         
@@ -1218,8 +917,8 @@ void dsp_flush_all_state(void)
         g_convolutionNode.lpStateR = 0.0f;
         g_convolutionNode.hpfL.reset();
         g_convolutionNode.hpfR.reset();
-        g_convolutionNode.blockAdapterL.fill = 0;
-        g_convolutionNode.blockAdapterR.fill = 0;
+        g_convolutionNode.blockAdapterL.reset();
+        g_convolutionNode.blockAdapterR.reset();
 
     }
 
@@ -1252,9 +951,18 @@ void dsp_flush_all_state(void)
     memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
     g_limiterNode.dlyIdx = 0;
     g_limiterNode.gainEnv = 1.0f;
+    g_limiterNode.gainSmooth = 1.0f;
+    g_limiterNode.holdSamples = 0;
+    g_limiterNode.osDetect.reset();
     g_limiterNode.peakEnv = 0.0f;
     g_limiterNode.scLpL = 0.0f;
     g_limiterNode.scLpR = 0.0f;
+    g_limiterNode.loudnessEnv = 0.0f;
+    g_limiterNode.loudnessGain = 1.0f;
+    g_limiterNode.loudnessThreshold = 1.0f;
+    g_limiterNode.loudnessRatio = 1.0f;
+    g_limiterNode.loudnessMakeup = 1.0f;
+    g_limiterNode.loudnessControlCounter = 0;
 
     g_exciterNode.hpStateL = 0.0f;
     g_exciterNode.hpStateR = 0.0f;
@@ -1268,21 +976,33 @@ void dsp_flush_all_state(void)
     g_audiophileEQNode.dcBlockR = 0.0f;
     g_audiophileEQNode.env = 0.0f;
 
-    g_subwooferNode.hp1L = 0.0f; g_subwooferNode.hp1R = 0.0f;
-    g_subwooferNode.lp1L = 0.0f; g_subwooferNode.lp1R = 0.0f;
+    g_subwooferNode.speakerProtectionL.reset();
+    g_subwooferNode.speakerProtectionR.reset();
+    g_subwooferNode.virtualBassL.reset();
+    g_subwooferNode.virtualBassR.reset();
     g_subwooferNode.env30_60 = 0.0f;
     g_subwooferNode.env60_90 = 0.0f;
     g_subwooferNode.env90_130 = 0.0f;
+    g_subwooferNode.transientFast = 0.0f;
+    g_subwooferNode.transientSlow = 0.0f;
+    g_subwooferNode.fullBandEnv = 0.0f;
+    g_subwooferNode.bassScarcity = 0.0f;
     g_subwooferNode.currentFreq = 105.0f;
     g_subwooferNode.targetFreq = 105.0f;
     g_subwooferNode.lastTunedFreq = -1.0f;
+    g_subwooferNode.lastSubHz = -1.0f;
     g_subwooferNode.subsonicL.reset();
     g_subwooferNode.subsonicR.reset();
+    g_subwooferNode.analysis60L.reset();
+    g_subwooferNode.analysis60R.reset();
+    g_subwooferNode.analysis100L.reset();
+    g_subwooferNode.analysis100R.reset();
     g_subwooferNode.subPeakL.reset();
     g_subwooferNode.subPeakR.reset();
     g_subwooferNode.midPeakL.reset();
     g_subwooferNode.midPeakR.reset();
     g_subwooferNode.lastBassGain = -1.0f;
+    g_subwooferNode.lastScarcity = -1.0f;
     g_subwooferNode.isHighlightInit = false;
 
     memset(g_spatializerNode.centerDelayBuf, 0, sizeof(g_spatializerNode.centerDelayBuf));
@@ -1290,6 +1010,7 @@ void dsp_flush_all_state(void)
     for(int i = 0; i < 3; ++i) {
         memset(g_spatializerNode.rearApL[i].buf, 0, sizeof(g_spatializerNode.rearApL[i].buf));
         memset(g_spatializerNode.rearApR[i].buf, 0, sizeof(g_spatializerNode.rearApR[i].buf));
+        g_spatializerNode.rearApL[i].idx = g_spatializerNode.rearApR[i].idx = 0;
     }
     g_spatializerNode.rearLpL = g_spatializerNode.rearLpR = 0.0f;
     g_spatializerNode.notchTopL1 = g_spatializerNode.notchTopL2 = 0.0f;
@@ -1303,10 +1024,7 @@ void dsp_flush_all_state(void)
     g_widenerNode.sideLp = 0.0f;
     g_widenerNode.sideLp2 = 0.0f;
 
-    g_restorationNode.x1L = 0.0f;
-    g_restorationNode.x1R = 0.0f;
-    g_restorationNode.prevTrebleL = 0.0f;
-    g_restorationNode.prevTrebleR = 0.0f;
+    g_restorationNode.init(g_subwooferNode.sampleRate);
 
     g_audioLevel.store(0.0f, std::memory_order_relaxed);
 }

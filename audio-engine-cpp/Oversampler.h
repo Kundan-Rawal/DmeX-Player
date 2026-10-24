@@ -69,39 +69,34 @@ struct Halfband2x {
     }
 
     inline void up(float x, float* out2) {
-        if (zUp.size() == 0 || taps == 0 || h.size() == 0) { out2[0] = x; out2[1] = x; return; }
-        zUp[idxUp] = x;
-        int centre = taps / 2;
-        int ic = idxUp - centre; if (ic < 0) ic += taps;
-        out2[0] = zUp[ic] * 1.0f;
-
-        float acc = 0.0f;
-        for (int n = 1; n < taps; n += 2) {
-            int i = idxUp - n; if (i < 0) i += taps;
-            acc += h[n] * zUp[i];
+        for (int phase = 0; phase < 2; ++phase) {
+            zUp[idxUp] = phase == 0 ? x : 0.0f;
+            float sum = 0.0f;
+            for (int n = 0; n < taps; ++n) {
+                int i = idxUp - n;
+                if (i < 0) i += taps;
+                sum += h[n] * zUp[i];
+            }
+            out2[phase] = 2.0f * sum;
+            if (++idxUp >= taps) idxUp = 0;
         }
-        out2[1] = acc * 2.0f;
-
-        if (++idxUp >= taps) idxUp = 0;
     }
 
     inline float down(const float* in2) {
-        if (zDown.size() == 0 || taps == 0 || h.size() == 0) return in2[0];
-        float acc = 0.0f;
-        for (int k = 0; k < 2; ++k) {
-            zDown[idxDown] = in2[k];
-            if (k == 1) {
-                int centre = taps / 2;
-                int ic = idxDown - centre; if (ic < 0) ic += taps;
-                acc = zDown[ic] * 0.5f;
-                for (int n = 1; n < taps; n += 2) {
-                    int i = idxDown - n; if (i < 0) i += taps;
-                    acc += h[n] * zDown[i];
+        float sum = 0.0f;
+        for (int phase = 0; phase < 2; ++phase) {
+            zDown[idxDown] = in2[phase];
+            // Even-phase decimation gives an integer round-trip delay.
+            if (phase == 0) {
+                for (int n = 0; n < taps; ++n) {
+                    int i = idxDown - n;
+                    if (i < 0) i += taps;
+                    sum += h[n] * zDown[i];
                 }
             }
             if (++idxDown >= taps) idxDown = 0;
         }
-        return acc;
+        return sum;
     }
 };
 
@@ -111,7 +106,7 @@ struct Halfband2x {
 struct Oversampler4x {
     Halfband2x s1L, s1R, s2L, s2R;
 
-    void init(int taps1 = 31, int taps2 = 15) {
+    void init(int taps1 = 33, int taps2 = 17) {
         s1L.init(taps1); s1R.init(taps1);
         s2L.init(taps2); s2R.init(taps2);
     }
@@ -145,6 +140,6 @@ struct Oversampler4x {
     }
 
     float latencySamples() const {
-        return (s1L.taps / 2) * 0.5f + (s2L.taps / 2) * 0.25f;
+        return (s1L.taps - 1) * 0.5f + (s2L.taps - 1) * 0.25f;
     }
 };

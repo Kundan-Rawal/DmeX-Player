@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/impulses/": "resources/impulses/",
+      "resources/hrtf/": "resources/hrtf/",
+      "../../audio-engine-cpp/third_party/steamaudio/lib/windows-x64/phonon.dll": "phonon.dll",
+      "../../audio-engine-cpp/third_party/steamaudio/LICENSE.md": "licenses/steam-audio/LICENSE.md",
+      "../../audio-engine-cpp/third_party/steamaudio/THIRDPARTY.md": "licenses/steam-audio/THIRDPARTY.md"
+    }
+  }
+}

@@ -1,48 +1,31 @@
 import { Track } from '../types';
 
+export const cleanMusicText = (value: string) => value
+  .replace(/[\[(][^\])]*(?:pagalworld|pagalnew|mp3mad|djpunjab|mr-jatt|\.(?:com|mobi|net|in))[^\])]*[\])]/gi, ' ')
+  .replace(/\b(?:pagalworld|pagalnew|mp3mad|djpunjab|mr-jatt)(?:\.(?:com|mobi|net|in))?\b/gi, ' ')
+  .replace(/\.(?:mp3|flac|wav|m4a|aac|ogg|aiff?)$/i, '')
+  .replace(/\s+/g, ' ').trim();
 
 export function sanitizeForLyricsAPI(track: Track) {
-    // 1. TRUST THE LIBRARY FIRST: Grab what the artistEngine already figured out
-    let queryArtist = (track.artist && track.artist !== "Unknown") ? track.artist : "";
-    
-    // 2. FILENAME FALLBACK EXTRACTOR: Since you only have 'path', we slice the filename out of it
-    // This handles both Windows (\) and Unix (/) path separators safely
-    const fallbackName = track.path ? track.path.split(/[/\\]/).pop() || "" : "";
+  let queryArtist = /^(?:unknown(?: artist)?|<unknown>|-)$/i.test(track.artist?.trim() || '') ? '' : cleanMusicText(track.artist || '');
+  let queryTitle = cleanMusicText(track.name || track.path.split(/[/\\]/).pop() || '');
+  if (!queryArtist && queryTitle.includes(' - ')) {
+    const split = queryTitle.indexOf(' - ');
+    queryArtist = queryTitle.slice(0, split).trim();
+    queryTitle = queryTitle.slice(split + 3).trim();
+  }
+  return { queryTitle, queryArtist };
+}
+export const normalizeMusicIdentity = (text: string) => cleanMusicText(text).normalize('NFKC').toLocaleLowerCase()
+  .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
 
-    // 3. USE TRACK.NAME (Your interface does not have track.title)
-    let queryTitle = (track.name && track.name !== "Unknown") ? track.name : fallbackName;
-
-    // 4. NUKE THE TITLE TRASH: Always clean piracy tags and brackets from the title
-    queryTitle = queryTitle.replace(/\s*[\[\(\{].*?[\]\)\}]\s*/g, ' ')
-                           .replace(/pagalworld(\.com|\.io|\.pw)?|djmaza|webmusic/gi, '')
-                           .replace(/\.mp3|\.flac|\.wav|\.m4a/gi, '')
-                           .trim();
-
-    // 5. THE FALLBACK HEURISTIC: Only parse hyphens if the database failed to find an artist
-    if (!queryArtist) {
-        if (queryTitle.includes(' - ')) {
-            const parts = queryTitle.split(' - ');
-            queryArtist = parts[0].trim();
-            queryTitle = parts[1].trim();
-        } 
-        else if (queryTitle.includes('-') && !queryTitle.includes(' ')) {
-            const words = queryTitle.split('-');
-            // Your strict 2-word artist heuristic
-            if (words.length >= 3) {
-                queryArtist = words.slice(0, 2).join(' ').trim();
-                queryTitle = words.slice(2).join(' ').trim();
-            } else {
-                queryTitle = queryTitle.replace(/-/g, ' ').trim();
-            }
-        }
-    } else {
-        // If the library DID find the artist, just replace remaining hyphens in the title with spaces
-        queryTitle = queryTitle.replace(/-/g, ' ').trim();
-    }
-
-    // 6. FINAL POLISH: Collapse extra spaces
-    queryTitle = queryTitle.replace(/\s+/g, ' ').trim();
-    queryArtist = queryArtist.replace(/\s+/g, ' ').trim();
-
-    return { queryArtist, queryTitle };
+export interface LyricsCandidate { trackName: string; artistName: string; duration: number; syncedLyrics?: string; plainLyrics?: string }
+export function chooseLyricsMatch(results: LyricsCandidate[], title: string, artist: string, duration: number): LyricsCandidate | undefined {
+  const t = normalizeMusicIdentity(title), a = normalizeMusicIdentity(artist);
+  return results.filter(result => {
+    if (normalizeMusicIdentity(result.trackName || '') !== t) return false;
+    const candidateArtist = normalizeMusicIdentity(result.artistName || '');
+    if (a && candidateArtist !== a && !candidateArtist.startsWith(a + ' ')) return false;
+    return !!result.syncedLyrics && (!(duration > 0) || Math.abs(result.duration - duration) <= Math.max(5, duration * 0.02));
+  }).sort((x, y) => Math.abs(x.duration - duration) - Math.abs(y.duration - duration))[0];
 }

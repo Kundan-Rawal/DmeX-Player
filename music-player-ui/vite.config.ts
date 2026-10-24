@@ -2,8 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { internalIpV4 } from 'internal-ip';
 
-// Replace this with your exact IPv4 address from running 'ipconfig' in cmd
-const myIP = "192.168.1.11"; 
+const devHost = process.env.TAURI_DEV_HOST || await internalIpV4();
 
 export default defineConfig({
   plugins: [react()],
@@ -14,7 +13,7 @@ export default defineConfig({
     host: '0.0.0.0', 
     hmr: {
       protocol: 'ws',
-      host: await internalIpV4(),
+      host: devHost,
       port: 1421,
     },
     watch: {

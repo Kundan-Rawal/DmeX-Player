@@ -44,8 +44,8 @@ def read_wav(file_path):
         int32_arr = padded.view(dtype=np.int32).flatten()
         data = (int32_arr / 2147483648.0).astype(np.float32)
     elif sampwidth == 4:
-        # 32-bit float or int32
-        data = np.frombuffer(raw, dtype=np.float32)
+        # wave accepts integer PCM here; float WAV is rejected by its parser.
+        data = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
     else:
         raise ValueError(f"Unsupported sample width: {sampwidth}")
 
@@ -57,17 +57,18 @@ def write_wav_float32(file_path, data_stereo, sr=48000):
     """Writes a 2-channel float32 WAV file."""
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     # data_stereo shape: (N, 2)
-    nframes = len(data_stereo)
-    interleaved = data_stereo.flatten().astype(np.float32)
-    
-    with wave.open(file_path, "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2) # 16-bit PCM for universal cross-platform compatibility
-        w.setframerate(int(sr))
-        # Convert float32 to int16
-        clipped = np.clip(interleaved, -1.0, 1.0)
-        int16_data = (clipped * 32767.0).astype(np.int16)
-        w.writeframes(int16_data.tobytes())
+    samples = np.asarray(data_stereo, dtype="<f4")
+    if samples.ndim != 2 or samples.shape[1] != 2 or not np.isfinite(samples).all():
+        raise ValueError("Invalid stereo impulse response")
+    payload = samples.tobytes()
+    # IEEE float preserves coefficients above unity without clipping the filter.
+    fmt = struct.pack("<HHIIHH", 3, 2, int(sr), int(sr) * 8, 8, 32)
+    fact = struct.pack("<I", len(samples))
+    with open(file_path, "wb") as output:
+        output.write(b"RIFF" + struct.pack("<I", 48 + len(payload)) + b"WAVE")
+        output.write(b"fmt " + struct.pack("<I", len(fmt)) + fmt)
+        output.write(b"fact" + struct.pack("<I", len(fact)) + fact)
+        output.write(b"data" + struct.pack("<I", len(payload)) + payload)
 
 def compute_harman_target(freqs):
     """
@@ -223,13 +224,15 @@ def process_headphone_models():
             path_r = os.path.join(INPUT_DIR, files[1])
             data_l, sr_l, _ = read_wav(path_l)
             data_r, sr_r, _ = read_wav(path_r)
+            if sr_l != sr_r:
+                raise ValueError(f"Mismatched left/right rates for {model_id}")
             inv_l = compute_regularized_inverse(data_l.flatten(), sr_l)
             inv_r = compute_regularized_inverse(data_r.flatten(), sr_r)
             sr = sr_l
             
         stereo_inv = np.column_stack([inv_l, inv_r])
         out_path = os.path.join(OUTPUT_DIR, f"{model_id}_harman_inv.wav")
-        write_wav_float32(out_path, stereo_inv, sr=48000)
+        write_wav_float32(out_path, stereo_inv, sr=sr)
         
         # Verify criteria:
         peak_l = np.max(np.abs(inv_l))

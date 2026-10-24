@@ -1,3 +1,6 @@
+#include <atomic>
+extern std::atomic<float> g_presenceBoost;
+extern std::atomic<float> g_upscaleTarget;
 #include "FFTConvolver.h"
 #pragma once
 
@@ -57,33 +60,46 @@ struct BiquadPeak
 
     
     void reset() { x1 = x2 = y1 = y2 = 0.0f; }
-void init(float sample_rate, float cutoff_hz, float q, float gain_db)
+    void init(float sample_rate, float cutoff_hz, float q, float gain_db)
     {
-        float A = powf(10.0f, gain_db / 40.0f);
-        float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
-        float alpha = sinf(w0) / (2.0f * q);
-        float a0 = 1.0f + alpha / A;
-
-        b0 = (1.0f + alpha * A) / a0;
-        b1 = (-2.0f * cosf(w0)) / a0;
-        b2 = (1.0f - alpha * A) / a0;
-        a1 = (-2.0f * cosf(w0)) / a0;
-        a2 = (1.0f - alpha / A) / a0;
-        x1 = x2 = y1 = y2 = 0.0f;
+        update_coeffs(sample_rate, cutoff_hz, q, gain_db);
+        reset();
     }
 
     void update_coeffs(float sample_rate, float cutoff_hz, float q, float gain_db)
     {
+        if (fabsf(gain_db) < 1.0e-6f) {
+            b0 = 1.0f;
+            b1 = b2 = a1 = a2 = 0.0f;
+            return;
+        }
         float A = powf(10.0f, gain_db / 40.0f);
         float w0 = 2.0f * (float)M_PI * cutoff_hz / sample_rate;
         float alpha = sinf(w0) / (2.0f * q);
         float a0 = 1.0f + alpha / A;
-
         b0 = (1.0f + alpha * A) / a0;
         b1 = (-2.0f * cosf(w0)) / a0;
         b2 = (1.0f - alpha * A) / a0;
         a1 = (-2.0f * cosf(w0)) / a0;
         a2 = (1.0f - alpha / A) / a0;
+    }
+
+    // RBJ slope-1 shelves, matching miniaudio's shelf design.
+    void update_shelf(float sampleRate, float frequency, float gainDb, bool high) {
+        if (fabsf(gainDb) < 1.0e-6f) {
+            b0 = 1.0f; b1 = b2 = a1 = a2 = 0.0f;
+            return;
+        }
+        const double A = pow(10.0, gainDb / 40.0);
+        const double w = 2.0 * M_PI * frequency / sampleRate;
+        const double c = cos(w), v = sqrt(2.0 * A) * sin(w);
+        const double sign = high ? 1.0 : -1.0;
+        const double a0 = A + 1.0 - sign * (A - 1.0) * c + v;
+        b0 = (float)(A * (A + 1.0 + sign * (A - 1.0) * c + v) / a0);
+        b1 = (float)(-sign * 2.0 * A * (A - 1.0 + sign * (A + 1.0) * c) / a0);
+        b2 = (float)(A * (A + 1.0 + sign * (A - 1.0) * c - v) / a0);
+        a1 = (float)(sign * 2.0 * (A - 1.0 - sign * (A + 1.0) * c) / a0);
+        a2 = (float)((A + 1.0 - sign * (A - 1.0) * c - v) / a0);
     }
 
     float process(float in_sample)
@@ -167,15 +183,37 @@ struct DynamicSpatializerNode
     NineSpeakerUpmixer upmixer;
     SmoothedGate gate;
     float sampleRate = 48000.0f;
+    bool rendererSleeping = true;
 
-    void init(float sr) {
+    void init(float sr, const char* sofaFile = nullptr) {
         sampleRate = sr;
-        upmixer.init(sr);
+        upmixer.init(sr, sofaFile);
         gate.init(false, sr, 25.0f); // 25ms smooth click-free crossfade
+        rendererSleeping = true;
     }
 
-    void setBass3D(bool roomBass) {
-        upmixer.setBass3D(roomBass);
+    void setSeparation(float value) {
+        upmixer.setSeparation(value);
+    }
+
+    float separationTarget() const {
+        return upmixer.separationTarget();
+    }
+
+    void setDepth(float value) {
+        upmixer.setDepth(value);
+    }
+
+    bool hrtfAvailable() const {
+        return upmixer.hrtfAvailable();
+    }
+
+    int hrtfSampleRate() const {
+        return upmixer.hrtfSampleRate();
+    }
+
+    int hrtfInitStatus() const {
+        return upmixer.hrtfInitStatus();
     }
 
     void reset() {
@@ -194,12 +232,14 @@ struct StudioExciterNode
     float hpStateL, hpStateR;
     float hpCoef; // Dynamically calculated HPF coefficient
 
-    Oversampler4x os;
-    float dryDelayL[32], dryDelayR[32];
+    Oversampler4x os, cleanOs;
+    float dryDelayL[64], dryDelayR[64];
     int dryIdx = 0, dryDelay = 0;
 
     void init(float sampleRate) {
         os.init();
+        cleanOs.init();
+        drive.init(0.0f, sampleRate);
         dryDelay = (int)(os.latencySamples() + 0.5f);
         memset(dryDelayL, 0, sizeof(dryDelayL));
         memset(dryDelayR, 0, sizeof(dryDelayR));
@@ -214,6 +254,7 @@ struct StudioExciterNode
 struct StereoWidenerNode
 {
     ma_node_base baseNode;
+    float sampleRate = 48000.0f;
     SmoothedParam width;
     
     // Crossfeed states
@@ -234,6 +275,7 @@ struct AllPassFilter
 };
 
 void ap_init(AllPassFilter *a, int sz, float fb);
+float ap_tick(AllPassFilter *a, float in);
 
 #define SURROUND_HAAS_DELAY 882
 #define CENTER_ITD_DELAY 22
@@ -241,6 +283,7 @@ void ap_init(AllPassFilter *a, int sz, float fb);
 struct PsychoacousticNode
 {
     ma_node_base baseNode;
+    float sampleRate = 48000.0f;
     
     // Subwoofer Bypass (180Hz) to keep bass completely dry
     LinkwitzRiley4 crossSubwooferL, crossSubwooferR;
@@ -267,11 +310,26 @@ struct PsychoacousticNode
 };
 
 struct EqualLoudness {
-    BiquadPeak lowShelf, highShelf;
+    BiquadPeak lowShelfL, lowShelfR;
+    BiquadPeak highShelfL, highShelfR;
     float sr = 48000.0f;
     float envDb = -20.0f;
+    float lastVolume = -1.0f;
+    SmoothedParam volume;
+    SmoothedGate enabled;
+    unsigned updateCounter = 0;
 
-    void init(float sampleRate) { sr = sampleRate; update(-20.0f); }
+    void init(float sampleRate) {
+        sr = sampleRate;
+        lastVolume = -1.0f;
+        updateCounter = 0;
+        volume.init(1.0f, sr, 50.0f);
+        enabled.init(true, sr, 25.0f);
+        lowShelfL.init(sr, 80.0f, 0.7f, 0.0f);
+        lowShelfR.init(sr, 80.0f, 0.7f, 0.0f);
+        highShelfL.init(sr, 10000.0f, 0.7f, 0.0f);
+        highShelfR.init(sr, 10000.0f, 0.7f, 0.0f);
+    }
 
     void update(float currentVolume) {
         float delta = 0.0f;
@@ -289,13 +347,24 @@ struct EqualLoudness {
         bassBoost   = fminf(bassBoost,   2.5f); // Max +2.5dB
         trebleBoost = fminf(trebleBoost, 1.5f); // Max +1.5dB
 
-        lowShelf .init(sr,   80.0f, 0.7f, bassBoost);
-        highShelf.init(sr, 10000.0f, 0.7f, trebleBoost);
+        // Coefficients can change with the volume control, but each channel
+        // keeps its own history so loudness compensation cannot crossfeed L/R.
+        lowShelfL.update_shelf(sr, 80.0f, bassBoost, false);
+        lowShelfR.update_shelf(sr, 80.0f, bassBoost, false);
+        highShelfL.update_shelf(sr, 10000.0f, trebleBoost, true);
+        highShelfR.update_shelf(sr, 10000.0f, trebleBoost, true);
+        lastVolume = currentVolume;
     }
 
     inline void process(float& l, float& r) {
-        l = highShelf.process(lowShelf.process(l));
-        r = highShelf.process(lowShelf.process(r));
+        const float v = volume.next();
+        if ((updateCounter++ & 31u) == 0 && fabsf(lastVolume - v) > 0.0001f)
+            update(v);
+        const float wet = enabled.next();
+        const float fl = highShelfL.process(lowShelfL.process(l));
+        const float fr = highShelfR.process(lowShelfR.process(r));
+        l += (fl - l) * wet;
+        r += (fr - r) * wet;
     }
 };
 
@@ -303,6 +372,11 @@ struct AudiophileEQNode
 {
     ma_node_base baseNode;
     SmoothedParam targetBass, targetMid, targetHigh;
+    float sampleRate = 48000.0f;
+    float lastPresence = -1.0f;
+    float lastBassDb = 100.0f, lastTrebleDb = 100.0f;
+    BiquadPeak bassShelfL, bassShelfR, trebleShelfL, trebleShelfR;
+    unsigned coefficientCounter = 0;
     
     LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
     LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
@@ -329,10 +403,12 @@ struct CombFilter
 struct ReverbNode
 {
     ma_node_base baseNode;
+    float sampleRate = 48000.0f;
     CombFilter combL[4], combR[4];
     AllPassFilter apL[2], apR[2];
     SmoothedParam roomSize, wetMix, damp;
-    BiquadHPF hpfL, hpfR; // <-- ADD THIS
+    SmoothedGate enabled;
+    BiquadHPF hpfL, hpfR;
 };
 
 struct SubwooferNode
@@ -340,18 +416,31 @@ struct SubwooferNode
     ma_node_base baseNode;
     LinkwitzRiley4 crossBassL, crossBassR;       // 80Hz
     LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
+    LinkwitzRiley4 analysis60L, analysis60R;
+    LinkwitzRiley4 analysis100L, analysis100R;
     
-    // Legacy 1-pole filter states for Android/Laptop Speaker protection
-    float hp1L, hp1R;
-    float lp1L, lp1R;
+    SmoothedParam drive, field, room;
+    BiquadHPF speakerProtectionL, speakerProtectionR;
+    BiquadHPF virtualBassL, virtualBassR;
+    float fieldDelayL[2048]{}, fieldDelayR[2048]{};
+    int fieldIndex = 0;
+    unsigned tuneCounter = 0;
+    float energyAttack = 0.0f, energyRelease = 0.0f;
+    float transientFastCoef = 0.0f, transientSlowCoef = 0.0f;
+    float transientFast = 0.0f, transientSlow = 0.0f;
+    float fullBandEnv = 0.0f;
+    float bassScarcity = 0.0f;
+    float lastDensity = -1.0f;
+    float lastScarcity = -1.0f;
 
-    // Adaptive Fundamental Tracking & Dual-Peak Bi-Modal Highlighting
+    // Three-band fundamental tracking and broad dual-anchor shaping.
     float env30_60 = 0.0f, env60_90 = 0.0f, env90_130 = 0.0f;
     float currentFreq = 105.0f, targetFreq = 105.0f;
     float lastTunedFreq = -1.0f;
-    BiquadPeak subPeakL, subPeakR; // Peak 1: Clean, punchy 60Hz tactile anchor
-    BiquadPeak midPeakL, midPeakR; // Peak 2: Dynamic 95-125Hz acoustic fundamental anchor
-    BiquadHPF subsonicL, subsonicR; // Sub-sonic filter (32Hz) to prevent physical driver rattling
+    float lastSubHz = -1.0f;
+    BiquadPeak subPeakL, subPeakR; // User-selected broad weight anchor
+    BiquadPeak midPeakL, midPeakR; // Dynamic 78-118Hz punch anchor
+    BiquadHPF subsonicL, subsonicR; // Removes non-musical content below roughly 26Hz
     bool isHighlightInit = false;
     float lastBassGain = -1.0f;
     float sampleRate = 44100.0f;
@@ -364,16 +453,14 @@ struct ConvolutionNode
     std::atomic<FFTConvolver*> convL{nullptr};
     std::atomic<FFTConvolver*> convR{nullptr};
     
-    // Defer deletion
-    FFTConvolver* pendingDeleteL = nullptr;
-    FFTConvolver* pendingDeleteR = nullptr;
-    int deleteCountdown = 0;
+    // IR ownership changes are permitted only while the engine is stopped.
 
     BlockAdapter blockAdapterL;
     BlockAdapter blockAdapterR;
     int blockSize = 512;
 
     SmoothedParam wetMix;
+    float feedL[512]{}, feedR[512]{}, wetL[512]{}, wetR[512]{}, mix[512]{};
     BiquadHPF hpfL, hpfR;
     float hpStateL = 0.0f;
     float hpStateR = 0.0f;
@@ -389,13 +476,12 @@ struct ConvolutionNode
 struct HeadphoneCompNode
 {
     ma_node_base baseNode;
+    float sampleRate = 48000.0f;
 
     std::atomic<FFTConvolver*> convL{nullptr};
     std::atomic<FFTConvolver*> convR{nullptr};
 
-    FFTConvolver* pendingDeleteL = nullptr;
-    FFTConvolver* pendingDeleteR = nullptr;
-    int deleteCountdown = 0;
+    // IR ownership changes are permitted only while the engine is stopped.
 
     BlockAdapter blockAdapterL;
     BlockAdapter blockAdapterR;
@@ -405,6 +491,7 @@ struct HeadphoneCompNode
     SmoothedParam strength; // 0.0 to 1.0 (100% Harman calibration)
 
     void init(float sr = 48000.0f) {
+        sampleRate = sr;
         blockSize = 512;
         blockAdapterL.init(512, 2);
         blockAdapterR.init(512, 2);
@@ -415,20 +502,23 @@ struct HeadphoneCompNode
     void reset() {
         if (auto* c = convL.load(std::memory_order_relaxed)) c->reset();
         if (auto* c = convR.load(std::memory_order_relaxed)) c->reset();
-        blockAdapterL.fill = 0;
-        blockAdapterR.fill = 0;
+        blockAdapterL.reset();
+        blockAdapterR.reset();
     }
 };
 
-#define COMP_LOOKAHEAD_SAMPLES 96
+#define COMP_LOOKAHEAD_SAMPLES 192
 
 struct MultibandCompressorNode
 {
     ma_node_base baseNode;
+    float sampleRate = 48000.0f;
     SmoothedParam threshold;
     SmoothedParam makeupGain;
     float envLow, envHigh;
     float attackCoef, releaseCoef;
+    float detectorCoef = 0.02f;
+    SmoothedGate enabled;
     float lpStateL, lpStateR;
 
     // CRITICAL FIX 2: Crossover states for the delayed audio path
@@ -440,16 +530,28 @@ struct MultibandCompressorNode
     LinkwitzRiley4 crossL, crossR; // Phase-coherent 150Hz crossover
 };
 
-#define LIMITER_LOOKAHEAD_SAMPLES 192
+#define LIMITER_LOOKAHEAD_SAMPLES 384
 
 struct LimiterNode
 {
     ma_node_base baseNode;
-    SmoothedParam boost;
+    SmoothedParam boost, master;
+    int holdSamples = 0;
     float gainEnv;
     float gainSmooth; // T11.3 smoothed envelope
     float attackCoef, releaseCoef;
     float peakEnv; // Anti-motorboating envelope peak follower
+    float loudnessEnv = 0.0f;
+    float loudnessGain = 1.0f;
+    float loudnessAttackCoef = 0.0f;
+    float loudnessReleaseCoef = 0.0f;
+    float loudnessGainAttackCoef = 0.0f;
+    float loudnessGainReleaseCoef = 0.0f;
+    float loudnessSidechainCoef = 0.0f;
+    float loudnessThreshold = 1.0f;
+    float loudnessRatio = 1.0f;
+    float loudnessMakeup = 1.0f;
+    unsigned loudnessControlCounter = 0;
 
     float dlyL[LIMITER_LOOKAHEAD_SAMPLES];
     float dlyR[LIMITER_LOOKAHEAD_SAMPLES];
@@ -477,32 +579,24 @@ extern ma_node_vtable g_headphone_comp_vtable;
 struct AudioRestorationNode
 {
     ma_node_base baseNode;
-    
-    // Parameters
-    float denoiseIntensity; // 0.0 to 1.0
-    float upscaleTarget; // 1.0 = 320k, 2.0 = 640k extreme
-    float presenceBoost; // 0.0 to 1.0
-    
-    // Wave shaper states
-    float x1L = 0, x1R = 0;
-    float prevTrebleL = 0, prevTrebleR = 0;
-    
-    // Filter states for perfect separation
     LinkwitzRiley4 crossoverL, crossoverR;
     BiquadHPF harmonicFilterL, harmonicFilterR;
-    BiquadLPF lowPassSincL, lowPassSincR;
-    
-    void init(float sample_rate) {
-        // 8000Hz crossover completely isolates the air/cymbals from the vocals
-        crossoverL.init(sample_rate, 8000.0f);
-        crossoverR.init(sample_rate, 8000.0f);
-        harmonicFilterL.init(sample_rate, 10000.0f);
-        harmonicFilterR.init(sample_rate, 10000.0f);
-        lowPassSincL.init(sample_rate, 18000.0f);
-        lowPassSincR.init(sample_rate, 18000.0f);
-        denoiseIntensity = 0.0f;
-        upscaleTarget = 0.0f;
-        presenceBoost = 0.0f;
+    Oversampler4x os;
+    SmoothedParam amount;
+    float dryL[64]{}, dryR[64]{};
+    int delayIndex = 0, delaySamples = 20;
+
+    void init(float sampleRate) {
+        crossoverL.init(sampleRate, 8000.0f);
+        crossoverR.init(sampleRate, 8000.0f);
+        harmonicFilterL.init(sampleRate, 10000.0f);
+        harmonicFilterR.init(sampleRate, 10000.0f);
+        os.init();
+        amount.init(0.0f, sampleRate, 25.0f);
+        delaySamples = (int)os.latencySamples();
+        delayIndex = 0;
+        std::fill(std::begin(dryL), std::end(dryL), 0.0f);
+        std::fill(std::begin(dryR), std::end(dryR), 0.0f);
     }
 };
 

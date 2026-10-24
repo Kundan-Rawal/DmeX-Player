@@ -1,7 +1,8 @@
-import React, { useRef, useEffect, useCallback,useState } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { NavView, IS_MOBILE } from '../../types'; 
 import { X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import './TopNav.css';
 const IS_ANDROID = /android/i.test(navigator.userAgent);
 
 interface TopNavProps {
@@ -34,104 +35,97 @@ export const TopNav = ({
     { id: 'ARTIST', label: 'Artists' }
   ];
 
-  // ====================================================================
-  // THE 60FPS PHYSICS ENGINE: Continuous Scaling & Opacity
-  // ====================================================================
+  const normalizedView = (view: string) => view.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY'
+    : view.startsWith('ALBUM_') ? 'ALBUMS' : view.startsWith('ARTIST_') ? 'ARTIST' : view;
+  const currentViewRef = useRef(currentView);
+  currentViewRef.current = currentView;
+  const programmaticScroll = useRef(false);
+  const paintRef = useRef<number | undefined>(undefined);
+
   const updateScales = useCallback(() => {
-    if (!navRef.current || !IS_MOBILE) return;
-    
-    // THE FIX: Use activeId to identify which tab should be at 1.20x scale
-    const activeId = currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : 
-                     currentView.startsWith('ALBUM_') ? 'ALBUMS' : currentView;
-                     
-    const container = navRef.current;
-    const centerLine = container.scrollLeft + container.clientWidth / 2;
-    const maxDist = 140; 
+    const nav = navRef.current;
+    if (!nav || !IS_MOBILE) return;
+    const center = nav.getBoundingClientRect().left + nav.clientWidth / 2;
+    const activeId = normalizedView(currentViewRef.current);
+    for (const button of nav.querySelectorAll<HTMLButtonElement>('button[data-view]')) {
+      const rect = button.getBoundingClientRect();
+      const distance = Math.abs(center - rect.left - rect.width / 2);
+      const ratio = Math.max(0, 1 - distance / 140);
+      const eased = ratio * (2 - ratio);
+      const active = button.dataset.view === activeId;
+      button.style.setProperty('transform', `scale(${(active ? 1 : .85) + eased * .35})`, 'important');
+      button.style.setProperty('opacity', String(Math.min(1, (active ? .7 : .4) + eased * .6)), 'important');
+    }
+  }, []);
 
-    let closestView: string | null = null;
-    let minDiff = Infinity;
-
-    Array.from(container.children).forEach((child) => {
-      if (child.tagName === 'BUTTON') {
-        const el = child as HTMLElement;
-        const viewId = el.dataset.view;
-        const elCenter = el.offsetLeft + el.offsetWidth / 2;
-        const distance = Math.abs(centerLine - elCenter);
-        
-        let ratio = 1 - (distance / maxDist);
-        if (ratio < 0) ratio = 0;
-        
-        const easeRatio = ratio * (2 - ratio); 
-        
-        // OPTIMIZATION: If this button is the activeId, we give it priority scaling
-        const isCurrent = viewId === activeId;
-        const scale = (isCurrent ? 1.0 : 0.85) + (easeRatio * 0.35);
-        const opacity = (isCurrent ? 0.7 : 0.4) + (easeRatio * 0.6);
-
-        el.style.setProperty('transform', `scale(${scale})`, 'important');
-        el.style.setProperty('opacity', Math.min(opacity, 1).toString(), 'important');
-
-        if (distance < minDiff) {
-          minDiff = distance;
-          closestView = viewId || null;
-        }
-      }
-    });
-
-    // THE FLIP-FLOP KILLER: Only update the React state when the user completely stops scrolling
-    clearTimeout(stateUpdateTimeoutRef.current);
-    stateUpdateTimeoutRef.current = setTimeout(() => {
-      if (closestView && minDiff < 30) {
-        if (closestView !== currentView && !(closestView === 'PLAYLIST_GALLERY' && currentView.startsWith('PLAYLIST_'))) {
-          setCurrentView(closestView as NavView);
-        }
-      }
-    }, 150); // Wait 150 milliseconds after motion stops to commit the change
-  }, [currentView, setCurrentView]);
+  const centerTab = useCallback((view: string, behavior: ScrollBehavior = 'smooth') => {
+    const nav = navRef.current;
+    const button = nav?.querySelector<HTMLButtonElement>(`button[data-view="${normalizedView(view)}"]`);
+    if (!nav || !button) return;
+    const navRect = nav.getBoundingClientRect(), rect = button.getBoundingClientRect();
+    const distance = rect.left + rect.width / 2 - navRect.left - nav.clientWidth / 2;
+    if (Math.abs(distance) < 1) { updateScales(); return; }
+    programmaticScroll.current = true;
+    nav.scrollTo({ left: nav.scrollLeft + distance, behavior });
+  }, [updateScales]);
 
   useEffect(() => {
     const nav = navRef.current;
     if (!nav || !IS_MOBILE) return;
-    
-    let rafId: number;
-    const handleScroll = () => { rafId = requestAnimationFrame(updateScales); };
-    
-    nav.addEventListener('scroll', handleScroll, { passive: true });
-    updateScales(); 
-    
-    return () => {
-      nav.removeEventListener('scroll', handleScroll);
-      cancelAnimationFrame(rafId);
+    const settle = () => {
+      updateScales();
+      if (programmaticScroll.current) { programmaticScroll.current = false; return; }
+      const center = nav.getBoundingClientRect().left + nav.clientWidth / 2;
+      let closest: HTMLButtonElement | null = null, distance = Infinity;
+      for (const button of nav.querySelectorAll<HTMLButtonElement>('button[data-view]')) {
+        const rect = button.getBoundingClientRect();
+        const diff = Math.abs(rect.left + rect.width / 2 - center);
+        if (diff < distance) { closest = button; distance = diff; }
+      }
+      const next = closest?.dataset.view;
+      if (next && next !== normalizedView(currentViewRef.current)) setCurrentView(next as NavView);
     };
-  }, [updateScales]);
+    const scroll = () => {
+      if (paintRef.current === undefined) paintRef.current = requestAnimationFrame(() => {
+        paintRef.current = undefined; updateScales();
+      });
+      window.clearTimeout(stateUpdateTimeoutRef.current);
+      stateUpdateTimeoutRef.current = window.setTimeout(settle, 160);
+    };
+    const userScroll = () => { programmaticScroll.current = false; };
+    const resize = () => {
+      const buttons = nav.querySelectorAll<HTMLButtonElement>('button[data-view]');
+      const spacers = nav.querySelectorAll<HTMLElement>('.nav-spacer');
+      const gap = parseFloat(getComputedStyle(nav).columnGap) || 0;
+      if (buttons.length && spacers.length === 2) {
+        spacers[0].style.width = Math.max(0, nav.clientWidth / 2 - buttons[0].offsetWidth / 2 - gap) + 'px';
+        spacers[1].style.width = Math.max(0, nav.clientWidth / 2 - buttons[buttons.length - 1].offsetWidth / 2 - gap) + 'px';
+      }
+      centerTab(currentViewRef.current, 'auto');
+    };
+    nav.addEventListener('scroll', scroll, { passive: true });
+    nav.addEventListener('pointerdown', userScroll, { passive: true });
+    nav.addEventListener('wheel', userScroll, { passive: true });
+    const observer = new ResizeObserver(resize);
+    observer.observe(nav);
+    resize();
+    return () => {
+      observer.disconnect();
+      nav.removeEventListener('scroll', scroll);
+      nav.removeEventListener('pointerdown', userScroll);
+      nav.removeEventListener('wheel', userScroll);
+      if (paintRef.current !== undefined) cancelAnimationFrame(paintRef.current);
+      paintRef.current = undefined;
+      window.clearTimeout(stateUpdateTimeoutRef.current);
+    };
+  }, [centerTab, updateScales, setCurrentView]);
 
-  // THE JERK KILLER: Only auto-scroll if the change came from a click or another page.
-  useEffect(() => {
-    if (!navRef.current || !IS_MOBILE) return;
-    
-    // THE FIX: Use the variable you declared!
-    const activeId = currentView.startsWith('PLAYLIST_') ? 'PLAYLIST_GALLERY' : 
-                     currentView.startsWith('ALBUM_') ? 'ALBUMS' : currentView;
-    
-    // Use activeId here instead of raw currentView
-    const activeBtn = navRef.current.querySelector(`button[data-view="${activeId}"]`) as HTMLElement;
-    if (!activeBtn) return;
+  useEffect(() => { if (IS_MOBILE) centerTab(currentView); }, [currentView, centerTab]);
 
-    const container = navRef.current;
-    const center = container.scrollLeft + container.clientWidth / 2;
-    const btnCenter = activeBtn.offsetLeft + activeBtn.offsetWidth / 2;
-
-    if (Math.abs(center - btnCenter) > 20) {
-      activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    }
-  }, [currentView]);
-
-  const handleTabClick = (view: string, e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!IS_MOBILE) { setCurrentView(view as NavView); return; }
+  const handleTabClick = (view: string) => {
     setCurrentView(view as NavView);
-    e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    if (IS_MOBILE) centerTab(view);
   };
-
   return (
     <>
       {!IS_MOBILE && appWindow && (
@@ -162,7 +156,7 @@ export const TopNav = ({
                 </button>
                 
                 <div style={{ position: 'relative' }}>
-                  <button className="samsung-icon-btn" onClick={() => setIsKebabOpen(!isKebabOpen)}>
+                  <button className="samsung-icon-btn" aria-label="Library options" onClick={() => setIsKebabOpen(!isKebabOpen)}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
                   </button>
                   
@@ -182,7 +176,7 @@ export const TopNav = ({
                         minWidth: '200px', boxShadow: '0 16px 40px rgba(0,0,0,0.6)' 
                       }}>
                         
-                        <button onClick={() => { handleAddFolder(); setIsKebabOpen(false); }} style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', color: '#ffffff', fontSize: '15px', fontWeight: 600, cursor: 'pointer', borderRadius: '8px' }}>
+                        <button disabled={isLoading} onClick={() => { handleAddFolder(); setIsKebabOpen(false); }} style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', color: '#ffffff', fontSize: '15px', fontWeight: 600, cursor: 'pointer', borderRadius: '8px' }}>
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
                           Add Folder
                         </button>
@@ -234,7 +228,7 @@ export const TopNav = ({
           </div>
         </header>
 
-        <nav className="samsung-nav-tabs" data-tauri-drag-region="true" ref={navRef}>
+        <nav className={'samsung-nav-tabs' + (IS_MOBILE ? ' mobile-scroll-nav' : '')} data-tauri-drag-region={IS_MOBILE ? undefined : 'true'} ref={navRef} aria-label="Library views">
           <div className="nav-spacer" />
           {TABS.map(tab => {
             const isActive = currentView === tab.id || 
@@ -244,7 +238,8 @@ export const TopNav = ({
               <button 
                 key={tab.id} data-view={tab.id}
                 className={isActive ? 'active' : ''}
-                onClick={(e) => handleTabClick(tab.id, e)}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => handleTabClick(tab.id)}
               >
                 {tab.label}
               </button>

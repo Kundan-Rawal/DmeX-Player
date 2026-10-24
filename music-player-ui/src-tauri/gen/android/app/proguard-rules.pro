@@ -1,4 +1,7 @@
 # Add project specific ProGuard rules here.
+-keep class com.dmex.player.MusicLibraryPlugin { *; }
+-keep class com.dmex.player.MusicScanArgs { *; }
+-keep class com.dmex.player.MusicMetadataArgs { *; }
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #

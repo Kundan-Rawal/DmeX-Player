@@ -1,0 +1,8 @@
+.lyrics-search { display: flex; flex-direction: column; gap: 12px; align-items: stretch; width: min(100%, 340px); margin: auto; padding: 16px; box-sizing: border-box; }
+.lyrics-search p { margin: 0; opacity: .65; text-align: center; }
+.lyrics-search label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; text-align: left; }
+.lyrics-search input { min-width: 0; width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #ffffff30; border-radius: 8px; background: #ffffff0d; color: inherit; font: inherit; font-size: 16px; }
+.lyrics-search input:focus { outline: 2px solid var(--theme-color, #51bfa3); outline-offset: 1px; }
+.lyrics-search button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid #ffffff30; border-radius: 8px; color: inherit; background: #ffffff18; font: inherit; font-size: 14px; cursor: pointer; white-space: normal; }
+.lyrics-search button:disabled { opacity: .6; cursor: wait; }
+.lyrics-search [role=status] { font-size: 12px; line-height: 1.5; opacity: .75; overflow-wrap: anywhere; text-align: center; }

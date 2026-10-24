@@ -2,8 +2,10 @@ import './MobileExpandedPlayer.css';
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import Marquee from 'react-fast-marquee';
-import { DSPStudio, ReverbEnv, HEADPHONE_MODELS } from './ExpandedPlayerUI';
+import { DSPStudio, ReverbEnv } from './ExpandedPlayerUI';
+import { TrackOptions } from './TrackOptions';
 import { AmbientBackground } from './AmbientBackground';
+import { Android8BRipples, Android8BDustCanvas } from './MobileVisualizer';
 import { Taste, LyricLine, IS_ANDROID } from '../../types/index';
 import { AudioProfile } from '../../config/audio';
 import { formatTime } from '../../utils/formatters';
@@ -66,163 +68,12 @@ interface MobileExpandedPlayerProps {
   onSeekCommit: (e: React.MouseEvent | React.TouchEvent) => Promise<void>;
   onTasteChange: (t: Taste) => Promise<void>;
   onFetchLyrics: () => Promise<void>;
+  lyricsSearch?: React.ReactNode;
   writeToEngine: (cmd: string) => Promise<void>;
   isSeekingRef: React.MutableRefObject<boolean>;
   setCurrentTime: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const Android8BRipples: React.FC<{ spatialData: React.MutableRefObject<any>, isPlaying: boolean }> = ({ spatialData, isPlaying }) => {
-  const r1 = useRef<HTMLDivElement>(null);
-  const r2 = useRef<HTMLDivElement>(null);
-  const r3 = useRef<HTMLDivElement>(null);
-
-  const rippleState = useRef([
-    { active: false, triggerTime: 0 },
-    { active: false, triggerTime: 0 },
-    { active: false, triggerTime: 0 }
-  ]);
-  const lastRippleTime = useRef(0);
-  const lastBassLevel = useRef(0);
-  const rippleThreshold = useRef(0.35);
-
-  useEffect(() => {
-    let raf: number;
-    const tick = (now: number) => {
-      raf = requestAnimationFrame(tick);
-      if (!isPlaying) return;
-
-      const d = spatialData.current;
-      if (!d) return;
-      const lvl = d.bLvl;
-      
-      // Decay threshold slowly down to 0.1
-      rippleThreshold.current = Math.max(0.1, rippleThreshold.current - 0.001);
-      
-      // Cleanup expired ripples inside the loop (no setTimeouts!)
-      rippleState.current.forEach(r => {
-        if (r.active && now - r.triggerTime > 1800) {
-          r.active = false;
-        }
-      });
-      
-      // Dynamic spike detection: 
-      // 1. Must be above the dynamically decaying threshold
-      // 2. Must be on the rising edge of the wave
-      const isRising = lvl > lastBassLevel.current;
-      const isSpike = lvl > rippleThreshold.current && isRising;
-      
-      if (isSpike && now - lastRippleTime.current > 330) { 
-        const rIdx = rippleState.current.findIndex(r => !r.active);
-        if (rIdx !== -1) {
-          const r = rippleState.current[rIdx];
-          const ref = [r1, r2, r3][rIdx];
-          r.active = true;
-          r.triggerTime = now;
-          lastRippleTime.current = now;
-          
-          // Artificially bump the threshold to prevent immediate double-triggers,
-          // but strictly cap it at 0.35 so loud songs always trigger.
-          rippleThreshold.current = Math.min(0.35, rippleThreshold.current + 0.15);
-          
-          if (ref.current) {
-            ref.current.style.animation = 'none';
-            // Avoid synchronous reflow stutter by waiting for next paint frame
-            requestAnimationFrame(() => {
-              if (ref.current) ref.current.style.animation = 'mep-neon-expand 1.8s linear forwards';
-            });
-          }
-        }
-      }
-      lastBassLevel.current = lvl;
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [isPlaying, spatialData]);
-
-  return (
-    <>
-      <div ref={r1} className="mep-neon-ripple" />
-      <div ref={r2} className="mep-neon-ripple" />
-      <div ref={r3} className="mep-neon-ripple" />
-    </>
-  );
-};
-
-const Android8BDustCanvas: React.FC<{ isExpanded?: boolean }> = ({ isExpanded = true }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  const motes = useRef(Array.from({ length: 40 }).map(() => ({
-    x: Math.random() * (window.innerWidth || 500),
-    y: Math.random() * (window.innerHeight || 800),
-    // Enforce exactly 1px, 2px, 3px, 4px, or 5px distinct sizes
-    size: Math.floor(Math.random() * 5) + 1,
-    opacity: 1.0, // 100% visible, no fading
-    vy: -(Math.random() * 1.5 + 1.0), // Much faster upward movement
-    vx: (Math.random() - 0.5) * 0.8 // Faster horizontal drift
-  })));
-
-  // Use a mutable ref to track isExpanded inside the RAF without recreating the function
-  const isExpandedRef = useRef(isExpanded);
-  useEffect(() => {
-    isExpandedRef.current = isExpanded;
-  }, [isExpanded]);
-
-  useEffect(() => {
-    const cvs = canvasRef.current;
-    if (!cvs) return;
-    const ctx = cvs.getContext('2d', { alpha: true, desynchronized: true });
-    if (!ctx) return;
-    
-    cvs.width = window.innerWidth;
-    cvs.height = window.innerHeight;
-
-    let rafId: number;
-    const draw = () => {
-      // Pause battery-draining math when UI is minimized
-      if (!isExpandedRef.current) {
-        rafId = requestAnimationFrame(draw);
-        return;
-      }
-
-      ctx.clearRect(0, 0, cvs.width, cvs.height);
-      
-      const theme = document.documentElement.getAttribute('data-theme') || 'dark';
-      // Use pure white/black without any background washing out the color
-      ctx.fillStyle = theme === 'light' ? 'rgba(0,0,0,1)' : 'rgba(255,255,255,1)';
-      
-      motes.current.forEach(m => {
-        m.x += m.vx;
-        m.y += m.vy;
-        if (m.y < -10) m.y = cvs.height + 10;
-        if (m.x < -10) m.x = cvs.width + 10;
-        if (m.x > cvs.width + 10) m.x = -10;
-        
-        ctx.globalAlpha = m.opacity;
-        
-        // Render perfect circles instead of squares
-        ctx.beginPath();
-        // m.size is the diameter, so radius is m.size / 2
-        ctx.arc(m.x, m.y, m.size / 2, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      rafId = requestAnimationFrame(draw);
-    };
-    rafId = requestAnimationFrame(draw);
-
-    const handleResize = () => {
-      cvs.width = window.innerWidth;
-      cvs.height = window.innerHeight;
-    };
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      cancelAnimationFrame(rafId);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'none' }} />;
-};
 
 export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => {
 
@@ -358,7 +209,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
       />
 
-      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} />}
+      {IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} isDarkMode={p.isDarkMode} />}
 
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">
@@ -383,12 +234,12 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             : p.isManualOverride
               ? <span className="mep-badge" style={{ color: '#ffa726' }}>Manual Override</span>
               : p.detectedProfile
-                ? <span className="mep-badge">{p.detectedProfile.icon && React.createElement(p.detectedProfile.icon as any, {size: 14})} {p.detectedProfile.label}{!p.isProfileActive ? ' (Raw)' : ''}</span>
+                ? <span className="mep-badge">{p.detectedProfile.icon && React.createElement(p.detectedProfile.icon as any, {size: 14})} {p.detectedProfile.label}{!p.isProfileActive ? ' (Manual)' : ''}</span>
                 : <span className="mep-badge mep-badge-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Disc size={14} /> Standard Audio</span>
           }
         </div>
 
-        <button className={`mep-topbar-btn ${showOptionsMenu ? 'mep-topbar-btn--active' : ''}`}
+        <button aria-label="Track Options" aria-expanded={showOptionsMenu} className={`mep-topbar-btn ${showOptionsMenu ? 'mep-topbar-btn--active' : ''}`}
           onClick={e => { e.stopPropagation(); setShowOptionsMenu(v => !v); }}>
           <svg width="4" height="20" viewBox="0 0 4 20" fill="currentColor">
             <circle cx="2" cy="2" r="2"/><circle cx="2" cy="10" r="2"/><circle cx="2" cy="18" r="2"/>
@@ -398,193 +249,9 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
         {showOptionsMenu && (
           <>
             <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={e => { e.stopPropagation(); setShowOptionsMenu(false); }}/>
-            <div className="glass-options-menu fade-in" style={{ top: '80px', right: '24px', zIndex: 100 }} onClick={e => e.stopPropagation()}>
-              <div className="glass-menu-header">Track Options</div>
-              
-              <div className="glass-menu-section">
-                <div className="glass-label-row"><span>Subwoofer Bass</span><span style={{ color: 'var(--theme-color)', fontWeight: 600 }}>{Math.round(p.bassLevel * 100)}%</span></div>
-                <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={p.bassLevel} onChange={e => { const v = parseFloat(e.target.value); p.setBassLevel(v); p.bassLevelRef.current = v; p.writeToEngine(`BASS ${v}`); }}/>
-                <div className="glass-label-row" style={{ marginTop: 10 }}><span>Crystal Treble</span><span style={{ color: 'var(--theme-color)', fontWeight: 600 }}>{Math.round(p.trebleLevel * 100)}%</span></div>
-                <input type="range" className="glass-slider" min="0" max="1.5" step="0.05" value={p.trebleLevel} onChange={e => { const v = parseFloat(e.target.value); p.setTrebleLevel(v); p.trebleLevelRef.current = v; p.writeToEngine(`TREBLE ${v}`); }}/>
-              </div>
-
-              <div className="glass-menu-section" style={{ marginTop: 14 }}>
-                <div className="glass-label-row" style={{ marginBottom: 10 }}>
-                  <span>Speaker Boost</span>
-                  <span style={{ color: p.speakerMode === 'NONE' ? 'var(--text-secondary)' : p.speakerMode === 'LOW' ? '#4fc3f7' : p.speakerMode === 'MED' ? '#ff9800' : '#ff3b30', fontWeight: 600, fontSize: '0.8rem' }}>
-                    {p.speakerMode === 'NONE' ? 'Off' : p.speakerMode === 'LOW' ? '30%' : p.speakerMode === 'MED' ? '60%' : '100%'}
-                  </span>
-                </div>
-                <div className="glass-boost-grid">
-                  {(['NONE','LOW','MED','HIGH'] as const).map(mode => (
-                    <button key={mode} className={`glass-boost-btn ${p.speakerMode === mode ? 'active' : ''}`}
-                      style={p.speakerMode === mode ? { background: mode==='NONE'?'rgba(255,255,255,0.18)':mode==='LOW'?'rgba(79,195,247,0.25)':mode==='MED'?'rgba(255,152,0,0.25)':'rgba(255,59,48,0.28)', borderColor: mode==='NONE'?'rgba(255,255,255,0.35)':mode==='LOW'?'rgba(79,195,247,0.5)':mode==='MED'?'rgba(255,152,0,0.5)':'rgba(255,59,48,0.55)', color: mode==='NONE'?'#fff':mode==='LOW'?'#4fc3f7':mode==='MED'?'#ff9800':'#ff3b30' } : undefined}
-                      onClick={() => { p.setSpeakerMode(mode); p.writeToEngine(`LIMITER ${mode==='NONE'?0:mode==='LOW'?0.3:mode==='MED'?0.6:1.0}`); }}>
-                      {mode === 'NONE' ? 'None' : mode === 'LOW' ? 'Low' : mode === 'MED' ? 'Med' : 'High'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* RESTORED: VISUALIZER */}
-              <div className="glass-menu-section" style={{ marginTop: 14 }}>
-                <div className="glass-label-row" style={{ marginBottom: 10 }}><span>Background Visualizer</span><span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{p.visMode === 'ORBIT' ? 'Lava Lamps' : '8B Fast'}</span></div>
-                <div className="glass-boost-grid">
-                  <button className={`glass-boost-btn ${p.visMode === 'ORBIT' ? 'active' : ''}`} style={p.visMode === 'ORBIT' ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined} onClick={() => p.setVisMode('ORBIT')}>Orbit</button>
-                  <button className={`glass-boost-btn ${p.visMode === 'RADAR' ? 'active' : ''}`} style={p.visMode === 'RADAR' ? { background: 'rgba(200,34,42,0.25)', borderColor: 'var(--theme-color)', color: 'var(--theme-color)' } : undefined} onClick={() => p.setVisMode('RADAR')}>8B</button>
-                </div>
-              </div>
-
-              {/* 9D VIRTUAL SPEAKERS (CINEMA STAGE) */}
-              <div className="glass-menu-section" style={{ marginTop: 14 }}>
-                <div className="glass-label-row" style={{ marginBottom: 6 }}>
-                  <span>9D Cinema Stage</span>
-                  <span style={{ color: p.is9DStageOn ? '#00e5ff' : 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>
-                    {p.is9DStageOn ? '9.1 Stage ON' : 'Stereo OFF'}
-                  </span>
-                </div>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0 0 10px 0', lineHeight: 1.4 }}>
-                  Intelligent 9-direction speaker separation with front/center vocal anchoring & 360° height ambience.
-                </p>
-                <div className="glass-boost-grid">
-                  <button
-                    className={`glass-boost-btn ${!p.is9DStageOn ? 'active' : ''}`}
-                    style={!p.is9DStageOn ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined}
-                    onClick={async () => {
-                      if (p.setIs9DStageOn) p.setIs9DStageOn(false);
-                      await p.writeToEngine('SPEAKER9D OFF');
-                    }}
-                  >
-                    Stereo
-                  </button>
-                  <button
-                    className={`glass-boost-btn ${p.is9DStageOn ? 'active' : ''}`}
-                    style={p.is9DStageOn ? { background: 'rgba(0,229,255,0.22)', borderColor: '#00e5ff', color: '#00e5ff' } : undefined}
-                    onClick={async () => {
-                      if (p.setIs9DStageOn) p.setIs9DStageOn(true);
-                      await p.writeToEngine('SPEAKER9D ON');
-                    }}
-                  >
-                    9D Cinema
-                  </button>
-                </div>
-
-                {/* Dual Bass Selector for 9D */}
-                {p.is9DStageOn && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                    <div className="glass-label-row" style={{ marginBottom: 6 }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>9D Bass Routing</span>
-                      <span style={{ fontSize: '0.72rem', color: p.is9DBassRoom ? '#ff79c6' : '#50fa7b', fontWeight: 600 }}>
-                        {p.is9DBassRoom ? '3D Room Bass' : 'Direct Stereo Bass'}
-                      </span>
-                    </div>
-                    <div className="glass-boost-grid" style={{ marginBottom: 6 }}>
-                      <button
-                        className={`glass-boost-btn ${!p.is9DBassRoom ? 'active' : ''}`}
-                        title="Direct Stereo Bass (Punch Focus): Sub-bass (<180Hz) stays anchored in dry, fast stereo for maximum kick-drum punch, raw transient impact, and visceral weight."
-                        style={!p.is9DBassRoom ? { background: 'rgba(80,250,123,0.2)', borderColor: '#50fa7b', color: '#50fa7b' } : undefined}
-                        onClick={async () => {
-                          if (p.setIs9DBassRoom) p.setIs9DBassRoom(false);
-                          await p.writeToEngine('SPEAKER9D_BASS STEREO');
-                        }}
-                      >
-                        ⚡ Direct Bass (Punch)
-                      </button>
-                      <button
-                        className={`glass-boost-btn ${p.is9DBassRoom ? 'active' : ''}`}
-                        title="Full 3D Room Bass (Spatial Immersion): Low-end enters the 9.1 virtual speaker array with physical front-stage room projection, creating a cohesive concert hall atmosphere."
-                        style={p.is9DBassRoom ? { background: 'rgba(255,121,198,0.22)', borderColor: '#ff79c6', color: '#ff79c6' } : undefined}
-                        onClick={async () => {
-                          if (p.setIs9DBassRoom) p.setIs9DBassRoom(true);
-                          await p.writeToEngine('SPEAKER9D_BASS ROOM');
-                        }}
-                      >
-                        🌐 3D Room Bass (Immersive)
-                      </button>
-                    </div>
-                    <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.35 }}>
-                      {!p.is9DBassRoom 
-                        ? "• Direct Stereo Bass: Sub-bass (<180Hz) is kept dry & centered in stereo for fast, high-impact kick punch." 
-                        : "• 3D Room Bass: Full low-end enters the 9 virtual speakers, externalizing the bass into the 3D room."}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* RESTORED: EQ */}
-              <div className="glass-menu-section" style={{ marginTop: 14 }}>
-                <div className="glass-label-row" style={{ marginBottom: 6 }}><span>Audiophile EQ</span><span style={{ fontSize: '0.72rem', fontWeight: 600, color: p.isFIRMode ? '#a5d6a7' : 'var(--text-secondary)' }}>{p.isFIRMode ? '✦ Linear Phase' : 'Standard IIR'}</span></div>
-                <div className="glass-boost-grid">
-                  <button className={`glass-boost-btn ${!p.isFIRMode ? 'active' : ''}`} style={!p.isFIRMode ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined} onClick={() => { p.setIsFIRMode(false); p.writeToEngine('FIRMODE 0'); }}>Standard</button>
-                  <button className={`glass-boost-btn ${p.isFIRMode ? 'active' : ''}`} style={p.isFIRMode ? { background: 'rgba(165,214,167,0.2)', borderColor: '#a5d6a7', color: '#a5d6a7' } : undefined} onClick={() => { p.setIsFIRMode(true); p.writeToEngine('FIRMODE 1'); }}>✦ Audiophile</button>
-                </div>
-              </div>
-
-              {/* RESTORED: HARDWARE OUTPUT */}
-              <div className="glass-menu-section" style={{ marginTop: 14 }}>
-                <div className="glass-label-row" style={{ marginBottom: 10 }}>
-                  <span>Hardware Output</span>
-                  <span style={{ color: 'var(--theme-color)', fontWeight: 600, fontSize: '0.8rem' }}>{p.isPhoneSpeaker ? 'Phone Speaker' : 'Headphones'}</span>
-                </div>
-                <div className="glass-boost-grid">
-                  <button className={`glass-boost-btn ${!p.isPhoneSpeaker ? 'active' : ''}`} style={!p.isPhoneSpeaker ? { background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.35)', color: '#fff' } : undefined} onClick={() => { p.setIsPhoneSpeaker(false); p.writeToEngine('ANDROID_SPEAKER 0'); }}>Headphones</button>
-                  <button className={`glass-boost-btn ${p.isPhoneSpeaker ? 'active' : ''}`} style={p.isPhoneSpeaker ? { background: 'rgba(255,59,48,0.28)', borderColor: 'rgba(255,59,48,0.55)', color: '#ff3b30' } : undefined} onClick={() => { p.setIsPhoneSpeaker(true); p.writeToEngine('ANDROID_SPEAKER 1'); }}>Phone Speaker</button>
-                </div>
-              </div>
-
-              {/* TASK T22: HEADPHONE CALIBRATION (HARMAN TARGET) */}
-              <div className="glass-menu-section" style={{ marginTop: 14 }}>
-                <div className="glass-label-row" style={{ marginBottom: 6 }}>
-                  <span>Headphone Calibration</span>
-                  <span style={{ color: p.selectedHeadphoneModel && p.selectedHeadphoneModel !== 'NONE' ? '#a5d6a7' : 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>
-                    {p.selectedHeadphoneModel && p.selectedHeadphoneModel !== 'NONE' ? 'Harman Target Active' : 'Bypass'}
-                  </span>
-                </div>
-                <select
-                  className="glass-select"
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: '8px',
-                    background: 'rgba(255,255,255,0.08)',
-                    color: '#fff',
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    fontSize: '0.8rem',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                  value={p.selectedHeadphoneModel || 'NONE'}
-                  onChange={async e => {
-                    const modelId = e.target.value;
-                    if (p.onHeadphoneModelSelect) {
-                      await p.onHeadphoneModelSelect(modelId);
-                    } else if (p.setSelectedHeadphoneModel) {
-                      p.setSelectedHeadphoneModel(modelId);
-                      const model = HEADPHONE_MODELS.find(m => m.id === modelId);
-                      if (model && model.path) {
-                        try {
-                          const path = await invoke<string>('extract_and_load_ir', { assetPath: model.path });
-                          await p.writeToEngine(`HEADPHONE_CORRECTION ${path}`);
-                        } catch (err) {
-                          console.error('Failed to load headphone correction:', err);
-                        }
-                      } else {
-                        await p.writeToEngine('HEADPHONE_CORRECTION OFF');
-                      }
-                    }
-                  }}
-                >
-                  {HEADPHONE_MODELS.map(m => (
-                    <option key={m.id} value={m.id} style={{ background: '#1c1c1e', color: '#fff' }}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-                <p style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', margin: '6px 0 0 0', lineHeight: 1.35 }}>
-                  {HEADPHONE_MODELS.find(m => m.id === p.selectedHeadphoneModel)?.desc || 'No correction applied. Audio is sent straight to drivers.'}
-                </p>
-              </div>
-
+            <div className="glass-options-menu player-track-menu fade-in" style={{ right: '24px', zIndex: 100 }} onClick={e => e.stopPropagation()}>
+              <TrackOptions visMode={p.visMode} setVisMode={p.setVisMode}
+                onManualEdit={() => { p.setIsManualOverride(true); p.setSmartTaste('ORIGINAL'); }} />
             </div>
           </>
         )}
@@ -634,7 +301,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                     <p key={i} className={`mep-lyric-line ${i === p.activeLyricIndex ? 'mep-lyric-active' : ''}`}>{line.text}</p>
                   ))
                 ) : (
-                  <div className="mep-lyrics-empty">
+                  p.lyricsSearch || <div className="mep-lyrics-empty">
                     <p className="mep-lyrics-empty-text">No synced lyrics available.</p>
                     <button className="mep-fetch-btn" style={{ opacity: p.scanProgress ? 0.6 : 1, pointerEvents: p.scanProgress ? 'none' : 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} onClick={p.onFetchLyrics}>
                       {p.scanProgress ? <><Hourglass size={14} /> {p.scanProgress}</> : <><Search size={14} /> Fetch Lyrics Online</>}
@@ -683,10 +350,10 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                 : <svg width="22" height="22" viewBox="0 0 24 24"><path fill="currentColor" d="m12.1 18.55-.1.1-.11-.1C7.14 14.24 4 11.39 4 8.5C4 6.5 5.5 5 7.5 5c1.54 0 3.04 1 3.57 2.36h1.86C13.46 6 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5c0 2.89-3.14 5.74-7.9 10.05M16.5 3c-1.74 0-3.41.81-4.5 2.08C10.91 3.81 9.24 3 7.5 3C4.42 3 2 5.41 2 8.5c0 3.77 3.4 6.86 8.55 11.53L12 21.35l1.45-1.32C18.6 15.36 22 12.27 22 8.5C22 5.41 19.58 3 16.5 3"/></svg>
               }
             </button>
-            <button className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'lyrics' ? 'none' : 'lyrics')} style={{ color: panel === 'lyrics' ? 'var(--theme-color)' : undefined }}>
+            <button aria-label="Lyrics" aria-pressed={panel === 'lyrics'} className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'lyrics' ? 'none' : 'lyrics')} style={{ color: panel === 'lyrics' ? 'var(--theme-color)' : undefined }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3.577 19.577V4.616q0-.672.472-1.144T5.192 3h9.77q.67 0 1.143.472q.472.472.472 1.144v.251q-.293.14-.533.32q-.24.179-.467.39v-.961q0-.27-.173-.443T14.96 4H5.192q-.269 0-.442.173t-.173.443v12.54L5.733 16h9.229q.269 0 .442-.173t.173-.442v-2.962q.227.212.467.39q.24.18.533.32v2.252q0 .67-.472 1.143q-.472.472-1.143.472H6.154zm3.5-6.077h3v-1h-3zm11.539-2q-1.039 0-1.77-.73T16.116 9t.73-1.77t1.77-.73q.486 0 .823.137t.677.461V1.5h3v1h-2V9q0 1.039-.731 1.77q-.731.73-1.77.73m-11.538-1h6v-1h-6zm0-3h6v-1h-6zm-2.5 8.5V4z"/></svg>
             </button>
-            <button className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'dsp' ? 'none' : 'dsp')} style={{ color: panel === 'dsp' ? 'var(--theme-color)' : undefined }}>
+            <button aria-label="DSP Controls" aria-pressed={panel === 'dsp'} className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'dsp' ? 'none' : 'dsp')} style={{ color: panel === 'dsp' ? 'var(--theme-color)' : undefined }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
             </button>
           </div>

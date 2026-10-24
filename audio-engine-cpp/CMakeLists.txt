@@ -1,7 +1,39 @@
-cmake_minimum_required(VERSION 3.10)
-project(DmeXAudioEngine)
-
+cmake_minimum_required(VERSION 3.16)
+project(DmeXAudioEngine LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
-
-# Create the executable from our main.cpp
-add_executable(AudioEngine main.cpp)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(DMEX_MEASURED_HRTF "Use the bundled Windows x64 Steam Audio renderer" ON)
+set(DSP_SOURCES EngineCore.cpp DSP_Nodes.cpp Telemetry.cpp CommandParser.cpp StreamingDecoder.cpp SteamAudioHrtf.cpp pffft.c pffft_common.c)
+add_library(dmex-audio STATIC ${DSP_SOURCES})
+target_include_directories(dmex-audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+  target_compile_definitions(dmex-audio PRIVATE PFFFT_ENABLE_NEON)
+endif()
+if(MSVC)
+  target_compile_options(dmex-audio PRIVATE /O2 /EHsc)
+endif()
+if(WIN32)
+  target_link_libraries(dmex-audio PUBLIC winmm ole32 avrt advapi32 shell32)
+endif()
+if(WIN32 AND DMEX_MEASURED_HRTF AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+  set(SDK "${CMAKE_CURRENT_SOURCE_DIR}/third_party/steamaudio")
+  target_compile_definitions(dmex-audio PUBLIC DMEX_USE_STEAMAUDIO)
+  target_include_directories(dmex-audio PUBLIC "${SDK}/include")
+  target_link_libraries(dmex-audio PUBLIC "${SDK}/lib/windows-x64/phonon.lib")
+endif()
+include(CTest)
+if(BUILD_TESTING)
+  target_compile_definitions(dmex-audio PRIVATE DMEX_DSP_TESTS)
+  add_executable(dmex-dsp-tests tests/dsp_tests.cpp tests/ffi_stubs.cpp)
+  target_link_libraries(dmex-dsp-tests PRIVATE dmex-audio)
+  if(SDK)
+    add_custom_command(TARGET dmex-dsp-tests POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDK}/lib/windows-x64/phonon.dll" "$<TARGET_FILE_DIR:dmex-dsp-tests>"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dmex-dsp-tests>/assets/hrtf"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../music-player-ui/src-tauri/resources/hrtf/subject_003.sofa"
+        "$<TARGET_FILE_DIR:dmex-dsp-tests>/assets/hrtf/subject_003.sofa")
+  endif()
+  add_test(NAME dsp-regression COMMAND dmex-dsp-tests)
+  set_tests_properties(dsp-regression PROPERTIES WORKING_DIRECTORY "$<TARGET_FILE_DIR:dmex-dsp-tests>")
+endif()
