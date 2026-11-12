@@ -5,6 +5,7 @@ import { CustomSelect } from '../components/common/CustomSelect';
 import { ToggleSwitch } from '../components/common/ToggleSwitch';
 import { LibraryFilters, MINIMUM_DURATIONS } from '../utils/libraryFilters';
 import { CustomPlaylist } from '../types/index'; // Adjust path if needed
+import { BrandMark } from '../components/common/BrandMark';
 
 export const FolderModal = memo(({ onClose, onScan }: { onClose: () => void; onScan: (path: string) => void }) => {
   const folders = [
@@ -68,7 +69,7 @@ export const SettingsModal = memo(({ apiKey, setApiKey, filters, onClose, onSave
   return (
     <div className="folder-modal-overlay" onClick={onClose}>
       <div className="folder-modal" onClick={e=>e.stopPropagation()} style={{ maxWidth: '400px', height: 'auto', maxHeight: '90dvh', overflowY: 'auto', paddingBottom: IS_ANDROID ? 'calc(52px + env(safe-area-inset-bottom, 0px))' : '20px' }}>
-        <div className="folder-modal-header"><h2>Settings</h2><button className="folder-modal-close" onClick={onClose}>×</button></div>
+        <div className="folder-modal-header"><h2 className="settings-brand-heading"><BrandMark />Settings</h2><button className="folder-modal-close" onClick={onClose}>×</button></div>
         
         <div style={{ padding: '0 20px', marginTop: '10px' }}>
           <h3 style={{ fontSize: '14px', marginBottom: '16px' }}>Library filters</h3>

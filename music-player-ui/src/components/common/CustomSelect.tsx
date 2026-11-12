@@ -2,6 +2,7 @@ import { CSSProperties, KeyboardEvent, useEffect, useId, useLayoutEffect, useRef
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search } from 'lucide-react';
 import './CustomSelect.css';
+import { BRAND } from '../../config/brand';
 
 interface SelectOption { value: string; label: string }
 interface CustomSelectProps {
@@ -42,7 +43,7 @@ export function CustomSelect({ label, value, options, disabled, onChange }: Cust
         ...(flip ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }),
         maxHeight: Math.max(80, Math.min(360, flip ? above : below)),
         '--select-surface': background, '--select-text': styles.color,
-        '--select-accent': styles.getPropertyValue('--theme-color').trim() || '#23bb92',
+        '--select-accent': styles.getPropertyValue('--theme-color').trim() || BRAND.accent,
       } as CSSProperties & Record<`--${string}`, string>);
     };
     place();

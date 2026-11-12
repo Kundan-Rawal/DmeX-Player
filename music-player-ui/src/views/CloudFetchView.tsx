@@ -81,7 +81,7 @@ export const CloudFetchView = ({ onPlayCloudTrack }: CloudFetchViewProps) => {
             disabled={isLoading || !query.trim()}
             style={{
               position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
-              background: 'var(--theme-color, #c8222a)', color: '#fff', border: 'none',
+              background: 'var(--theme-color, var(--brand-accent))', color: '#fff', border: 'none',
               padding: '8px 16px', borderRadius: '16px', fontWeight: 600, cursor: 'pointer',
               opacity: (isLoading || !query.trim()) ? 0.5 : 1
             }}
@@ -123,7 +123,7 @@ export const CloudFetchView = ({ onPlayCloudTrack }: CloudFetchViewProps) => {
               <button 
                 onClick={() => onPlayCloudTrack(song)}
                 className="samsung-icon-btn" 
-                style={{ background: 'var(--theme-color, #c8222a)', color: '#fff' }}
+                style={{ background: 'var(--theme-color, var(--brand-accent))', color: '#fff' }}
               >
                 <Play size={18} fill="currentColor" />
               </button>

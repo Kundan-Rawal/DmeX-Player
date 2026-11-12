@@ -35,7 +35,20 @@ input, textarea {
    color-scheme:dark tells the WebView to use a dark system UI
    (dark status bar, dark navigation bar) when in dark mode.
    The meta tag <meta name="color-scheme"> in index.html also helps. */
-:root { color-scheme: dark; }
+:root {
+  color-scheme: dark;
+  --brand-accent: #3d6390;
+  --brand-deep: #1c3d6b;
+  --brand-midnight: #102c50;
+  --brand-highlight: #7fa5d1;
+  --brand-icon-surface: #f4f7fc;
+  --theme-color: var(--brand-accent);
+  --theme-text: #ffffff;
+  --theme-on-surface: var(--brand-highlight);
+  --blob-1: var(--brand-accent);
+  --blob-2: var(--brand-deep);
+  --blob-3: var(--brand-midnight);
+}
 
 body {
   overflow: hidden;
@@ -72,7 +85,7 @@ body {
   --border:           rgba(255,255,255,0.07);
   --nav-hover-bg:     color-mix(in srgb,var(--theme-color) 10%,transparent);
   --nav-active-bg:    color-mix(in srgb,var(--theme-color) 15%,transparent);
-  --nav-active-text:  var(--theme-color);
+  --nav-active-text:  var(--theme-on-surface);
   --nav-active-left:  var(--theme-color);
   --track-hover:      rgba(255,255,255,0.04);
   --track-active-bg:  color-mix(in srgb,var(--theme-color) 10%,transparent);
@@ -120,6 +133,7 @@ body {
 }
 
 [data-theme="light"] {
+  --theme-on-surface: var(--theme-color);
   --bg-primary:       #ffffff;
   --bg-sidebar:       #f4f4f6;
   --bg-surface:       rgba(0,0,0,0.03);
@@ -228,7 +242,7 @@ body {
   padding:32px 20px 24px; display:flex; flex-direction:column; gap:18px; z-index:100;
 }
 .sidebar-logo { font-size:30px; font-weight:900; letter-spacing:-1.5px; padding:0 8px; line-height:1; user-select:none; }
-.logo-d    { color:#e83040; }
+.logo-d    { color:var(--theme-on-surface); }
 .logo-rest { color:var(--text-primary); }
 
 .search-box { position:relative; display:flex; align-items:center; }
@@ -332,7 +346,7 @@ body {
   margin-bottom: 3px !important;
 }
 .track-item-artist { font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:4px; }
-.fav-dot { color:#e83040; }
+.fav-dot { color:var(--theme-on-surface); }
 .track-profile-icon { font-size:10px; opacity:0.6; }
 .quality-badge { font-size:11px; background:var(--bg-surface); padding:2px 7px; border-radius:5px; display:inline-block; width:fit-content; color:var(--text-muted); }
 .time-cell { text-align:right; padding-right:0; color:var(--text-muted); }
@@ -1363,7 +1377,7 @@ body {
 }
 .mini-art-tile { width: 100%; height: 100%; background: #2a2a2a; }
 
-.fav-art { background: linear-gradient(135deg, #ff4081, #ff79b0); }
+.fav-art { background: linear-gradient(135deg, var(--brand-midnight), var(--brand-accent)); }
 .fav-heart-icon { font-size: 64px; color: #fff; }
 .most-played-art { background: linear-gradient(135deg, #00c6ff, #0072ff); }
 .play-icon { font-size: 54px; color: #fff; margin-left: 8px; }

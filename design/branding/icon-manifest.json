@@ -1,0 +1,7 @@
+{
+  "default": "dmex-orbit-d-light-navy-v1.png",
+  "bg_color": "#f4f7fc",
+  "android_fg": "dmex-orbit-d-light-navy-v1.png",
+  "android_monochrome": "dmex-orbit-d-light-navy-v1.png",
+  "android_fg_scale": 85
+}

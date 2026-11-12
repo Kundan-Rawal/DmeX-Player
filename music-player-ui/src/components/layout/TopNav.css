@@ -4,3 +4,10 @@
 .samsung-nav-tabs.mobile-scroll-nav button { flex:0 0 auto; white-space:nowrap; font-size:18px !important; min-height:44px; padding:6px 0 !important; scroll-snap-align:center; transform-origin:center; transition:color .15s ease !important; letter-spacing:0; }
 .samsung-nav-tabs.mobile-scroll-nav button:focus-visible { outline:2px solid var(--theme-color); outline-offset:2px; border-radius:4px; }
 @media(prefers-reduced-motion:reduce) { .samsung-nav-tabs.mobile-scroll-nav { scroll-behavior:auto; } }
+.samsung-logo-area { display:flex; align-items:center; gap:9px; min-width:0; letter-spacing:0; }
+.app-brand-wordmark { white-space:nowrap; letter-spacing:0; }
+.app-brand-mark { display:block; flex:0 0 auto; width:32px; height:32px; object-fit:contain; border-radius:6px; background:var(--brand-icon-surface,#f4f7fc); pointer-events:none; }
+.empty-icon .empty-brand-mark { width:72px; height:72px; margin:0 auto; border-radius:8px; }
+.settings-brand-heading { display:flex; align-items:center; gap:10px; }
+.settings-brand-heading .app-brand-mark { width:26px; height:26px; }
+@media (max-width:360px) { .samsung-logo-area { gap:7px; } .samsung-logo-area .app-brand-mark { width:28px; height:28px; } }

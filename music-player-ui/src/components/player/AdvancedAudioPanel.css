@@ -10,7 +10,7 @@
 .track-options .audio-bypass-button { width:44px; min-width:44px; min-height:44px; padding:0; }
 .track-options .audio-bypass-button span { display:none; }
 .track-options .glass-boost-btn { min-height:40px; }
-.track-options .glass-boost-btn.active { background:var(--theme-color,#176548); color:var(--theme-text,#fff); border-color:var(--theme-color,#176548); }
+.track-options .glass-boost-btn.active { background:var(--theme-color,var(--brand-accent)); color:var(--theme-text,#fff); border-color:var(--theme-color,var(--brand-accent)); }
 .track-options input:disabled, .track-options button:disabled { opacity:.45; cursor:default; }
 .track-options .glass-label-row { gap:12px; align-items:center; }
 .track-options .glass-label-row output { flex-shrink:0; font-variant-numeric:tabular-nums; }
@@ -23,7 +23,7 @@
 .dsp-section-stereo { --dsp-accent:#60aaf0; }
 .dsp-section-spatial { --dsp-accent:#c18beb; }
 .dsp-section-bass { --dsp-accent:#e4bf5c; }
-.dsp-section-room { --dsp-accent:#f39679; }
+.dsp-section-room { --dsp-accent:#91abc9; }
 .dsp-section-controls { display:flex; flex-direction:column; gap:20px; min-width:0; }
 .dsp-control { display:flex; flex-direction:column; gap:14px; min-width:0; }
 .advanced-audio-panel .dsp-label-row { gap:12px; align-items:center; flex-wrap:wrap; font-size:12px; }
@@ -37,7 +37,7 @@
 .audio-toggle-switch { width:48px; min-width:48px; height:44px; border:0; padding:0; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 .audio-toggle-track { display:block; width:46px; height:26px; padding:3px; border-radius:16px; background:color-mix(in srgb,var(--text-primary) 18%,transparent); transition:background .16s ease; }
 .audio-toggle-thumb { display:block; width:20px; height:20px; border-radius:50%; background:var(--text-primary); transform:translateX(0); transition:transform .16s ease,background .16s ease; box-shadow:0 1px 4px #0003; }
-.audio-toggle-switch[aria-checked=true] .audio-toggle-track { background:var(--dsp-accent,var(--theme-color,#23bb92)); }
+.audio-toggle-switch[aria-checked=true] .audio-toggle-track { background:var(--dsp-accent,var(--theme-color,var(--brand-accent))); }
 .audio-toggle-switch[aria-checked=true] .audio-toggle-thumb { transform:translateX(20px); background:#fff; }
 .audio-toggle-switch:focus-visible { outline:2px solid var(--dsp-accent,var(--theme-color)); outline-offset:2px; border-radius:6px; }
 .audio-mode-row { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; min-width:0; }

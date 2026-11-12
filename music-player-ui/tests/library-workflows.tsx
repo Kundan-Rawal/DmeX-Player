@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { mockIPC } from '@tauri-apps/api/mocks';
+import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 import App from '../src/App';
 import { AudioSettingsProvider, DEFAULT_AUDIO } from '../src/components/player/AudioSettingsContext';
 import { LyricsSearch } from '../src/components/player/LyricsSearch';
@@ -9,9 +9,21 @@ import { sanitizeForLyricsAPI, chooseLyricsMatch } from '../src/utils/metadataCl
 import { parseLRC } from '../src/utils/formatters';
 import { Track } from '../src/types';
 import { includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS } from '../src/utils/libraryFilters';
+import { BRAND, DEFAULT_AMBIENT_COLORS } from '../src/config/brand';
+import { getPalette, nudgeVibrancy, trackAccentColor } from '../src/utils/helpers';
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);
+mockWindows('main');
+if (query.has('branding')) {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
+  const context = canvas.getContext('2d')!; context.fillStyle = '#c8222a'; context.fillRect(0, 0, 16, 16);
+  tracks.push({ path: '/Music/artwork.wav', name: 'Artwork song', artist: 'Test Artist', duration: 120, metadataLoaded: true, thumb: canvas.toDataURL() },
+    { path: '/Music/no-artwork.wav', name: 'No artwork song', artist: 'Test Artist', duration: 120, metadataLoaded: true });
+  context.fillStyle = '#35a870'; context.fillRect(0, 0, 16, 16);
+  tracks.push({ path: '/Music/second-artwork.wav', name: 'Second artwork song', artist: 'Test Artist', duration: 120, metadataLoaded: true, thumb: canvas.toDataURL() },
+    { path: '/Music/broken-artwork.wav', name: 'Broken artwork song', artist: 'Test Artist', duration: 120, metadataLoaded: true, thumb: 'data:image/png;base64,broken' });
+}
 if (query.has('filters')) {
   for (const [name, duration] of [['Short sound', 5], ['Boundary song', 10], ['Call RECORDING 2026', 90], ['Recording of CALL', 100], ['Callback song', 120], ['Regular song', 120], ['Unknown duration', 0]] as const) {
     tracks.push({ path: `/Music/${name}.wav`, name, duration, artist: 'Test Singer', album: 'Test Album', metadataLoaded: true });
@@ -21,6 +33,7 @@ if (query.has('metadata-failure')) tracks.push({ path: '/Music/broken.flac', nam
 const store = new Map<string, unknown>();
 const calls: { command: string; payload: any }[] = [];
 (window as any).libraryTest = { tracks, calls, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+(window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
   if (command === 'audio_status') return { ready: true, settings: DEFAULT_AUDIO, generation: 1, bypassAll: false, ecoMode: true };
@@ -40,6 +53,11 @@ mockIPC((command, payload: any) => {
   if (command === 'add_library_tracks') { tracks.push(...payload.tracks); return; }
   if (command === 'extract_audio_metadata') {
     if (query.has('metadata-failure')) throw new Error('Test unreadable metadata');
+    if (query.has('branding')) {
+      const track = tracks.find(track => track.path === payload.path);
+      const delay = (window as any).brandingTest.metadataDelay || 0;
+      return new Promise(resolve => window.setTimeout(() => resolve({ title: track?.name, artist: track?.artist, duration: 120 }), delay));
+    }
     return { title: 'Correct Title', artist: 'Correct Singer', album: 'Correct Album', duration: 120, quality: '16-bit / 44.1 kHz' };
   }
   if (command === 'identify_lyrics_song') return null;

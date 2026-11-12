@@ -133,7 +133,7 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
   const renderSyncBar = () => {
     if (!isSyncing && syncProgress === 0) return null;
     
-    // Windows: Dark red gradient bar
+    // Windows: Brand-colored sync progress bar
     // Android: Loading metadata... X% (pill shape)
     
     const percentage = totalArtistsToSync > 0 ? Math.round((syncProgress / totalArtistsToSync) * 100) : 0;
@@ -159,7 +159,7 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
 
     return (
       <div style={{
-        background: 'linear-gradient(90deg, rgba(70,20,20,1) 0%, rgba(100,30,30,1) 100%)',
+        background: 'linear-gradient(90deg, var(--brand-midnight), var(--brand-deep))',
         borderRadius: '8px',
         padding: '12px',
         textAlign: 'center',
@@ -180,7 +180,7 @@ export const ArtistGalleryView = ({ playlist, setCurrentView }: ArtistGalleryPro
           transition: 'width 0.3s ease'
         }} />
         <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-          <div style={{ width: '6px', height: '6px', background: '#ff4444', borderRadius: '50%', animation: 'pulse 1.5s infinite' }} />
+          <div style={{ width: '6px', height: '6px', background: 'var(--brand-highlight)', borderRadius: '50%', animation: 'pulse 1.5s infinite' }} />
           Syncing Artists: {syncProgress} / {totalArtistsToSync}
         </span>
       </div>

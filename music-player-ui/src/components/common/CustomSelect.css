@@ -3,7 +3,7 @@
 .custom-select-trigger svg { flex-shrink:0; transition:transform .15s ease; opacity:.7; }
 .custom-select-trigger svg.open { transform:rotate(180deg); }
 .custom-select-trigger:disabled { opacity:.45; cursor:default; }
-.custom-select-trigger:focus-visible, .custom-select-search input:focus-visible { outline:2px solid var(--theme-color,#23bb92); outline-offset:2px; }
+.custom-select-trigger:focus-visible, .custom-select-search input:focus-visible { outline:2px solid var(--theme-color,var(--brand-accent)); outline-offset:2px; }
 .custom-select-popup { position:fixed; z-index:10000; display:flex; flex-direction:column; overflow:hidden; border:1px solid color-mix(in srgb,var(--select-text) 18%,transparent); border-radius:8px; background:var(--select-surface); color:var(--select-text); box-shadow:0 12px 36px #0005; font-size:13px; }
 .custom-select-search { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid color-mix(in srgb,var(--select-text) 12%,transparent); flex-shrink:0; }
 .custom-select-search input { width:100%; min-width:0; padding:4px; border:0; background:transparent; color:inherit; font-size:14px; outline:none; }

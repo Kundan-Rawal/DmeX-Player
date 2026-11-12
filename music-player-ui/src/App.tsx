@@ -34,6 +34,8 @@ import { LyricsSearch } from './components/player/LyricsSearch';
 import { X } from 'lucide-react';
 import { DEFAULT_LIBRARY_FILTERS, includeLibraryTrack, LibraryFilters, parseLibraryFilters } from './utils/libraryFilters';
 import { BulkScanner } from './components/library/BulkScanner';
+import { BRAND, DEFAULT_AMBIENT_COLORS } from './config/brand';
+import { BrandMark } from './components/common/BrandMark';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
 // IS_ANDROID gates every Android-specific optimisation in this file.
@@ -116,11 +118,11 @@ function App() {
   const [albumArt, setAlbumArt]             = useState<string | null>(null);
   const [trackTitle, setTrackTitle]         = useState('Ready');
   const [trackArtist, setTrackArtist]       = useState('DmeX Player');
-  const [themeColor, setThemeColor]         = useState('#c8222a');
-  const themeColorRef                       = useRef('#c8222a');
+  const [themeColor, setThemeColor]         = useState<string>(BRAND.accent);
+  const themeColorRef                       = useRef<string>(BRAND.accent);
   useEffect(() => { themeColorRef.current = themeColor; }, [themeColor]);
-  const [themeText, setThemeText]           = useState('#ffffff');
-  const [blobColors, setBlobColors]         = useState(['#c8222a','#8a1520','#6a1018']);
+  const [themeText, setThemeText]           = useState<string>(BRAND.text);
+  const [blobColors, setBlobColors]         = useState<string[]>([...DEFAULT_AMBIENT_COLORS]);
   const [lyrics, setLyrics]                 = useState<LyricLine[]>([]);
   const [isExpanded, setIsExpanded]         = useState(false);
   const isExpandedRef = useRef(false);
@@ -791,6 +793,7 @@ function App() {
     setCustomPlaylists([]);
     setCurrentTrack(null);
     setAlbumArt(null);
+    setThemeColor(BRAND.accent); setThemeText(BRAND.text); setBlobColors([...DEFAULT_AMBIENT_COLORS]);
     setLyrics([]);
     
     // 3. Nuke the Persistent Vault
@@ -878,6 +881,22 @@ function App() {
   const resumeBulkScan = useCallback(()=>{bulkScanPausedRef.current=false;setBulkScanPaused(false);},[]);
   const stopBulkScan   = useCallback(()=>{bulkScanRunning.current=false;bulkScanPausedRef.current=false;setBulkScanActive(false);setBulkScanPaused(false);},[]);
 
+  const applyArtworkPalette = useCallback(async (image: string | null, id: number) => {
+    let accent: string = BRAND.accent;
+    let palette: string[] = [...DEFAULT_AMBIENT_COLORS];
+    if (image) {
+      try {
+        const [color, extracted] = await Promise.all([
+          fac.getColorAsync(image, { algorithm: 'dominant' }), getPalette(image),
+        ]);
+        if (!color.error) { accent = color.hex; palette = extracted; }
+      } catch {}
+    }
+    if (id !== loadIdRef.current) return;
+    // Commit one complete palette; keep the previous track's colors while loading.
+    setThemeColor(accent); setThemeText(isHexDark(accent) ? '#ffffff' : '#111111'); setBlobColors(palette);
+  }, []);
+
   const playTrack = async (track:Track) => {
     if (!track || !includeLibraryTrack(track, libraryFiltersRef.current)) return;
     const id=++loadIdRef.current;
@@ -896,14 +915,17 @@ function App() {
       setTimeout(async()=>{
         if(id!==loadIdRef.current) return;
         try{
-          const native = await extractTrackMetadata(track);
+          const native = await extractTrackMetadata(track).catch(async error => {
+            await applyArtworkPalette(track.thumb || null, id);
+            throw error;
+          });
           if (id !== loadIdRef.current) return;
           const title = native.name;
           const artist = native.artist;
           setTrackTitle(title); setTrackArtist(artist);
           if (native.duration && native.duration > 0) setDuration(native.duration);
-          if (native.thumb) {
-            let image = native.thumb;
+          let image = native.thumb || null;
+          if (image) {
             if (native.artPath) {
               try {
                 const bytes = await readFile(native.artPath);
@@ -913,15 +935,9 @@ function App() {
             }
             if (id !== loadIdRef.current) { if (image.startsWith('blob:')) URL.revokeObjectURL(image); return; }
             setAlbumArt(image);
-            try {
-              const color = await fac.getColorAsync(image, { algorithm: 'dominant' });
-              if (id === loadIdRef.current && !color.error) {
-                setThemeColor(color.hex); setThemeText(isHexDark(color.hex) ? '#ffffff' : '#111111');
-                const palette = await getPalette(image);
-                if (id === loadIdRef.current) setBlobColors(palette);
-              }
-            } catch {}
           }
+          await applyArtworkPalette(image, id);
+          if (id !== loadIdRef.current) return;
 
 
           // 2. SHARED LOGIC: LRC Loader and DB Sync (Uses elevated title/artist)
@@ -1273,7 +1289,7 @@ function App() {
 
 
   return (
-    <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
+    <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-on-surface':isDarkMode && themeColor === BRAND.accent ? BRAND.highlight : themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
       {audio.error && <div className="audio-global-error" role="alert">{audio.error}</div>}
       {showSettings && <SettingsModal apiKey={geminiApiKey} setApiKey={setGeminiApiKey} filters={libraryFilters} onClose={() => setShowSettings(false)} onSave={async filters => {
         await invoke('set_setting', { key: 'gemini_api_key', value: geminiApiKey.trim() });
@@ -1520,7 +1536,7 @@ function App() {
                       
                       <div className="album-detail-actions" style={{ justifyContent: IS_ANDROID ? 'center' : 'flex-start', width: '100%', display: 'flex', gap: '12px' }}>
                         {displayedTracks.length > 0 && (
-                          <button className="play-all-btn" style={{ flex: IS_ANDROID ? 1 : undefined, justifyContent: 'center', background: 'var(--theme-color)', color: 'var(--theme-text)', boxShadow: '0 4px 20px rgba(255,50,50,0.4)', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => playTrack(displayedTracks[0])}>
+                          <button className="play-all-btn" style={{ flex: IS_ANDROID ? 1 : undefined, justifyContent: 'center', background: 'var(--theme-color)', color: 'var(--theme-text)', boxShadow: '0 4px 20px color-mix(in srgb, var(--theme-color) 40%, transparent)', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => playTrack(displayedTracks[0])}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play All
                           </button>
                         )}
@@ -1535,7 +1551,7 @@ function App() {
                 {/* 1.5. EMPTY STATE IF NO TRACKS */}
                 {displayedTracks.length === 0 ? (
                   <div className="empty-state" style={{ marginTop: '32px' }}>
-                    <div className="empty-icon">🎵</div>
+                    <div className="empty-icon"><BrandMark className="empty-brand-mark" /></div>
                     <p className="empty-title">{searchQuery?'No results found':headerInfo?'No tracks here yet':'No music yet'}</p>
                     <p className="empty-hint">{searchQuery?'Try a different search term':IS_MOBILE?'Tap the + button to add your music folders':'Click the + button in the top right'}</p>
                     {!searchQuery&&IS_MOBILE&&<button className="empty-add-btn" onClick={handleAddFolder}>+ Add Music Folder</button>}
@@ -1637,7 +1653,7 @@ function App() {
                         
                         {/* Track Name & Artist */}
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                          <span style={{ fontSize: '15px', fontWeight: 600, color: currentTrack?.path === track.path ? 'var(--theme-color)' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <span style={{ fontSize: '15px', fontWeight: 600, color: currentTrack?.path === track.path ? 'var(--theme-on-surface, var(--theme-color))' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {track.name}
                           </span>
                           <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

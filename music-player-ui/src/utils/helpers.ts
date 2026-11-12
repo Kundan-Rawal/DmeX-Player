@@ -1,5 +1,6 @@
 import { IPicture } from 'music-metadata';
 import { IS_ANDROID } from '../types';
+import { BRAND, DEFAULT_AMBIENT_COLORS } from '../config/brand';
 
 // ─── Shared HSL conversion ────────────────────────────────────────────────────
 const hue2rgb = (p: number, q: number, t: number) => {
@@ -64,7 +65,7 @@ export const isHexDark = (hex: string): boolean => {
 export const trackAccentColor = (name: string): string => {
   let h = 0;
   for (const c of name) h = (h << 5) - h + c.charCodeAt(0);
-  return ['#c8222a','#1565c0','#2e7d32','#e65100','#6a1b9a','#00838f','#c62828','#4527a0'][Math.abs(h) % 8];
+  return [BRAND.deep,'#1565c0','#2e7d32','#e65100','#6a1b9a','#00838f',BRAND.accent,'#4527a0'][Math.abs(h) % 8];
 };
 
 // ─── getPalette — faithful weighted median-cut extraction ─────────────────────
@@ -93,7 +94,7 @@ export const getPalette = (imgUrl: string): Promise<string[]> => {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      if (!ctx) { resolve(['#c8222a', '#8a1520', '#6a1018']); return; }
+      if (!ctx) { resolve([...DEFAULT_AMBIENT_COLORS]); return; }
 
       canvas.width = 64;
       canvas.height = 64;
@@ -163,13 +164,14 @@ export const getPalette = (imgUrl: string): Promise<string[]> => {
           });
         }
 
-        while (palette.length < 3) palette.push(palette[0] || '#c8222a');
+        if (!palette.length) { resolve([...DEFAULT_AMBIENT_COLORS]); return; }
+        while (palette.length < 3) palette.push(palette[0]);
         resolve(palette);
       } catch {
-        resolve(['#c8222a', '#8a1520', '#6a1018']);
+        resolve([...DEFAULT_AMBIENT_COLORS]);
       }
     };
-    img.onerror = () => resolve(['#c8222a', '#8a1520', '#6a1018']);
+    img.onerror = () => resolve([...DEFAULT_AMBIENT_COLORS]);
   });
 };
 // ─── getMime / stripExt ───────────────────────────────────────────────────────
@@ -248,7 +250,7 @@ export const enforceLightModeContrast = (hexColor: string): string => {
 //     where you want a silver/slate aesthetic instead of random hue artifacts.
 
 export const nudgeVibrancy = (hexColor: string, isMonochrome: boolean = false): string => {
-  if (!hexColor) return '#c8222a';
+  if (!hexColor) return BRAND.accent;
   const [r, g, b] = hexToRgb(hexColor);
   const [h, s, l] = rgbToHsl(r, g, b);
 

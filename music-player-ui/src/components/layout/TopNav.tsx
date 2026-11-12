@@ -3,6 +3,7 @@ import { NavView, IS_MOBILE } from '../../types';
 import { X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import './TopNav.css';
+import { BrandMark } from '../common/BrandMark';
 const IS_ANDROID = /android/i.test(navigator.userAgent);
 
 interface TopNavProps {
@@ -141,8 +142,11 @@ export const TopNav = ({
       <div className="samsung-header-wrapper" data-tauri-drag-region="true">
         <header className="samsung-top-bar">
           <div className="samsung-logo-area" data-tauri-drag-region="true">
+            <BrandMark />
+            <span className="app-brand-wordmark">
             <span style={{ fontWeight: 800, color: 'var(--text-primary)' }}>DmeX </span>
             <span style={{ fontWeight: 400, color: 'var(--text-primary)' }}>Player</span>
+            </span>
           </div>
 
           <div className="samsung-actions">
@@ -151,7 +155,7 @@ export const TopNav = ({
               /* ANDROID LAYOUT: Search Icon + 3-Dot Kebab Menu                 */
               /* ============================================================== */
               <>
-                <button className="samsung-icon-btn" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
+                <button className="samsung-icon-btn" aria-label="Search" title="Search" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                 </button>
                 
@@ -208,19 +212,19 @@ export const TopNav = ({
               /* WINDOWS LAYOUT: The Unaltered 4-Button Array                   */
               /* ============================================================== */
               <>
-                <button className="samsung-icon-btn" onClick={handleClearLibrary} disabled={isLoading} style={{ color: '#e83040' }}>
+                <button className="samsung-icon-btn" aria-label="Clear Library" title="Clear Library" onClick={handleClearLibrary} disabled={isLoading} style={{ color: '#e83040' }}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                 </button>
-                <button className="samsung-icon-btn" onClick={handleAddFolder} disabled={isLoading}>
+                <button className="samsung-icon-btn" aria-label="Add Folder" title="Add Folder" onClick={handleAddFolder} disabled={isLoading}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
                 </button>
-                <button className="samsung-icon-btn" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
+                <button className="samsung-icon-btn" aria-label="Search" title="Search" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                 </button>
-                <button className="samsung-icon-btn" onClick={toggleTheme}>
+                <button className="samsung-icon-btn" aria-label="Toggle theme" title="Toggle theme" onClick={toggleTheme}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
                 </button>
-                <button className="samsung-icon-btn" onClick={onOpenSettings}>
+                <button className="samsung-icon-btn" aria-label="Settings" title="Settings" onClick={onOpenSettings}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                 </button>
               </>
