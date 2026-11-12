@@ -16,8 +16,33 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+
+    private fun webViewIn(view: View): WebView? {
+        if (view is WebView) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                webViewIn(view.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun publishMobileInsets(insets: WindowInsetsCompat) {
+        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val density = resources.displayMetrics.density
+        val values = listOf("top" to bars.top, "right" to bars.right, "bottom" to bars.bottom, "left" to bars.left)
+        val script = values.joinToString(";") { (edge, value) ->
+            "document.documentElement.style.setProperty('--dmex-inset-$edge','${value / density}px')"
+        }
+        webViewIn(window.decorView)?.evaluateJavascript(script, null)
+    }
 
     // Link to our low-level Rust function
     external fun onAudioBecomingNoisy()
@@ -49,6 +74,14 @@ class MainActivity : TauriActivity() {
         // This allows your React dark mode (or expanded player gradient) to show through!
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
+
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+            publishMobileInsets(insets)
+            insets
+        }
+        window.decorView.postDelayed({
+            ViewCompat.getRootWindowInsets(window.decorView)?.let { publishMobileInsets(it) }
+        }, 1800)
 
         // 4. Delay permissions so React can boot
         Handler(Looper.getMainLooper()).postDelayed({

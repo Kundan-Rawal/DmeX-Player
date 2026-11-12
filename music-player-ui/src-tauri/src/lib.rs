@@ -810,6 +810,7 @@ pub fn run() {
             let _ = conn.execute("ALTER TABLE tracks ADD COLUMN dateAdded INTEGER DEFAULT 0", []);
             let _ = conn.execute("ALTER TABLE tracks ADD COLUMN detected_cutoff_hz REAL", []);
             let _ = conn.execute("ALTER TABLE tracks ADD COLUMN source_quality TEXT", []);
+            let _ = conn.execute("ALTER TABLE tracks ADD COLUMN lastPlayed INTEGER DEFAULT 0", []);
 
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS playlists (

@@ -13,7 +13,7 @@ try {
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.goto(base + '/tests/library-workflows.html');
     await page.getByRole('button', { name: 'Library options' }).click();
-    await page.getByRole('button', { name: 'Add Folder', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Add music', exact: true }).click();
     await page.locator('.folder-modal-item').first().waitFor();
     assert.deepEqual(await page.locator('.folder-modal-item').allTextContents(), ['Music folder', 'Internal Storage', 'Downloads', 'Custom']);
     await page.screenshot({ path: `tests/artifacts/folders-${width}.png` });
@@ -22,14 +22,15 @@ try {
     assert.equal(await page.evaluate(() => window.libraryTest.tracks[0].name), 'Correct Title');
     assert.equal(await page.evaluate(() => window.libraryTest.tracks[0].artist), 'Correct Singer');
     await page.getByRole('button', { name: 'Library options' }).click();
-    await page.getByRole('button', { name: 'Add Folder', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Add music', exact: true }).click();
     await page.getByRole('button', { name: 'Custom', exact: true }).click();
     await page.waitForFunction(() => window.libraryTest.calls.some(c => c.command === 'scan_android_music' && c.payload.folderPath === 'content://test/tree/selected'));
     assert.equal(await page.evaluate(() => window.libraryTest.tracks.length), 1, 'Rescan must deduplicate');
     await page.getByRole('button', { name: 'Library options' }).click();
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.locator('input[type=password]').fill('test-key-not-a-secret');
-    await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
     await page.waitForFunction(() => window.libraryTest.calls.some(c => c.command === 'set_setting' && c.payload.value === 'test-key-not-a-secret'));
 
     const domain = await page.evaluate(() => {
@@ -47,8 +48,8 @@ try {
     assert.equal(domain.lrc.length, 3); assert.equal(domain.lrc[0].text, 'First'); assert.equal(domain.lrc[1].time, 2.1); assert.equal(domain.wrong, undefined);
 
     await page.route('https://lrclib.net/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-    await page.locator('.track-item').first().click();
-    await page.locator('.mini-player-content .track-info').click();
+    await page.locator('.dmex-mobile-track-play').first().click();
+    await page.getByRole('button', { name: 'Open expanded player', exact: true }).click();
     await page.getByRole('button', { name: 'Lyrics', exact: true }).click();
     await page.getByRole('button', { name: 'Fetch Lyrics Online' }).click();
     await page.getByLabel('Song name').waitFor();

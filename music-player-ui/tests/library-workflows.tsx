@@ -11,9 +11,23 @@ import { Track } from '../src/types';
 import { includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS } from '../src/utils/libraryFilters';
 import { BRAND, DEFAULT_AMBIENT_COLORS } from '../src/config/brand';
 import { getPalette, nudgeVibrancy, trackAccentColor } from '../src/utils/helpers';
+import { createQueue } from '../src/mobile/queue';
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);
+const testPlaylists: { id: string; name: string; trackPaths: string[] }[] = [];
+const artistImages: Record<string, string> = {};
+if (query.has('mobile')) {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 120;
+  const ctx = canvas.getContext('2d')!;
+  for (let i = 0; i < 80; i++) {
+    ctx.fillStyle = ['#315e87', '#b53f61', '#237a68', '#79583f'][i % 4]; ctx.fillRect(0, 0, 120, 120);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 32px sans-serif'; ctx.fillText(String(i + 1).padStart(2, '0'), 28, 70);
+    tracks.push({ path: `/Music/Album ${i % 8}/track-${i}.flac`, name: ['Night Drive', 'Paper Lanterns', 'Open Water', 'Every Little Moment'][i % 4] + ` ${i + 1}`,
+      artist: ['Kira Lane', 'Aarav', 'The Coast', 'Mina'][i % 4], album: `Sessions ${i % 8 + 1}`, duration: 180 + i, dateAdded: 1794355200 - i * 1000, thumb: canvas.toDataURL(), metadataLoaded: true,
+      isFavorite: i < 3, playCount: i < 8 ? 8 - i : 0, totalSecondsListened: i < 8 ? 3000 - i * 100 : 0, lastPlayed: i < 4 ? 1794355200000 - i * 1000 : 0 });
+  }
+}
 mockWindows('main');
 if (query.has('branding')) {
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
@@ -31,6 +45,11 @@ if (query.has('filters')) {
 }
 if (query.has('metadata-failure')) tracks.push({ path: '/Music/broken.flac', name: 'Broken file', artist: 'Unknown Artist', duration: 0, metadataLoaded: false });
 const store = new Map<string, unknown>();
+if (query.has('native-queue')) {
+  const queue = createQueue(tracks.slice(0, 3), tracks[0], 'Saved native queue'); queue.position = 41;
+  store.set('dmex_mobile_queue_v1', JSON.stringify(queue));
+  store.set('app_settings', { lastTrackPath: tracks[2].path, isDarkMode: true });
+}
 const calls: { command: string; payload: any }[] = [];
 (window as any).libraryTest = { tracks, calls, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
@@ -38,10 +57,27 @@ mockIPC((command, payload: any) => {
   calls.push({ command, payload });
   if (command === 'audio_status') return { ready: true, settings: DEFAULT_AUDIO, generation: 1, bypassAll: false, ecoMode: true };
   if (command === 'audio_metrics') return { currentTime: 0, duration: 120, audioLevel: 0, bassLevel: 0, midLevel: 0, trebleLevel: 0, limiterGain: 1 };
-  if (command === 'fetch_library') return tracks.map(t => ({ ...t }));
-  if (command === 'get_playlists') return [];
-  if (command === 'get_all_artist_images') return {};
-  if (command === 'get_setting') return store.get(payload.key) || null;
+  if (command === 'fetch_library') {
+    const library = tracks.map(t => ({ ...t }));
+    return query.has('slow-library') ? new Promise(resolve => setTimeout(() => resolve(library), 1200)) : library;
+  }
+  if (command === 'get_playlists') return testPlaylists.map(p => ({ ...p }));
+  if (command === 'save_playlist') { const index = testPlaylists.findIndex(p => p.id === payload.playlist.id); if (index >= 0) testPlaylists[index] = payload.playlist; else testPlaylists.push(payload.playlist); return; }
+  if (command === 'delete_playlist') { const index = testPlaylists.findIndex(p => p.id === payload.id); if (index >= 0) testPlaylists.splice(index, 1); return; }
+  if (command === 'toggle_favorite') { const track = tracks.find(t => t.path === payload.path); if (track) track.isFavorite = payload.isFavorite; return; }
+  if (command === 'update_play_stats') { const track = tracks.find(t => t.path === payload.path); if (track) track.totalSecondsListened = (track.totalSecondsListened || 0) + payload.seconds; return; }
+  if (command === 'record_play') { const track = tracks.find(t => t.path === payload.path); if (track) track.playCount = (track.playCount || 0) + 1; return; }
+  if (command === 'get_all_artist_images') return { ...artistImages };
+  if (command === 'download_artist_art') {
+    const key = artistCacheKey(payload.artistName), path = `/artist-art/${key}.jpg`;
+    artistImages[key] = path; return path;
+  }
+  if (command === 'nuke_artist_cache') { Object.keys(artistImages).forEach(key => delete artistImages[key]); return; }
+  if (command === 'get_setting') {
+    const value = store.get(payload.key) || null;
+    if (query.has('native-queue') && payload.key === 'dmex_mobile_queue_v1') return new Promise(resolve => setTimeout(() => resolve(value), 1200));
+    return value;
+  }
   if (command === 'set_setting') { store.set(payload.key, payload.value); return; }
   if (command === 'scan_android_music') return [{ file_path: '/Music/example.flac', title: 'Filename', artist: 'Unknown Artist', album: 'Unknown Album', duration: 0 }];
   if (command === 'pick_music_folder') return 'content://test/tree/selected';
@@ -52,6 +88,7 @@ mockIPC((command, payload: any) => {
   }
   if (command === 'add_library_tracks') { tracks.push(...payload.tracks); return; }
   if (command === 'extract_audio_metadata') {
+    if (query.has('mobile')) { const track = tracks.find(t => t.path === payload.path); return { title: track?.name, artist: track?.artist, album: track?.album, duration: track?.duration || 180 }; }
     if (query.has('metadata-failure')) throw new Error('Test unreadable metadata');
     if (query.has('branding')) {
       const track = tracks.find(track => track.path === payload.path);

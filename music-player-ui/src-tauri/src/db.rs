@@ -18,6 +18,7 @@ pub struct Track {
     pub total_seconds_listened: Option<i32>,
     pub thumb: Option<String>,
     pub date_added: Option<i64>,
+    pub last_played: Option<i64>,
     pub detected_cutoff_hz: Option<f32>,
     pub source_quality: Option<String>,
 }
@@ -31,10 +32,10 @@ pub struct CustomPlaylist {
 }
 
 pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
-    // Extract true OS-level file CREATION time (when it was copied to the PC/Phone)
-    // If creation time is unavailable (some Linux systems), fallback to modified time.
     let date_added = track.date_added.unwrap_or_else(|| {
-        #[cfg(unix)]
+        #[cfg(target_os = "android")]
+        { return std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0); }
+        #[cfg(all(unix, not(target_os = "android")))]
         {
             use std::os::unix::fs::MetadataExt;
             if let Ok(m) = std::fs::metadata(&track.path) {
@@ -82,7 +83,7 @@ pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb, dateAdded, detected_cutoff_hz, source_quality 
+        "SELECT path, name, artist, album, year, quality, duration, profile, metadataLoaded, genre, isFavorite, playCount, totalSecondsListened, thumb, dateAdded, detected_cutoff_hz, source_quality, lastPlayed
          FROM tracks ORDER BY artist, album, name"
     )?;
     
@@ -105,6 +106,7 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             date_added: row.get(14).unwrap_or(Some(0)),
             detected_cutoff_hz: row.get(15).unwrap_or(None),
             source_quality: row.get(16).unwrap_or(None),
+            last_played: row.get(17).unwrap_or(None),
         })
     })?;
 
@@ -124,7 +126,7 @@ pub fn update_play_stats(conn: &Connection, path: &str, seconds: i32) -> Result<
 }
 
 pub fn record_play(conn: &Connection, path: &str) -> Result<()> {
-    conn.execute("UPDATE tracks SET playCount = COALESCE(playCount, 0) + 1 WHERE path = ?1", [path])?;
+    conn.execute("UPDATE tracks SET playCount = COALESCE(playCount, 0) + 1, lastPlayed = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE path = ?1", [path])?;
     Ok(())
 }
 
@@ -134,11 +136,13 @@ pub fn update_profile(conn: &Connection, path: &str, profile: &str) -> Result<()
 }
 
 pub fn save_playlist(conn: &Connection, playlist: &CustomPlaylist) -> Result<()> {
-    conn.execute("INSERT OR REPLACE INTO playlists (id, name) VALUES (?1, ?2)", (&playlist.id, &playlist.name))?;
-    conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?1", [&playlist.id])?;
+    let transaction = conn.unchecked_transaction()?;
+    transaction.execute("INSERT INTO playlists (id, name) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET name = excluded.name", (&playlist.id, &playlist.name))?;
+    transaction.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?1", [&playlist.id])?;
     for (i, path) in playlist.track_paths.iter().enumerate() {
-        conn.execute("INSERT INTO playlist_tracks (playlist_id, track_path, position) VALUES (?1, ?2, ?3)", (&playlist.id, path, i))?;
+        transaction.execute("INSERT INTO playlist_tracks (playlist_id, track_path, position) VALUES (?1, ?2, ?3)", (&playlist.id, path, i))?;
     }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -167,7 +171,7 @@ mod tests {
 
     fn database() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE tracks (path TEXT PRIMARY KEY, name TEXT, artist TEXT, album TEXT, year TEXT, quality TEXT, duration REAL, profile TEXT, metadataLoaded BOOLEAN, genre TEXT, isFavorite BOOLEAN, playCount INTEGER, totalSecondsListened INTEGER, thumb TEXT, dateAdded INTEGER, detected_cutoff_hz REAL, source_quality TEXT);
+        conn.execute_batch("CREATE TABLE tracks (path TEXT PRIMARY KEY, name TEXT, artist TEXT, album TEXT, year TEXT, quality TEXT, duration REAL, profile TEXT, metadataLoaded BOOLEAN, genre TEXT, isFavorite BOOLEAN, playCount INTEGER, totalSecondsListened INTEGER, thumb TEXT, dateAdded INTEGER, detected_cutoff_hz REAL, source_quality TEXT, lastPlayed INTEGER);
             CREATE TABLE playlists (id TEXT PRIMARY KEY, name TEXT);
             CREATE TABLE playlist_tracks (playlist_id TEXT, track_path TEXT, position INTEGER, PRIMARY KEY(playlist_id, track_path));").unwrap();
         conn
@@ -216,5 +220,17 @@ mod tests {
         assert_eq!(get_playlists(&conn).unwrap()[0].track_paths, playlist.track_paths);
         playlist.track_paths = vec!["a".into()]; save_playlist(&conn, &playlist).unwrap();
         assert_eq!(get_playlists(&conn).unwrap()[0].track_paths, vec!["a"]);
+    }
+
+    #[test]
+    fn playlist_failure_restores_previous_name_and_items() {
+        let conn = database();
+        let original = CustomPlaylist { id: "p".into(), name: "Original".into(), track_paths: vec!["a".into(), "b".into()] };
+        save_playlist(&conn, &original).unwrap();
+        let invalid = CustomPlaylist { id: "p".into(), name: "Changed".into(), track_paths: vec!["duplicate".into(), "duplicate".into()] };
+        assert!(save_playlist(&conn, &invalid).is_err());
+        let saved = get_playlists(&conn).unwrap();
+        assert_eq!(saved[0].name, original.name);
+        assert_eq!(saved[0].track_paths, original.track_paths);
     }
 }

@@ -20,6 +20,12 @@ export interface Track {
   dateAdded?: number;
   detectedCutoffHz?: number;
   sourceQuality?: string;
+  lastPlayed?: number;
+  albumArtist?: string;
+  trackNumber?: number;
+  discNumber?: number;
+  source?: 'local' | 'cloud';
+  sourceId?: string;
 }
 
 export type NavView = 'ALL' | 'FAVORITES' | 'ALBUMS' | 'TOPTRACKS' | 'PLAYLIST_GALLERY' | 'CLOUD_FETCH' | string;

@@ -9,10 +9,10 @@ try {
       userAgent: 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36' });
     const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(base + '/tests/library-workflows.html?filters', { waitUntil: 'domcontentloaded' });
-    await page.locator('.track-item').first().click();
-    await page.locator('.mini-player-content .track-info').waitFor();
+    await page.locator('.dmex-mobile-track-play').first().click();
+    await page.getByRole('button', { name: 'Open expanded player', exact: true }).waitFor();
     assert.equal(await page.locator('.mep-root .ambient-background').count(), 0);
-    await page.locator('.mini-player-content .track-info').click();
+    await page.getByRole('button', { name: 'Open expanded player', exact: true }).click();
     await page.waitForTimeout(80);
     assert.equal(await page.locator('.expanded-player-content').getAttribute('data-ready'), 'false');
     assert.equal(await page.locator('.mep-root .ambient-background').count(), 0, 'Heavy visualizer must wait for expansion');
@@ -26,8 +26,8 @@ try {
     await page.waitForFunction(() => document.querySelector('.expanded-player-content').getAttribute('aria-hidden') === 'true');
     assert.equal(await page.locator('.mep-root .ambient-background').count(), 0);
     await page.waitForTimeout(500);
-    assert.equal(await page.locator('.mini-player-content').evaluate(node => getComputedStyle(node).opacity), '1');
-    await page.locator('.mini-player-content .track-info').click();
+    assert.equal(await page.locator('.dmex-mobile-mini').evaluate(node => getComputedStyle(node).opacity), '1');
+    await page.getByRole('button', { name: 'Open expanded player', exact: true }).click();
     await page.waitForTimeout(50); await page.evaluate(() => history.back());
     await page.waitForTimeout(600);
     assert.equal(await page.locator('.mep-root .ambient-background').count(), 0, 'Canceled opening must not restart hidden visuals');

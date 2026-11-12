@@ -36,6 +36,8 @@ import { DEFAULT_LIBRARY_FILTERS, includeLibraryTrack, LibraryFilters, parseLibr
 import { BulkScanner } from './components/library/BulkScanner';
 import { BRAND, DEFAULT_AMBIENT_COLORS } from './config/brand';
 import { BrandMark } from './components/common/BrandMark';
+import { MobileShell, MobileMiniPlayer } from './mobile/MobileShell';
+import { MobileLoadOptions, useMobilePlayback } from './mobile/useMobilePlayback';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
 // IS_ANDROID gates every Android-specific optimisation in this file.
@@ -84,6 +86,7 @@ function App() {
   const [currentTrack, setCurrentTrack]     = useState<Track | null>(null);
   const [favorites, setFavorites]           = useState<string[]>([]);
   const [currentView, setCurrentView]       = useState<NavView>('ALL');
+  const [mobileQueueRequest, setMobileQueueRequest] = useState(0);
   const scrollPositionsRef                  = useRef<Record<string, number>>({});
   const trackContainerRef                   = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery]       = useState('');
@@ -141,7 +144,10 @@ function App() {
   const [showLyrics, setShowLyrics]         = useState(false);
   const [showStudio, setShowStudio]         = useState(false);
   const [showDSPPage, setShowDSPPage]       = useState(false);
-  const [isDarkMode, setIsDarkMode]         = useState(true);
+  const [isDarkMode, setIsDarkMode]         = useState(() => {
+    if (!IS_MOBILE) return true;
+    try { return localStorage.getItem('dmex_mobile_appearance') !== 'light'; } catch { return true; }
+  });
   const [isBooted, setIsBooted]             = useState(false);
   const [volume, setVolume]                 = useState(1.0);
   const volumeRef = useRef(1.0);
@@ -272,6 +278,7 @@ function App() {
   useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
 
   useEffect(() => {
+    if (IS_MOBILE) return;
     if (!isPlaying || !currentTrack) return;
     const path = currentTrack.path;
     let start = performance.now();
@@ -294,6 +301,7 @@ function App() {
   }, [isPlaying, currentTrack?.path]);
 
   useEffect(() => {
+    if (IS_MOBILE) return;
     const handlePopState = () => {
       if (showFolderModal) { setShowFolderModal(false); return; }
       if (isBulkScanOpen) { setIsBulkScanOpen(false); return; }
@@ -306,6 +314,7 @@ function App() {
   }, [isExpanded, showFolderModal, isBulkScanOpen, showDSPPage, showLyrics, showStudio]);
 
   useEffect(() => {
+    if (IS_MOBILE) return;
     if (isExpanded || showFolderModal || isBulkScanOpen) window.history.pushState({ modal:true }, '');
   }, [isExpanded, showFolderModal, isBulkScanOpen]);
 
@@ -372,6 +381,21 @@ function App() {
   useEffect(() => { stateRefs.current = { displayedTracks, currentTrack }; }, [displayedTracks, currentTrack]);
 
   const writeToEngine = useCallback(sendAudioCommand, []);
+  const mobileLoaderRef = useRef<(track: Track, options?: MobileLoadOptions) => Promise<void>>(async () => {});
+  const mobilePlayback = useMobilePlayback(IS_MOBILE, isBooted, visiblePlaylist,
+    (track, options) => mobileLoaderRef.current(track, options),
+    (path, seconds, counted) => setPlaylist(prev => prev.map(t => t.path === path ? { ...t,
+      totalSecondsListened: (t.totalSecondsListened || 0) + seconds,
+      playCount: (t.playCount || 0) + (counted ? 1 : 0), lastPlayed: Date.now() } : t)));
+  const mobilePlaybackRef = useRef(mobilePlayback);
+  mobilePlaybackRef.current = mobilePlayback;
+  useEffect(() => {
+    if (!IS_MOBILE || !isBooted) return;
+    const appearance = isDarkMode ? 'dark' : 'light';
+    document.documentElement.dataset.mobileLaunch = appearance;
+    try { localStorage.setItem('dmex_mobile_appearance', appearance); } catch {}
+  }, [isDarkMode, isBooted]);
+  useEffect(() => { mobilePlayback.progress(currentTime, isPlaying); }, [currentTime, isPlaying, mobilePlayback.progress]);
 
   
   const applyHeadphoneCorrection = useCallback((modelId: string) => audio.loadAsset(modelId, true), [audio.loadAsset]);
@@ -403,7 +427,7 @@ function App() {
     async function boot() {
       setIsLoading(true);
       setScanProgress('Waking up database...');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      if (!IS_MOBILE) await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
         const saved = await invoke<Track[]>('fetch_library');
@@ -462,6 +486,7 @@ function App() {
                  const currentPl = playlistRef.current;
                  const track = currentPl.find((t: any) => t.path === settings.lastTrackPath);
                  if (track && includeLibraryTrack(track, libraryFiltersRef.current)) {
+                     if (IS_MOBILE) { mobilePlaybackRef.current.restoreFallback(track); return; }
                      setCurrentTrack(track);
                      setDuration(track.duration || 0);
                      setTrackTitle(track.name);
@@ -501,6 +526,7 @@ function App() {
   }, [currentView]);
 
   useEffect(() => {
+    if (IS_MOBILE) return;
     const pushTime = Date.now();
     // 1. When we dive into an Album, Playlist, Artist, or Favourites, forcefully inject a fake history state.
     // This physically stops Android from exiting the app when you swipe back.
@@ -529,7 +555,8 @@ function App() {
   }, [currentView]);
 
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback((automatic = false) => {
+    if (IS_MOBILE) { if (!mobilePlaybackRef.current.next(automatic) && automatic) setIsPlaying(false); return; }
     const { displayedTracks:list, currentTrack:track } = stateRefs.current;
     const library = playablePlaylistRef.current;
     if (!library.length||!track) return;
@@ -583,12 +610,12 @@ function App() {
           if (!isTransitioningRef.current) {
             isTransitioningRef.current = true;
             const currentPath = stateRefs.current.currentTrack?.path;
-            if (currentPath && lastCountedTrackRef.current !== currentPath) {
+            if (!IS_MOBILE && currentPath && lastCountedTrackRef.current !== currentPath) {
               lastCountedTrackRef.current = currentPath;
               invoke('record_play', { path: currentPath }).catch(console.error);
               setPlaylist(prev => prev.map(t => t.path === currentPath ? { ...t, playCount: (t.playCount || 0) + 1 } : t));
             }
-            handleNext();
+            handleNext(true);
             setTimeout(() => { isTransitioningRef.current = false; }, 1500);
           }
         }
@@ -661,6 +688,7 @@ function App() {
 
   const handleToggleShuffle = useCallback((e?:React.MouseEvent) => {
     if(e) e.stopPropagation();
+    if (IS_MOBILE) { mobilePlaybackRef.current.toggleShuffle(); return; }
     const next=!isShuffle; setIsShuffle(next);
     if(next){
       const {displayedTracks:list,currentTrack:track}=stateRefs.current;
@@ -675,12 +703,14 @@ function App() {
 
   const handleToggleRepeat = useCallback((e?:React.MouseEvent) => {
     if(e) e.stopPropagation();
+    if (IS_MOBILE) { mobilePlaybackRef.current.toggleRepeat(); return; }
     if(repeatBusy) return;
     setRepeatBusy(true);setRepeatDeg(d=>d+360);
     setTimeout(()=>{setRepeatMode(prev=>{const next=prev==='OFF'?'ALL':prev==='ALL'?'ONE':'OFF';repeatModeRef.current=next;return next;});setRepeatBusy(false);},390);
   }, [repeatBusy]);
 
   const handlePrev = useCallback(() => {
+    if (IS_MOBILE) { mobilePlaybackRef.current.previous(); return; }
     const {displayedTracks:list,currentTrack:track}=stateRefs.current;
     const library = playablePlaylistRef.current;
     if(!library.length||!track) return;
@@ -897,7 +927,7 @@ function App() {
     setThemeColor(accent); setThemeText(isHexDark(accent) ? '#ffffff' : '#111111'); setBlobColors(palette);
   }, []);
 
-  const playTrack = async (track:Track) => {
+  const playTrack = async (track:Track, options: MobileLoadOptions = {}) => {
     if (!track || !includeLibraryTrack(track, libraryFiltersRef.current)) return;
     const id=++loadIdRef.current;
     try { await writeToEngine('STOP'); } catch (_) {}
@@ -908,12 +938,23 @@ function App() {
     setAlbumArt(prev=>{if(prev?.startsWith('blob:')) URL.revokeObjectURL(prev);return track.thumb || null;});
     try{
       if(id!==loadIdRef.current) return;
-      await writeToEngine(`LOAD ${track.path}`);
+      let playbackPath = track.path;
+      if (IS_MOBILE && track.source === 'cloud' && track.sourceId) {
+        const result = JSON.parse(await invoke<string>('fetch_cloud_api', { url: `https://saavn.dev/api/songs?ids=${encodeURIComponent(track.sourceId)}` }));
+        const urls = result?.data?.[0]?.downloadUrl;
+        const url = Array.isArray(urls) && urls[urls.length - 1]?.url;
+        if (!url) throw new Error('This online track is unavailable.');
+        playbackPath = await invoke<string>('download_cloud_stream', { url });
+        if (id !== loadIdRef.current) return;
+      }
+      await writeToEngine(`LOAD ${playbackPath}`);
       if(id!==loadIdRef.current) return;
-      await writeToEngine('PLAY');setIsPlaying(true);
+      if (options.position && options.position > 0) { await writeToEngine(`SEEK ${options.position}`); setCurrentTime(options.position); }
+      if (options.autoplay !== false) { await writeToEngine('PLAY'); if (id === loadIdRef.current) setIsPlaying(true); }
 
       setTimeout(async()=>{
         if(id!==loadIdRef.current) return;
+        if (IS_MOBILE && track.source === 'cloud') { await applyArtworkPalette(track.thumb || null, id); return; }
         try{
           const native = await extractTrackMetadata(track).catch(async error => {
             await applyArtworkPalette(track.thumb || null, id);
@@ -979,8 +1020,9 @@ function App() {
             vaultSet("user_playlist", nl);          }
         }catch(_){}finally{setIsAnalyzing(false);}
       },2000);}
-    }catch(error){if(id===loadIdRef.current) setIsPlaying(false); console.error('Track playback failed:', error);}
+    }catch(error){if(id===loadIdRef.current) setIsPlaying(false); console.error('Track playback failed:', error); if (IS_MOBILE) throw error;}
   };
+  mobileLoaderRef.current = playTrack;
 
   const finalizeLyrics = async (track: Track, lrc: string) => {
     const parsed = parseLRC(lrc);
@@ -1051,6 +1093,21 @@ function App() {
   }, []);
   const handlePlayPause = async () => {
     try{if(isPlaying){await writeToEngine('PAUSE');setIsPlaying(false);}else{await writeToEngine('PLAY_USER');setIsPlaying(true);}}catch(_){}
+  };
+  const saveMobilePlaylist = async (value: CustomPlaylist) => {
+    const playlist = { ...value, name: value.name.trim(), trackPaths: [...new Set(value.trackPaths)] };
+    if (!playlist.name) throw new Error('A playlist name is required.');
+    await invoke('save_playlist', { playlist });
+    setCustomPlaylists(previous => previous.some(p => p.id === playlist.id) ? previous.map(p => p.id === playlist.id ? playlist : p) : [...previous, playlist]);
+  };
+  const deleteMobilePlaylist = async (id: string) => {
+    await invoke('delete_playlist', { id });
+    setCustomPlaylists(previous => previous.filter(p => p.id !== id));
+  };
+  const favouriteMobileTrack = async (track: Track, favourite: boolean) => {
+    await invoke('toggle_favorite', { path: track.path, isFavorite: favourite });
+    setFavorites(previous => favourite ? [...new Set([...previous, track.path])] : previous.filter(path => path !== track.path));
+    setPlaylist(previous => previous.map(t => t.path === track.path ? { ...t, isFavorite: favourite } : t));
   };
   const isCurrentFavorite = currentTrack?favorites.includes(currentTrack.path):false;
 
@@ -1289,7 +1346,7 @@ function App() {
 
 
   return (
-    <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-on-surface':isDarkMode && themeColor === BRAND.accent ? BRAND.highlight : themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
+    <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-mobile-redesign={IS_MOBILE || undefined} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-on-surface':isDarkMode && themeColor === BRAND.accent ? BRAND.highlight : themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
       {audio.error && <div className="audio-global-error" role="alert">{audio.error}</div>}
       {showSettings && <SettingsModal apiKey={geminiApiKey} setApiKey={setGeminiApiKey} filters={libraryFilters} onClose={() => setShowSettings(false)} onSave={async filters => {
         await invoke('set_setting', { key: 'gemini_api_key', value: geminiApiKey.trim() });
@@ -1303,6 +1360,22 @@ function App() {
       
 
       <div className="app-container">
+        {IS_MOBILE ? <MobileShell ready={isBooted} tracks={visiblePlaylist} favourites={favoritesSet} playlists={customPlaylists} playback={mobilePlayback}
+          currentTrack={currentTrack} isExpanded={isExpanded} onCollapse={() => setIsExpanded(false)} queueRequest={mobileQueueRequest}
+          onScan={scanAndAdd} scanning={isLoading && isBooted} scanMessage={scanProgress} onDismissScan={() => setScanProgress('')}
+          apiKey={geminiApiKey} filters={libraryFilters} onSaveSettings={async (key, filters) => {
+            await invoke('set_setting', { key: 'gemini_api_key', value: key.trim() });
+            await invoke('set_setting', { key: 'library_filters', value: JSON.stringify(filters) });
+            setGeminiApiKey(key.trim()); setLibraryFilters(filters);
+          }} onSavePlaylist={saveMobilePlaylist} onDeletePlaylist={deleteMobilePlaylist} onFavourite={favouriteMobileTrack}
+          onClearLibrary={handleClearLibrary} dark={isDarkMode} onTheme={() => { void toggleTheme(); }}
+          profileJob={{ active: bulkScanActive, paused: bulkScanPaused, done: bulkScanDone, total: bulkScanTotal, start: () => { void startBulkCategoryScan(); }, pause: pauseBulkScan, resume: resumeBulkScan, stop: stopBulkScan }}
+          onCloudPlay={async data => { const track: Track = { path: `cloud://${data.id}`, source: 'cloud', sourceId: data.id,
+            name: String(data.name || data.title || 'Online track').replace(/&quot;/g, '"').replace(/&amp;/g, '&'),
+            artist: data.artists?.primary?.map((a: { name: string }) => a.name).join(', ') || 'Unknown Artist', album: data.album?.name || 'Online music', duration: Number(data.duration) || 0,
+            thumb: data.image?.[2]?.url || data.image?.[0]?.url };
+            await mobilePlayback.start([track], track, 'Discover');
+          }} /> : <>
         {/* THE SEARCH BAR OVERRIDE: Absolute positioning guarantees it renders on top of everything */}
         {/* THE SEARCH BAR OVERRIDE */}
         {mobileSearchOpen && (
@@ -1692,20 +1765,23 @@ function App() {
             )}
           </div>
         </main>
+        </>}
 
 
 
         <footer className={`bottom-player ${isExpanded?'expanded':''}`}>
           
           {/* 1. Mini Player: Never unmounted, never display:none. Just faded out. */}
-          <MiniPlayer 
+          {IS_MOBILE ? <MobileMiniPlayer isExpanded={isExpanded} onExpand={() => setIsExpanded(true)} onQueue={() => setMobileQueueRequest(v => v + 1)}
+            track={currentTrack} title={trackTitle} artist={trackArtist} art={albumArt} playing={isPlaying} busy={mobilePlayback.busy}
+            onPlayPause={() => { void handlePlayPause(); }} onPrevious={handlePrev} onNext={() => handleNext()} time={currentTime} duration={duration} /> : <MiniPlayer
             isExpanded={isExpanded} setIsExpanded={setIsExpanded}
             duration={duration} currentTime={currentTime} isSeekingRef={isSeekingRef}
             handleSeekDrag={handleSeekDrag} handleSeekCommit={handleSeekCommit}
             albumArt={albumArt} trackTitle={trackTitle} trackArtist={trackArtist}
             detectedProfile={detectedProfile} isPlaying={isPlaying}
             handlePlayPause={handlePlayPause} handlePrev={handlePrev} handleNext={handleNext}
-          />
+          />}
 
           {/* 2. Expanded Player: Hardware Accelerated Decoupled Layout */}
           <div className="expanded-player-content" data-ready={expandedContentReady} aria-hidden={!isExpanded} style={{
@@ -1735,7 +1811,7 @@ function App() {
                 isExpanded={isExpanded}
                 trackTitle={trackTitle} trackArtist={trackArtist} albumArt={albumArt}
                 isPlaying={isPlaying} currentTime={currentTime} duration={duration}
-                isShuffle={isShuffle} repeatMode={repeatMode} repeatDeg={repeatDeg} repeatBusy={repeatBusy}
+                isShuffle={mobilePlayback.queue.shuffle} repeatMode={mobilePlayback.queue.repeat} repeatDeg={repeatDeg} repeatBusy={repeatBusy}
                 isAnalyzing={isAnalyzing} isManualOverride={isManualOverride} detectedProfile={detectedProfile}
                 smartTaste={smartTaste} isCurrentFavorite={isCurrentFavorite}
                 lyrics={lyrics} activeLyricIndex={activeLyricIndex} scanProgress={scanProgress}

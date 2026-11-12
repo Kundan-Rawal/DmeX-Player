@@ -36,13 +36,14 @@ try {
     const page = await context.newPage(); const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base + '/tests/library-workflows.html?branding', { waitUntil: 'domcontentloaded' });
-    const logo = page.locator('.samsung-logo-area .app-brand-mark');
+    const logo = page.locator(mobile ? '.dmex-mobile-header .app-brand-mark' : '.samsung-logo-area .app-brand-mark');
     await logo.waitFor();
-    await page.waitForFunction(() => document.querySelector('.samsung-logo-area img').naturalWidth === 256);
+    await page.waitForFunction(selector => document.querySelector(selector).naturalWidth === 256, mobile ? '.dmex-mobile-header img' : '.samsung-logo-area img');
+    const row = name => mobile ? page.getByRole('button', { name: `Play ${name}`, exact: true }) : page.locator('.track-item').filter({ hasText: new RegExp('^' + name) });
     const initial = await page.locator('.app-layout').evaluate(node => ({ accent: getComputedStyle(node).getPropertyValue('--theme-color').trim(),
       blobs: [1, 2, 3].map(i => getComputedStyle(node).getPropertyValue('--blob-' + i).trim()) }));
     assert.equal(initial.accent, '#3d6390'); assert.deepEqual(initial.blobs, ['#3d6390', '#1c3d6b', '#102c50']);
-    const brand = await page.locator('.samsung-logo-area').boundingBox(), actions = await page.locator('.samsung-actions').boundingBox();
+    const brand = await page.locator(mobile ? '.dmex-mobile-header h1' : '.samsung-logo-area').boundingBox(), actions = await page.locator(mobile ? '.dmex-mobile-header button[aria-label="Search library"]' : '.samsung-actions').boundingBox();
     assert.ok(brand.x >= 0 && brand.x + brand.width + 4 <= actions.x && actions.x + actions.width <= width, 'Brand and header actions must not overlap');
     const palette = await page.evaluate(async () => {
       const test = window.brandingTest;
@@ -56,7 +57,8 @@ try {
     await page.screenshot({ path: `tests/artifacts/brand-library-${width}.png` });
     if (mobile) await page.getByRole('button', { name: 'Library options' }).click();
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.locator('.settings-brand-heading .app-brand-mark').waitFor();
+    if (mobile) await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor();
+    else await page.locator('.settings-brand-heading .app-brand-mark').waitFor();
     await page.getByRole('switch', { name: 'Skip call recordings' }).click();
     await page.waitForFunction(() => getComputedStyle(document.querySelector('[aria-label="Skip call recordings"] .audio-toggle-track')).backgroundColor === 'rgb(61, 99, 144)');
     assert.equal(await page.getByRole('switch', { name: 'Skip call recordings' }).locator('.audio-toggle-track').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(61, 99, 144)');
@@ -64,8 +66,8 @@ try {
     assert.equal(await page.locator('.custom-select-popup').evaluate(node => getComputedStyle(node).getPropertyValue('--select-accent').trim()), '#3d6390');
     await page.getByRole('combobox', { name: 'Minimum duration' }).press('Escape');
     await page.screenshot({ path: `tests/artifacts/brand-settings-${width}.png` });
-    await page.locator('.folder-modal-close').click();
-    await page.locator('.track-item').filter({ hasText: /^Artwork song/ }).click();
+    if (mobile) await page.getByRole('button', { name: 'Back', exact: true }).click(); else await page.locator('.folder-modal-close').click();
+    await row('Artwork song').click();
     await page.waitForFunction(() => document.querySelector('.app-layout').style.getPropertyValue('--theme-color') === '#c8222a');
     await page.evaluate(() => {
       window.brandingTest.metadataDelay = 700;
@@ -77,7 +79,7 @@ try {
       });
       window.paletteObserver.observe(document.querySelector('.app-layout'), { attributes: true, attributeFilter: ['style'] });
     });
-    await page.locator('.track-item').filter({ hasText: 'Second artwork song' }).click();
+    await row('Second artwork song').click();
     await page.waitForTimeout(500);
     assert.equal(await page.locator('.app-layout').evaluate(node => node.style.getPropertyValue('--theme-color')), '#c8222a', 'Keep old artwork colors while next metadata is pending');
     await page.waitForFunction(() => document.querySelector('.app-layout').style.getPropertyValue('--theme-color') === '#35a870');
@@ -85,24 +87,24 @@ try {
     assert.ok(history.length > 0 && history.every(entry => ['#c8222a', '#35a870'].includes(entry.accent)), 'Artwork transitions must never flash navy');
     assert.ok(history.every(entry => entry.blobs.every(color => color === entry.accent)), 'Theme and ambient colors commit together');
     await page.evaluate(() => { window.brandingTest.metadataDelay = 900; window.paletteHistory.length = 0; });
-    await page.locator('.track-item').filter({ hasText: /^Artwork song/ }).click();
+    await row('Artwork song').click();
     await page.waitForTimeout(400);
     await page.evaluate(() => { window.brandingTest.metadataDelay = 0; });
-    await page.locator('.track-item').filter({ hasText: 'Second artwork song' }).click();
+    await row('Second artwork song').click();
     await page.waitForTimeout(1400);
     assert.equal(await page.locator('.app-layout').evaluate(node => node.style.getPropertyValue('--theme-color')), '#35a870', 'Late previous metadata must not overwrite the newest artwork palette');
     assert.ok((await page.evaluate(() => window.paletteHistory)).every(entry => entry.accent === '#35a870'), 'Rapid skipping must not apply stale colors or navy');
     await page.evaluate(() => window.paletteObserver.disconnect());
-    await page.locator('.track-item').filter({ hasText: 'No artwork song' }).click();
+    await row('No artwork song').click();
     await page.waitForTimeout(100);
     assert.equal(await page.locator('.app-layout').evaluate(node => node.style.getPropertyValue('--theme-color')), '#35a870', 'Wait for metadata before choosing the no-art fallback');
     await page.waitForFunction(() => document.querySelector('.app-layout').style.getPropertyValue('--theme-color') === '#3d6390');
     assert.equal(await page.locator('.app-layout').evaluate(node => node.style.getPropertyValue('--theme-color')), '#3d6390', 'Missing artwork resets previous album color to navy');
-    await page.locator('.track-item').filter({ hasText: /^Artwork song/ }).click();
+    await row('Artwork song').click();
     await page.waitForFunction(() => document.querySelector('.app-layout').style.getPropertyValue('--theme-color') === '#c8222a');
-    await page.locator('.track-item').filter({ hasText: 'Broken artwork song' }).click();
+    await row('Broken artwork song').click();
     await page.waitForFunction(() => document.querySelector('.app-layout').style.getPropertyValue('--theme-color') === '#3d6390');
-    await page.locator('.mini-player-content .track-info').click();
+    if (mobile) await page.getByRole('button', { name: 'Open expanded player', exact: true }).click(); else await page.locator('.mini-player-content .track-info').click();
     await page.waitForFunction(() => document.querySelector('.expanded-player-content').dataset.ready === 'true');
     await page.waitForTimeout(230);
     await page.screenshot({ path: `tests/artifacts/brand-expanded-${width}.png` });
@@ -110,9 +112,14 @@ try {
     else await page.evaluate(() => history.back());
     await page.waitForTimeout(500);
     if (mobile) await page.getByRole('button', { name: 'Library options' }).click();
-    await page.getByRole('button', { name: mobile ? 'Toggle Theme' : 'Toggle theme', exact: true }).click();
+    if (mobile) { await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('switch', { name: 'Dark appearance', exact: true }).click(); }
+    else await page.getByRole('button', { name: 'Toggle theme', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.app-layout').dataset.theme === 'light');
     await page.screenshot({ path: `tests/artifacts/brand-light-${width}.png` });
+    if (mobile) {
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
+      assert.equal(await page.locator('.dmex-mobile-tabs').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(255, 255, 255)', 'Light library tabs remain pure white rather than artwork-tinted');
+    }
     assert.equal(await logo.evaluate(node => node.complete && node.naturalWidth > 0), true);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'No horizontal overflow');
     assert.deepEqual(errors, []);
