@@ -15,8 +15,24 @@ mod metadata;
 mod media_source;
 #[cfg(target_os = "android")]
 mod android_library;
+#[cfg(target_os = "android")]
+mod android_feedback;
 
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+async fn mobile_haptic(app: tauri::AppHandle, kind: String) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let feedback = app.state::<android_feedback::Feedback<tauri::Wry>>();
+            let result: serde_json::Value = feedback.0.run_mobile_plugin("perform", serde_json::json!({ "kind": kind })).map_err(|error| error.to_string())?;
+            Ok(result["performed"].as_bool().unwrap_or(false))
+        }).await.map_err(|error| error.to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = (app, kind); Ok(false) }
+}
 
 static DB_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 static ACTIVE_SOURCE: Mutex<Option<std::fs::File>> = Mutex::new(None);
@@ -769,6 +785,12 @@ pub fn run() {
             { tauri::plugin::Builder::<tauri::Wry, ()>::new("music-library").build() }
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin({
+            #[cfg(target_os = "android")]
+            { android_feedback::init() }
+            #[cfg(not(target_os = "android"))]
+            { tauri::plugin::Builder::<tauri::Wry, ()>::new("mobile-feedback").build() }
+        })
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
@@ -845,7 +867,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
+            mobile_haptic, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, delete_playlist, get_all_artist_images, get_setting, set_setting,
             audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music, pick_music_folder, extract_audio_metadata, record_play, identify_lyrics_song, download_cloud_stream, fetch_cloud_api,

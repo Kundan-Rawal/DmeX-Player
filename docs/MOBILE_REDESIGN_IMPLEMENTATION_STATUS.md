@@ -1,6 +1,6 @@
 # Mobile Redesign: Debug Build Status
 
-Date: 2026-11-12
+Date: 2026-11-13
 
 This is the first implemented mobile redesign iteration, not release certification.
 The approved direction is in [the redesign blueprint](MOBILE_UI_REDESIGN_BLUEPRINT.md).
@@ -78,9 +78,10 @@ still rendered through its original branch.
 | Actual S25 Ultra portrait and landscape framing | Visually inspected |
 | Protected layout-file diff and whitespace check | Passed |
 
-The native Android debug build is installed. The latest frontend is served through
-the USB development connection at `http://127.0.0.1:1420`. This is not a standalone
-release APK. Automatic phone rotation was restored after the landscape check.
+The latest native Android debug build is installed with its frontend bundled. It
+does not require the USB development server to open. This is not a release APK.
+The local frontend test server remains at `http://127.0.0.1:1420`.
+Automatic phone rotation was restored after the landscape check.
 No music files or existing playlists were deleted during inspection.
 
 ## Follow-Up Mobile Browsing Fixes
@@ -105,6 +106,34 @@ No music files or existing playlists were deleted during inspection.
   covers are consolidated, a single cover fills the tile, broken images are skipped,
   and an icon is used only when usable artwork is unavailable. Counts and routes
   still use the same collection selectors. Verified at 320, 360, and 800 widths.
+
+## Motion, Haptics, and Queue Dragging
+
+- Tab content follows horizontal touch movement and enters with directional
+  transform/opacity motion. Detail navigation also transitions without mounting a
+  second library tree. The tab rail no longer cancels its own smooth centering.
+- Menus, feedback messages, and button press states have short transitions. Native
+  vertical scrolling/inertia is retained; saved-position restoration is immediate.
+- Queue drag capture belongs to the stable list container. A CSS specificity bug
+  that replaced the handle's `touch-action: none` with `manipulation` is fixed.
+- A lifted drag row follows the pointer; neighboring rows preview the new order.
+  Frame-driven edge auto-scroll continues while the finger is stationary. Only a
+  valid drop commits the order. Cancellation/current-track changes preserve it.
+- Reduced motion disables page motion and animated reordering. No FPS cap was added.
+- Added a native Android feedback plugin using `View.performHapticFeedback`, with
+  version-compatible selection, tap, long-press, drag, and confirmation effects.
+  It does not bypass Android touch-feedback preferences or require VIBRATE permission.
+  See [Android's haptic feedback guidance](https://developer.android.com/develop/ui/views/haptics/haptic-feedback).
+- Foreground button/toggle/dropdown interactions and meaningful slider steps have
+  feedback. Long-press selection, tab swipes, and drag position changes have dedicated
+  feedback. Settings includes a persistent Haptic feedback toggle.
+- Real-touch browser tests passed at 360x800, 320x640, and 800x360: drag up/down,
+  stationary edge auto-scroll, cancellation, current-item protection, moving page
+  transitions, reduced motion, and feedback opt-out. Queue/playlist persistence,
+  branding, expanded-player transition, and native database regressions also pass.
+- Built and installed `app-universal-debug.apk`. On the S25 Ultra, the installed
+  app retained 1,781 library tracks and queue entries; native haptics reported
+  `performed: true`. No playback or volume changes were made during this check.
 
 ## Still Required Before Release
 

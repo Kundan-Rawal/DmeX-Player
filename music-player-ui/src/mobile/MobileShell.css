@@ -93,3 +93,19 @@ html[data-mobile-launch],html[data-mobile-launch] body{overscroll-behavior-x:non
 .dmex-mobile-cover-grid img{display:block;width:100%;height:100%;min-width:0;min-height:0;object-fit:cover}
 .dmex-mobile-collection-badge{position:absolute;right:5px;bottom:5px;display:flex;align-items:center;justify-content:center;width:23px;height:23px;border-radius:5px;color:#fff;background:rgba(0,0,0,.65)}
 @media(orientation:landscape) and (max-height:600px){.dmex-mobile-smart-grid{max-width:380px}.dmex-mobile-collection-art{max-width:108px}}
+.dmex-mobile-track-scroll,.dmex-mobile-page-scroll{-webkit-overflow-scrolling:touch}
+.dmex-mobile-icon,.dmex-mobile-smart,.dmex-mobile-album,.dmex-mobile-primary,.dmex-mobile-action{transition:transform .16s ease,background-color .16s ease,opacity .16s ease}
+.dmex-mobile-icon:active,.dmex-mobile-smart:active,.dmex-mobile-album:active,.dmex-mobile-primary:active{transform:scale(.97)}
+.dmex-mobile-tabs button{transition:color .16s ease,opacity .16s ease}
+.dmex-mobile-sheet{animation:dmex-sheet-enter .24s cubic-bezier(.22,1,.36,1)}
+.dmex-mobile-sheet-backdrop{animation:dmex-overlay-enter .16s ease}
+.dmex-mobile-snackbar{animation:dmex-sheet-enter .18s cubic-bezier(.22,1,.36,1)}
+.dmex-mobile-queue-row{transition:transform .18s cubic-bezier(.22,1,.36,1)}
+.dmex-mobile-queue-row.is-dragging{z-index:10;background:var(--m-surface);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.28);transition:none;pointer-events:none;will-change:transform}
+.dmex-mobile-queue-row.is-drag-source{opacity:0;pointer-events:none}
+.dmex-mobile-shell .dmex-mobile-drag-handle{touch-action:none!important;user-select:none;-webkit-user-select:none}
+.dmex-mobile-queue-slot{position:absolute;top:0;left:16px;right:8px;border-radius:6px;background:color-mix(in srgb,var(--theme-color) 9%,transparent);border-top:2px solid var(--m-accent);pointer-events:none}
+.dmex-mobile-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@keyframes dmex-sheet-enter{from{opacity:0;transform:translate3d(0,18px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes dmex-overlay-enter{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.dmex-mobile-queue-row,.dmex-mobile-icon,.dmex-mobile-smart,.dmex-mobile-album,.dmex-mobile-primary,.dmex-mobile-action,.dmex-mobile-tabs button{transition:none}.dmex-mobile-sheet,.dmex-mobile-sheet-backdrop,.dmex-mobile-snackbar{animation:none}}

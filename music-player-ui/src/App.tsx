@@ -38,6 +38,7 @@ import { BRAND, DEFAULT_AMBIENT_COLORS } from './config/brand';
 import { BrandMark } from './components/common/BrandMark';
 import { MobileShell, MobileMiniPlayer } from './mobile/MobileShell';
 import { MobileLoadOptions, useMobilePlayback } from './mobile/useMobilePlayback';
+import { useMobileFeedback } from './mobile/useMobileFeedback';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
 // IS_ANDROID gates every Android-specific optimisation in this file.
@@ -73,6 +74,7 @@ const fac = new FastAverageColor();
 // MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
 function App() {
+  useMobileFeedback();
   const audio = useAudioSettings();
   // const appWindow = getCurrentWindow();
 

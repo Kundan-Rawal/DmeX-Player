@@ -15,6 +15,8 @@ import { MobilePlayback } from './useMobilePlayback';
 import { MobileQueueList } from './MobileQueueList';
 import { MobilePaletteAmbient } from './MobilePaletteAmbient';
 import { MobileCollectionArtwork } from './MobileCollectionArtwork';
+import { haptic, hapticsEnabled, setHapticsEnabled } from './haptics';
+import { useMobileRouteMotion } from './useMobileRouteMotion';
 import { useArtistArtwork } from './useArtistArtwork';
 import './MobileShell.css';
 
@@ -82,27 +84,50 @@ function RememberedScroll({ scrollKey, positions, className = '', children }: { 
 }
 function useTabSwipe(enabled: boolean, active: MobileTab | null, onChange: (tab: MobileTab) => void) {
   const surface = useRef<HTMLElement>(null);
-  const gesture = useRef<{ x: number; y: number; horizontal: boolean; rejected: boolean } | null>(null);
+  const gesture = useRef<{ x: number; y: number; horizontal: boolean; rejected: boolean; offset: number } | null>(null);
+  const frame = useRef(0);
   const moved = useRef(false);
+  const resetMotion = (animate: boolean) => {
+    cancelAnimationFrame(frame.current); frame.current = 0;
+    const element = surface.current; if (!element) return;
+    const transform = element.style.transform, opacity = element.style.opacity;
+    element.style.transform = ''; element.style.opacity = ''; element.style.willChange = '';
+    if (animate && transform && !matchMedia('(prefers-reduced-motion: reduce)').matches) element.animate([{ transform, opacity }, { transform: 'translate3d(0,0,0)', opacity: 1 }], { duration: 180, easing: 'cubic-bezier(.22,1,.36,1)' });
+  };
   useEffect(() => {
     const element = surface.current; if (!element) return;
     const move = (event: TouchEvent) => {
       const start = gesture.current;
       if (!start || start.rejected || event.touches.length !== 1) return;
       const dx = Math.abs(event.touches[0].clientX - start.x), dy = Math.abs(event.touches[0].clientY - start.y);
-      if (dx > 10 && dx > dy * 1.4 && event.cancelable) event.preventDefault();
+      if (dx > 10 && dx > dy * 1.4) {
+        if (event.cancelable) event.preventDefault();
+        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          if (!start.horizontal) element.getAnimations().forEach(animation => animation.cancel());
+          start.offset = Math.max(-120, Math.min(120, (event.touches[0].clientX - start.x) * .22));
+          if (!frame.current) frame.current = requestAnimationFrame(() => {
+            frame.current = 0;
+            if (!gesture.current) return;
+            element.style.willChange = 'transform, opacity';
+            element.style.transform = `translate3d(${gesture.current.offset}px,0,0)`;
+            element.style.opacity = String(1 - Math.abs(gesture.current.offset) / 600);
+          });
+        }
+      }
     };
     element.addEventListener('touchmove', move, { passive: false });
-    return () => element.removeEventListener('touchmove', move);
+    return () => { element.removeEventListener('touchmove', move); cancelAnimationFrame(frame.current); };
   }, []);
   const finish = (x: number, y: number) => {
     const start = gesture.current; gesture.current = null;
-    if (!start || start.rejected || !active || !enabled) return;
+    if (!start || start.rejected || !active || !enabled) { resetMotion(true); return; }
     const dx = x - start.x, dy = y - start.y;
-    if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.4) { resetMotion(true); return; }
     moved.current = true;
     const index = TABS.findIndex(tab => tab.id === active), target = index + (dx < 0 ? 1 : -1);
-    if (target >= 0 && target < TABS.length) onChange(TABS[target].id);
+    const valid = target >= 0 && target < TABS.length;
+    resetMotion(!valid);
+    if (valid) { haptic('selection'); onChange(TABS[target].id); }
   };
   return {
     ref: surface,
@@ -110,18 +135,18 @@ function useTabSwipe(enabled: boolean, active: MobileTab | null, onChange: (tab:
       moved.current = false;
       const target = event.target as Element;
       if (!enabled || event.touches.length !== 1 || target.closest('input,textarea,select,[role="slider"],.dmex-mobile-drag-handle,.custom-select')) { gesture.current = null; return; }
-      const touch = event.touches[0]; gesture.current = { x: touch.clientX, y: touch.clientY, horizontal: false, rejected: false };
+      const touch = event.touches[0]; gesture.current = { x: touch.clientX, y: touch.clientY, horizontal: false, rejected: false, offset: 0 };
     },
     onTouchMove: (event: React.TouchEvent) => {
       const start = gesture.current; if (!start) return;
-      if (event.touches.length !== 1) { gesture.current = null; return; }
+      if (event.touches.length !== 1) { gesture.current = null; resetMotion(true); return; }
       const touch = event.touches[0], dx = Math.abs(touch.clientX - start.x), dy = Math.abs(touch.clientY - start.y);
       if (!start.horizontal && !start.rejected && Math.max(dx, dy) > 10) {
         start.horizontal = dx > dy * 1.4; start.rejected = !start.horizontal;
       }
     },
     onTouchEnd: (event: React.TouchEvent) => { if (event.changedTouches.length) finish(event.changedTouches[0].clientX, event.changedTouches[0].clientY); },
-    onTouchCancel: () => { gesture.current = null; },
+    onTouchCancel: () => { gesture.current = null; resetMotion(true); },
     onClickCapture: (event: React.MouseEvent) => {
       const native = event.nativeEvent as PointerEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } };
       if (moved.current && (native.pointerType === 'touch' || native.sourceCapabilities?.firesTouchEvents)) { event.preventDefault(); event.stopPropagation(); }
@@ -131,19 +156,20 @@ function useTabSwipe(enabled: boolean, active: MobileTab | null, onChange: (tab:
 }
 function MobileTabs({ active, onChange }: { active: MobileTab; onChange: (tab: MobileTab) => void }) {
   const ref = useRef<HTMLElement>(null), programmatic = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const activeRef = useRef(active), mounted = useRef(false); activeRef.current = active;
   const center = useCallback((tab: MobileTab, behavior: ScrollBehavior) => {
     const nav = ref.current, target = nav?.querySelector<HTMLElement>(`[data-tab="${tab}"]`);
     if (!nav || !target) return; programmatic.current = true;
     nav.scrollTo({ left: target.offsetLeft - nav.clientWidth / 2 + target.offsetWidth / 2, behavior });
   }, []);
-  useLayoutEffect(() => { center(active, 'smooth'); }, [active, center]);
-  useEffect(() => { const observer = new ResizeObserver(() => center(active, 'auto')); if (ref.current) observer.observe(ref.current); return () => { observer.disconnect(); clearTimeout(timer.current); }; }, [active, center]);
+  useLayoutEffect(() => { center(active, mounted.current && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto'); mounted.current = true; }, [active, center]);
+  useEffect(() => { const observer = new ResizeObserver(() => center(activeRef.current, 'auto')); if (ref.current) observer.observe(ref.current); return () => { observer.disconnect(); clearTimeout(timer.current); }; }, [center]);
   return <nav ref={ref} className="dmex-mobile-tabs" aria-label="Library views" onPointerDown={() => { programmatic.current = false; }} onWheel={() => { programmatic.current = false; }} onScroll={() => {
     clearTimeout(timer.current); timer.current = setTimeout(() => {
       if (programmatic.current) { programmatic.current = false; return; }
       const nav = ref.current!; const middle = nav.scrollLeft + nav.clientWidth / 2;
       const nearest = [...nav.querySelectorAll<HTMLButtonElement>('button')].sort((a, b) => Math.abs(a.offsetLeft + a.offsetWidth / 2 - middle) - Math.abs(b.offsetLeft + b.offsetWidth / 2 - middle))[0];
-      if (nearest?.dataset.tab && nearest.dataset.tab !== active) onChange(nearest.dataset.tab as MobileTab);
+      if (nearest?.dataset.tab && nearest.dataset.tab !== activeRef.current) { haptic('selection'); onChange(nearest.dataset.tab as MobileTab); }
     }, 160);
   }}><span className="dmex-tab-spacer" />{TABS.map(tab => <button type="button" key={tab.id} data-tab={tab.id} aria-current={active === tab.id ? 'page' : undefined} onClick={() => onChange(tab.id)}>{tab.label}</button>)}<span className="dmex-tab-spacer" /></nav>;
 }
@@ -175,8 +201,8 @@ function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, 
           reorder.current.target = Math.max(0, Math.min(tracks.length - 1, Math.floor((e.clientY - rect.top + ref.current.scrollTop) / rowHeight)));
         }} onPointerUp={() => { if (reorder.current) onReorder(reorder.current.track, tracks[reorder.current.target]); reorder.current = null; }} onPointerCancel={() => { reorder.current = null; }}><GripVertical size={20} /></button>}
         <button type="button" className="dmex-mobile-track-play" aria-label={selected.length ? `${selected.includes(track.path) ? 'Deselect' : 'Select'} ${track.name}` : `Play ${track.name}`} aria-pressed={selected.length ? selected.includes(track.path) : undefined}
-          onContextMenu={e => { e.preventDefault(); pressed.current = true; if (!selected.length) onSelect([track.path]); }}
-          onPointerDown={e => { if (e.pointerType === 'mouse') return; pressed.current = false; start.current = { x: e.clientX, y: e.clientY }; timer.current = setTimeout(() => { pressed.current = true; if (!selected.length) onSelect([track.path]); }, 550); }}
+          onContextMenu={e => { e.preventDefault(); pressed.current = true; if (!selected.length) { haptic('longPress'); onSelect([track.path]); } }}
+          onPointerDown={e => { if (e.pointerType === 'mouse') return; pressed.current = false; start.current = { x: e.clientX, y: e.clientY }; timer.current = setTimeout(() => { pressed.current = true; if (!selected.length) { haptic('longPress'); onSelect([track.path]); } }, 550); }}
           onPointerMove={e => { if (Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 8) clearTimeout(timer.current); }} onPointerUp={() => clearTimeout(timer.current)} onPointerCancel={() => clearTimeout(timer.current)}
           onClick={() => { if (pressed.current) { pressed.current = false; return; } if (!onReorder) selected.length ? toggle(track) : onPlay(track); }}>
           {selected.length ? <span className="dmex-mobile-selection">{selected.includes(track.path) ? <CheckCircle2 size={24} /> : <Circle size={24} />}</span> : <Artwork track={track} />}
@@ -206,8 +232,10 @@ function SheetFrame({ title, close, children }: { title: string; close: () => vo
 }
 function SettingsPage({ p, notify }: { p: Props; notify: (message: string) => void }) {
   const [key, setKey] = useState(p.apiKey), [filters, setFilters] = useState(p.filters), [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState(hapticsEnabled);
   return <div className="dmex-mobile-page-scroll"><section className="dmex-mobile-settings-group"><h2>Library</h2><label className="dmex-mobile-setting"><span>Minimum duration</span><CustomSelect label="Minimum duration" value={filters.minimumDuration} options={MINIMUM_DURATIONS.map(v => ({ value: String(v), label: v ? `${v} seconds` : 'Off' }))} onChange={v => setFilters(f => ({ ...f, minimumDuration: Number(v) }))} /></label><div className="dmex-mobile-setting"><span>Skip call recordings</span><ToggleSwitch label="Skip call recordings" checked={filters.skipCallRecordings} onChange={value => setFilters(f => ({ ...f, skipCallRecordings: value }))} /></div></section>
     <section className="dmex-mobile-settings-group"><h2>Appearance</h2><div className="dmex-mobile-setting"><span>Dark appearance</span><ToggleSwitch label="Dark appearance" checked={p.dark} onChange={p.onTheme} /></div><p className="dmex-mobile-secondary">Album artwork supplies your playback colors.</p></section>
+    <section className="dmex-mobile-settings-group"><h2>Interaction</h2><div className="dmex-mobile-setting"><span>Haptic feedback</span><ToggleSwitch label="Haptic feedback" checked={feedback} onChange={value => { setFeedback(value); setHapticsEnabled(value); if (value) haptic('confirm'); }} /></div></section>
     <section className="dmex-mobile-settings-group"><h2>Audio</h2><BypassAllButton /><p className="dmex-mobile-secondary">Advanced sound controls remain in the expanded player.</p></section>
     <section className="dmex-mobile-settings-group"><h2>Lyrics</h2><label className="dmex-mobile-field">Gemini API key<input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder="Optional API key" /></label><p className="dmex-mobile-secondary">Optional song identification when lyrics search fails. Online lyrics search works without a key. Your key stays on this device.</p>{key && <button type="button" className="dmex-mobile-text-button" onClick={() => setKey('')}>Remove key</button>}</section>
     <button className="dmex-mobile-primary" disabled={busy} onClick={async () => { setBusy(true); try { await p.onSaveSettings(key, filters); notify('Settings saved'); } catch { notify('Settings could not be saved. Please retry.'); } finally { setBusy(false); } }}>{busy ? 'Saving...' : 'Save settings'}</button>
@@ -263,6 +291,7 @@ export function MobileShell(p: Props) {
   const currentQueueIndex = p.playback.queue.entries.findIndex(entry => entry.id === p.playback.queue.currentId);
   const isList = (root && ['tracks', 'favourites'].includes(tab!)) || ['collection', 'playlist', 'playlistEdit', 'album', 'artist', 'folder'].includes(route.kind);
   const tabSwipe = useTabSwipe(root && !sheet && !state.selected.length && !p.isExpanded, tab, value => nav.navigate({ kind: 'library', tab: value }, true));
+  useMobileRouteMotion(tabSwipe.ref, route, state.routes.length, p.isExpanded);
   return <div className="dmex-mobile-shell" data-player-open={p.isExpanded}>
     <header className={'dmex-mobile-header' + (!root ? ' is-detail' : '')}>
       {!root && <button className="dmex-mobile-icon" aria-label="Back" onClick={nav.back}><ArrowLeft size={23} /></button>}
