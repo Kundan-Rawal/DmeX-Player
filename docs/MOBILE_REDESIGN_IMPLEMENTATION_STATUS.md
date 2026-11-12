@@ -31,9 +31,13 @@ The pre-redesign GitHub checkpoint is `12568e56340cea3bb46dfaa4fd3681907818dc92`
 - Android system-bar/cutout inset bridge and compact landscape browsing rules.
 - Follow-up feedback: pitch-black dark background, neutral black/white library tabs,
   barely visible neutral separators, and a fully rounded mini-player.
-- Only the active track row carries a soft ambient artwork wash using its current
-  palette. Its single blurred artwork layer drifts slowly, pauses while the expanded
-  player is open, and respects reduced-motion preferences.
+- Only the active track row carries an animated three-color ambient field using
+  the same extracted palette as the expanded player, not a blurred cover image.
+  Its color layers move independently, pause while the expanded player is open,
+  and respect reduced-motion preferences.
+- The rounded mobile mini-player shares the same extracted-color animation at a
+  softer strength, with stable light/dark text colors for readability. It has no
+  solid outline or inset side bands; the color field fills the rounded surface.
 - Removed double reservation of Android bottom insets; lists meet the mini-player
   without the previously visible gap. Verified with live WebView measurements.
 - Immediate mobile launch artwork and a library-loading skeleton prevent blank or

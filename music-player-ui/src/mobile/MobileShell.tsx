@@ -14,6 +14,7 @@ import { BypassAllButton } from '../components/player/AdvancedAudioPanel';
 import { albumGroups, countLabel, folderPath, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks } from './library';
 import { MobilePlayback } from './useMobilePlayback';
 import { MobileQueueList } from './MobileQueueList';
+import { MobilePaletteAmbient } from './MobilePaletteAmbient';
 import { useArtistArtwork } from './useArtistArtwork';
 import './MobileShell.css';
 
@@ -110,7 +111,7 @@ function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, 
   return <div ref={ref} className="dmex-mobile-track-scroll" role="list" aria-label="Tracks" onScroll={event => { const top = event.currentTarget.scrollTop; positions.current[scrollKey] = top; setScroll(top); }}>
     <div className="dmex-mobile-track-spacer" style={{ height: tracks.length * rowHeight }}>
       {tracks.slice(begin, end).map((track, i) => <div role="listitem" className={'dmex-mobile-track' + (track.path === currentPath ? ' is-current' : '')} key={track.path} style={{ top: (begin + i) * rowHeight, height: rowHeight }}>
-        {track.path === currentPath && <span className="dmex-mobile-track-ambient" aria-hidden="true">{track.thumb && <img src={track.thumb} alt="" decoding="async" onError={event => { event.currentTarget.style.display = 'none'; }} />}</span>}
+        {track.path === currentPath && <MobilePaletteAmbient className="dmex-mobile-track-ambient" />}
         {onReorder && <button className="dmex-mobile-icon dmex-mobile-drag-handle" aria-label={`Drag to reorder ${track.name}`} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); reorder.current = { track, target: begin + i }; }} onPointerMove={e => {
           if (!reorder.current || !ref.current) return;
           const rect = ref.current.getBoundingClientRect();
@@ -298,6 +299,7 @@ export function MobileShell(p: Props) {
 }
 export function MobileMiniPlayer({ isExpanded, onExpand, onQueue, track, title, artist, art, playing, busy, onPlayPause, onPrevious, onNext, time, duration }: { isExpanded: boolean; onExpand: () => void; onQueue: () => void; track: Track | null; title: string; artist: string; art: string | null; playing: boolean; busy: boolean; onPlayPause: () => void; onPrevious: () => void; onNext: () => void; time: number; duration: number }) {
   return <div className="dmex-mobile-mini" style={{ opacity: isExpanded ? 0 : 1, pointerEvents: isExpanded ? 'none' : 'auto' }}>
+    {track && <MobilePaletteAmbient className="dmex-mobile-mini-ambient" />}
     <span className="dmex-mobile-mini-progress" style={{ width: `${Math.min(100, Math.max(0, duration ? time / duration * 100 : 0))}%` }} />
     <button className="dmex-mobile-mini-info" onClick={onExpand} disabled={!track} aria-label="Open expanded player"><Artwork src={art || undefined} /><span><strong>{track ? title : 'Your music, ready when you are'}</strong><small>{track ? artist : 'Choose a track to begin'}</small></span></button>
     <button className="dmex-mobile-icon dmex-mobile-mini-prev" aria-label="Previous track" disabled={!track} onClick={onPrevious}><SkipBack size={20} fill="currentColor" /></button>
