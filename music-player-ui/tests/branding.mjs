@@ -38,7 +38,7 @@ try {
     await page.goto(base + '/tests/library-workflows.html?branding', { waitUntil: 'domcontentloaded' });
     const logo = page.locator(mobile ? '.dmex-mobile-header .app-brand-mark' : '.samsung-logo-area .app-brand-mark');
     await logo.waitFor();
-    await page.waitForFunction(selector => document.querySelector(selector).naturalWidth === 256, mobile ? '.dmex-mobile-header img' : '.samsung-logo-area img');
+    await page.waitForFunction(({ selector, width }) => document.querySelector(selector).naturalWidth === width, { selector: mobile ? '.dmex-mobile-header img' : '.samsung-logo-area img', width: mobile ? 432 : 256 });
     const row = name => mobile ? page.getByRole('button', { name: `Play ${name}`, exact: true }) : page.locator('.track-item').filter({ hasText: new RegExp('^' + name) });
     const initial = await page.locator('.app-layout').evaluate(node => ({ accent: getComputedStyle(node).getPropertyValue('--theme-color').trim(),
       blobs: [1, 2, 3].map(i => getComputedStyle(node).getPropertyValue('--blob-' + i).trim()) }));

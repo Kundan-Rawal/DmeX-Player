@@ -105,6 +105,10 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(DEFAULT_LIBRARY_FILTERS);
+  const [libraryFiltersReady, setLibraryFiltersReady] = useState(!IS_MOBILE);
+  const [mobileLibraryStatus, setMobileLibraryStatus] = useState<'loading' | 'ready' | 'error'>(IS_MOBILE ? 'loading' : 'ready');
+  const [mobileLibraryError, setMobileLibraryError] = useState('');
+  const mobileLibraryRequest = useRef<Promise<void> | null>(null);
   const libraryFiltersRef = useRef(libraryFilters);
   libraryFiltersRef.current = libraryFilters;
   const visiblePlaylist = useMemo(() => playlist.filter(track => includeLibraryTrack(track, libraryFilters)), [playlist, libraryFilters]);
@@ -115,7 +119,7 @@ function App() {
   const metadataQueuePending = useRef(false);
   useEffect(() => {
     invoke<string | null>('get_setting', { key: 'gemini_api_key' }).then(key => setGeminiApiKey(key || '')).catch(console.error);
-    invoke<string | null>('get_setting', { key: 'library_filters' }).then(value => setLibraryFilters(parseLibraryFilters(value))).catch(console.error);
+    invoke<string | null>('get_setting', { key: 'library_filters' }).then(value => setLibraryFilters(parseLibraryFilters(value))).catch(console.error).finally(() => setLibraryFiltersReady(true));
   }, []);
   const [isEnvDropdownOpen, setIsEnvDropdownOpen] = useState(false);
   const [albumArt, setAlbumArt]             = useState<string | null>(null);
@@ -423,13 +427,31 @@ function App() {
 
 
   // 1. THE BOOT SEQUENCE
+  const loadMobileLibrary = useCallback(() => {
+    if (mobileLibraryRequest.current) return mobileLibraryRequest.current;
+    setMobileLibraryStatus('loading'); setMobileLibraryError('');
+    const request = (async () => {
+      try {
+        const saved = await invoke<Track[]>('fetch_library');
+        playlistRef.current = saved;
+        setPlaylist(saved); setFavorites(saved.filter(track => track.isFavorite).map(track => track.path));
+        setMobileLibraryStatus('ready');
+      } catch {
+        setMobileLibraryStatus('error');
+        setMobileLibraryError('Your saved library could not be loaded. Your music has not been removed.');
+      } finally { mobileLibraryRequest.current = null; }
+    })();
+    mobileLibraryRequest.current = request;
+    return request;
+  }, []);
   useEffect(() => {
     async function boot() {
       setIsLoading(true);
       setScanProgress('Waking up database...');
       if (!IS_MOBILE) await new Promise(resolve => setTimeout(resolve, 100));
 
-      try {
+      if (IS_MOBILE) await loadMobileLibrary();
+      else try {
         const saved = await invoke<Track[]>('fetch_library');
         if (saved && saved.length > 0) {
           // No more wiping. Load the tracks and their micro-JPEGs exactly as they are in the DB.
@@ -1360,7 +1382,7 @@ function App() {
       
 
       <div className="app-container">
-        {IS_MOBILE ? <MobileShell ready={isBooted} tracks={visiblePlaylist} favourites={favoritesSet} playlists={customPlaylists} playback={mobilePlayback}
+        {IS_MOBILE ? <MobileShell ready={isBooted && libraryFiltersReady && mobileLibraryStatus === 'ready'} loadError={mobileLibraryError} onRetryLibrary={() => { void loadMobileLibrary(); }} totalTracks={playlist.length} tracks={visiblePlaylist} favourites={favoritesSet} playlists={customPlaylists} playback={mobilePlayback}
           currentTrack={currentTrack} isExpanded={isExpanded} onCollapse={() => setIsExpanded(false)} queueRequest={mobileQueueRequest}
           onScan={scanAndAdd} scanning={isLoading && isBooted} scanMessage={scanProgress} onDismissScan={() => setScanProgress('')}
           apiKey={geminiApiKey} filters={libraryFilters} onSaveSettings={async (key, filters) => {

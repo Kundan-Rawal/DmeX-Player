@@ -22,11 +22,17 @@ try {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 }, isMobile: true, hasTouch: true,
     userAgent: 'Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36' });
   const page = await context.newPage();
-  await page.goto(base + '/tests/mobile-redesign.html?mobile&slow-library');
+  await page.goto(base + '/tests/mobile-redesign.html?mobile&slow-library&strict');
   await page.getByRole('status', { name: 'Loading music library' }).waitFor();
   assert.equal(await page.getByText('No tracks here yet', { exact: true }).count(), 0, 'No false empty-library flash while the database loads');
   await page.getByRole('button', { name: 'Play Night Drive 1', exact: true }).waitFor();
   assert.equal(await page.getByRole('status', { name: 'Loading music library' }).count(), 0);
+  assert.equal(await page.evaluate(() => window.libraryTest.calls.filter(call => call.command === 'fetch_library').length), 1, 'StrictMode boot shares one pending library request');
+  await page.goto(base + '/tests/mobile-redesign.html?mobile&library-failure');
+  await page.getByRole('heading', { name: 'Library unavailable', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Add music', exact: true }).count(), 0, 'Failed load is not presented as an empty library');
+  await page.getByRole('button', { name: 'Retry loading library', exact: true }).click();
+  await page.getByRole('button', { name: 'Play Night Drive 1', exact: true }).waitFor();
   await context.close();
   console.log('PASS startup: mobile-only immediate launch screen, saved light/dark colors, slow-library loading state without false empty content');
 } finally { await browser.close(); }

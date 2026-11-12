@@ -9,6 +9,11 @@ export type MobileRoute = { kind: 'library'; tab: MobileTab } | { kind: 'collect
 export type MobileSort = 'title' | 'artist' | 'added' | 'duration';
 export const SMART_TITLES: Record<SmartCollection, string> = { recentlyAdded: 'Recently added', recentlyPlayed: 'Recently played', mostPlayed: 'Most played' };
 export const countLabel = (count: number, noun = 'track') => `${count} ${noun}${count === 1 ? '' : 's'}`;
+export function isFeaturedAlbum(id: string) {
+  let hash = 0;
+  for (let index = 0; index < id.length; index++) hash = Math.imul(hash, 31) + id.charCodeAt(index) | 0;
+  return (hash >>> 0) % 5 === 0;
+}
 export const albumId = (track: Track) => JSON.stringify([(track.album || 'Unknown Album').normalize('NFKC').trim().toLocaleLowerCase(), ((track as Track & { albumArtist?: string }).albumArtist || track.artist || 'Unknown Artist').normalize('NFKC').trim().toLocaleLowerCase()]);
 export function sortTracks(tracks: Track[], sort: MobileSort): Track[] {
   return [...tracks].sort((a, b) => sort === 'added' ? (b.dateAdded || 0) - (a.dateAdded || 0) || a.name.localeCompare(b.name) : sort === 'duration' ? b.duration - a.duration : sort === 'artist' ? a.artist.localeCompare(b.artist) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name));
@@ -28,7 +33,10 @@ export function routeTracks(route: MobileRoute, tracks: Track[], favourites: Set
   if (route.kind === 'collection') return smartTracks(route.id, tracks, recent);
   if (route.kind === 'playlist' || route.kind === 'playlistEdit') { const byPath = new Map(tracks.map(t => [t.path, t])); return (playlists.find(p => p.id === route.id)?.trackPaths || []).map(path => byPath.get(path)).filter((t): t is Track => !!t); }
   if (route.kind === 'album') return tracks.filter(t => albumId(t) === route.id).sort((a, b) => (a.discNumber || 0) - (b.discNumber || 0) || (a.trackNumber || 0) - (b.trackNumber || 0) || a.name.localeCompare(b.name));
-  if (route.kind === 'artist') return tracks.filter(t => splitArtists(t.artist).some(name => artistIdentity(name) === route.id));
+  if (route.kind === 'artist') return tracks.filter(t => splitArtists(t.artist).some(name => {
+    const id = artistIdentity(name);
+    return (!id || id === 'unknown' || id === 'unknownartist' ? 'unknown-artist' : id) === route.id;
+  }));
   if (route.kind === 'folder') return tracks.filter(t => folderPath(t) === route.id);
   return tracks;
 }

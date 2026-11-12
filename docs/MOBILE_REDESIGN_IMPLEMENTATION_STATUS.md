@@ -83,6 +83,24 @@ the USB development connection at `http://127.0.0.1:1420`. This is not a standal
 release APK. Automatic phone rotation was restored after the landscape check.
 No music files or existing playlists were deleted during inspection.
 
+## Follow-Up Mobile Browsing Fixes
+
+- A left swipe across library content selects the adjacent tab to the left; a
+  right swipe selects the adjacent tab to the right. Vertical gestures remain
+  scrolling, horizontal gestures do not trigger browser Back, and swipe-generated
+  clicks cannot accidentally open or play an item.
+- Albums, Artists, Playlists, Folders, and Discover retain independent scroll
+  positions. Album/artist detail round-trips also restore the source position.
+- The header replaces the letter D with the existing transparent DmeX mark and
+  keeps `meX Player` inline. Desktop and launcher assets are unchanged.
+- Artist artwork has fixed circular dimensions, including in landscape.
+- Album browsing restores deterministic larger feature covers among smaller ones.
+- Mobile startup shares a pending library request, waits for filters/settings,
+  and distinguishes loading, genuine empty libraries, and failures with Retry.
+- Unknown Artist detail now matches its dictionary identity and track count.
+- Added real-touch navigation, saved-scroll, header-alpha/alignment, collection
+  consistency, delayed startup, and failed-load/retry regression coverage.
+
 ## Still Required Before Release
 
 1. **Native playback reliability (blueprint Phase E).** The new queue is currently

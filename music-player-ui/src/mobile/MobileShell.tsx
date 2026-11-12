@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { ArrowDown, ArrowLeft, ArrowUp, Check, CheckCircle2, ChevronRight, Circle, Clock3, Disc3, Folder, GripVertical, Heart, History, ListMusic, ListPlus, LoaderCircle, MoreHorizontal, Music2, Pause, Play, Plus, Search, Settings, Shuffle, SkipBack, SkipForward, Trash2, Undo2, Users, X } from 'lucide-react';
 import { Track, CustomPlaylist } from '../types';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { BrandMark } from '../components/common/BrandMark';
 import { FolderModal } from '../modals/modals';
 import { ToggleSwitch } from '../components/common/ToggleSwitch';
 import { CustomSelect } from '../components/common/CustomSelect';
@@ -11,7 +10,7 @@ import { artistCacheKey, buildArtistDictionary } from '../utils/artistEngine';
 import { formatTime } from '../utils/formatters';
 import { CloudFetchView } from '../views/CloudFetchView';
 import { BypassAllButton } from '../components/player/AdvancedAudioPanel';
-import { albumGroups, countLabel, folderPath, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks } from './library';
+import { albumGroups, countLabel, folderPath, isFeaturedAlbum, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks } from './library';
 import { MobilePlayback } from './useMobilePlayback';
 import { MobileQueueList } from './MobileQueueList';
 import { MobilePaletteAmbient } from './MobilePaletteAmbient';
@@ -23,6 +22,7 @@ type Sheet = { kind: 'folder' | 'libraryMenu' | 'sort' | 'playlistMenu' | 'track
 interface Navigation { routes: MobileRoute[]; sheet: Sheet | null; selected: string[]; expanded: boolean }
 interface Props {
   ready: boolean;
+  loadError: string; onRetryLibrary: () => void; totalTracks: number;
   tracks: Track[]; favourites: Set<string>; playlists: CustomPlaylist[]; playback: MobilePlayback;
   currentTrack: Track | null; isExpanded: boolean; onCollapse: () => void; queueRequest: number;
   onScan: (path: string) => Promise<void>; scanning: boolean; scanMessage: string; onDismissScan: () => void;
@@ -73,6 +73,60 @@ function Artwork({ track, src, label = '' }: { track?: Track; src?: string; labe
   const [failed, setFailed] = useState(false); const image = src || track?.thumb;
   useEffect(() => setFailed(false), [image]);
   return <span className="dmex-artwork">{image && !failed ? <img src={image} alt={label} loading="lazy" decoding="async" onError={() => setFailed(true)} /> : <Music2 size={22} aria-hidden="true" />}</span>;
+}
+function RememberedScroll({ scrollKey, positions, className = '', children }: { scrollKey: string; positions: React.RefObject<Record<string, number>>; className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (ref.current) ref.current.scrollTop = positions.current[scrollKey] || 0; }, [scrollKey, positions]);
+  return <div ref={ref} className={`dmex-mobile-page-scroll ${className}`} data-scroll-key={scrollKey} onScroll={event => { positions.current[scrollKey] = event.currentTarget.scrollTop; }}>{children}</div>;
+}
+function useTabSwipe(enabled: boolean, active: MobileTab | null, onChange: (tab: MobileTab) => void) {
+  const surface = useRef<HTMLElement>(null);
+  const gesture = useRef<{ x: number; y: number; horizontal: boolean; rejected: boolean } | null>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    const element = surface.current; if (!element) return;
+    const move = (event: TouchEvent) => {
+      const start = gesture.current;
+      if (!start || start.rejected || event.touches.length !== 1) return;
+      const dx = Math.abs(event.touches[0].clientX - start.x), dy = Math.abs(event.touches[0].clientY - start.y);
+      if (dx > 10 && dx > dy * 1.4 && event.cancelable) event.preventDefault();
+    };
+    element.addEventListener('touchmove', move, { passive: false });
+    return () => element.removeEventListener('touchmove', move);
+  }, []);
+  const finish = (x: number, y: number) => {
+    const start = gesture.current; gesture.current = null;
+    if (!start || start.rejected || !active || !enabled) return;
+    const dx = x - start.x, dy = y - start.y;
+    if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    moved.current = true;
+    const index = TABS.findIndex(tab => tab.id === active), target = index + (dx < 0 ? -1 : 1);
+    if (target >= 0 && target < TABS.length) onChange(TABS[target].id);
+  };
+  return {
+    ref: surface,
+    onTouchStart: (event: React.TouchEvent) => {
+      moved.current = false;
+      const target = event.target as Element;
+      if (!enabled || event.touches.length !== 1 || target.closest('input,textarea,select,[role="slider"],.dmex-mobile-drag-handle,.custom-select')) { gesture.current = null; return; }
+      const touch = event.touches[0]; gesture.current = { x: touch.clientX, y: touch.clientY, horizontal: false, rejected: false };
+    },
+    onTouchMove: (event: React.TouchEvent) => {
+      const start = gesture.current; if (!start) return;
+      if (event.touches.length !== 1) { gesture.current = null; return; }
+      const touch = event.touches[0], dx = Math.abs(touch.clientX - start.x), dy = Math.abs(touch.clientY - start.y);
+      if (!start.horizontal && !start.rejected && Math.max(dx, dy) > 10) {
+        start.horizontal = dx > dy * 1.4; start.rejected = !start.horizontal;
+      }
+    },
+    onTouchEnd: (event: React.TouchEvent) => { if (event.changedTouches.length) finish(event.changedTouches[0].clientX, event.changedTouches[0].clientY); },
+    onTouchCancel: () => { gesture.current = null; },
+    onClickCapture: (event: React.MouseEvent) => {
+      const native = event.nativeEvent as PointerEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } };
+      if (moved.current && (native.pointerType === 'touch' || native.sourceCapabilities?.firesTouchEvents)) { event.preventDefault(); event.stopPropagation(); }
+      moved.current = false;
+    },
+  };
 }
 function MobileTabs({ active, onChange }: { active: MobileTab; onChange: (tab: MobileTab) => void }) {
   const ref = useRef<HTMLElement>(null), programmatic = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -200,17 +254,18 @@ export function MobileShell(p: Props) {
     try { await p.onSavePlaylist({ ...routePlaylist, trackPaths: paths }); } catch { notify('Playlist order could not be saved.'); } finally { setSaving(false); }
   };
   const trackList = (tracks: Track[], key: string, origin = title) => <TrackList tracks={tracks} currentPath={p.currentTrack?.path} favourites={p.favourites} selected={state.selected} onSelect={nav.select} onPlay={track => play(tracks, track, origin)} onMenu={trackMenu} scrollKey={key} positions={positions} onReorder={route.kind === 'playlistEdit' ? (from, to) => { void reorderPlaylistTrack(from, to); } : undefined} />;
-  const empty = (heading: string, text: string) => <div className="dmex-mobile-empty"><Music2 size={34} /><h2>{heading}</h2><p>{text}</p>{p.tracks.length === 0 && <button className="dmex-mobile-primary" onClick={() => nav.sheet({ kind: 'folder' })}><Plus size={18} />Add music</button>}</div>;
+  const empty = (heading: string, text: string) => <div className="dmex-mobile-empty"><Music2 size={34} /><h2>{heading}</h2><p>{text}</p>{p.ready && !p.scanning && p.totalTracks === 0 && <button className="dmex-mobile-primary" onClick={() => nav.sheet({ kind: 'folder' })}><Plus size={18} />Add music</button>}</div>;
   const sheet = state.sheet;
   const sheetTitle = sheet?.kind === 'clearArtistArt' ? 'Clear artist artwork?' : sheet?.kind === 'queueEntry' ? 'Queue options' : null;
   const track = sheet?.track;
   const queueIndex = p.playback.queue.entries.findIndex(entry => entry.id === sheet?.queueId);
   const currentQueueIndex = p.playback.queue.entries.findIndex(entry => entry.id === p.playback.queue.currentId);
   const isList = (root && ['tracks', 'favourites'].includes(tab!)) || ['collection', 'playlist', 'playlistEdit', 'album', 'artist', 'folder'].includes(route.kind);
+  const tabSwipe = useTabSwipe(root && !sheet && !state.selected.length && !p.isExpanded, tab, value => nav.navigate({ kind: 'library', tab: value }, true));
   return <div className="dmex-mobile-shell" data-player-open={p.isExpanded}>
     <header className={'dmex-mobile-header' + (!root ? ' is-detail' : '')}>
       {!root && <button className="dmex-mobile-icon" aria-label="Back" onClick={nav.back}><ArrowLeft size={23} /></button>}
-      {root && <BrandMark />}<h1>{state.selected.length ? `${state.selected.length} selected` : title}</h1>
+      <h1>{state.selected.length ? `${state.selected.length} selected` : root ? <span className="dmex-mobile-wordmark" aria-label="DmeX Player"><img className="app-brand-mark" src="/branding/dmex-d-transparent.png" alt="" aria-hidden="true" width={32} height={38} draggable={false} /><span>meX Player</span></span> : title}</h1>
       {state.selected.length ? <button className="dmex-mobile-icon" aria-label="Cancel selection" onClick={nav.back}><X size={22} /></button> : <>
         {root && <button className="dmex-mobile-icon" aria-label="Search library" onClick={() => { setQuery(''); nav.navigate({ kind: 'search' }); }}><Search size={22} /></button>}
         {root ? <button className="dmex-mobile-icon" aria-label="Library options" onClick={() => nav.sheet({ kind: 'libraryMenu' })}><MoreHorizontal size={23} /></button> : route.kind === 'playlist' && routePlaylist ? <button className="dmex-mobile-icon" aria-label="Playlist options" onClick={() => nav.sheet({ kind: 'playlistMenu', playlistId: routePlaylist.id })}><MoreHorizontal size={23} /></button> : null}
@@ -219,8 +274,8 @@ export function MobileShell(p: Props) {
     {root && !state.selected.length && <MobileTabs active={tab!} onChange={value => nav.navigate({ kind: 'library', tab: value }, true)} />}
     {p.scanning && <button className="dmex-mobile-job-strip" onClick={() => nav.navigate({ kind: 'activity' })}><LoaderCircle size={15} /><span>{p.scanMessage || 'Updating library'}</span><ChevronRight size={17} /></button>}
     {p.playback.error && <div className="dmex-mobile-error" role="alert"><span>{p.playback.error}</span><button onClick={() => void p.playback.retry()}>Retry</button><button className="dmex-mobile-icon" aria-label="Dismiss playback error" onClick={p.playback.dismissError}><X size={17} /></button></div>}
-    <main className="dmex-mobile-main" inert={!!sheet} aria-hidden={sheet ? true : undefined} aria-busy={!p.ready}>
-      {!p.ready && !p.tracks.length ? <div className="dmex-mobile-loading" role="status" aria-label="Loading music library">{Array.from({ length: 9 }, (_, index) => <div className="dmex-mobile-loading-row" aria-hidden="true" key={index}><span className="dmex-mobile-loading-art" /><span className="dmex-mobile-loading-text" /></div>)}</div> : <>
+    <main className="dmex-mobile-main" {...tabSwipe} inert={!!sheet} aria-hidden={sheet ? true : undefined} aria-busy={!p.ready}>
+      {!p.ready || (p.scanning && !p.tracks.length) ? p.loadError ? <div className="dmex-mobile-empty" role="alert"><Music2 size={34} /><h2>Library unavailable</h2><p>{p.loadError}</p><button className="dmex-mobile-primary" onClick={p.onRetryLibrary}>Retry loading library</button></div> : <div className="dmex-mobile-loading" role="status" aria-label="Loading music library">{Array.from({ length: 9 }, (_, index) => <div className="dmex-mobile-loading-row" aria-hidden="true" key={index}><span className="dmex-mobile-loading-art" /><span className="dmex-mobile-loading-text" /></div>)}</div> : <>
       {route.kind === 'playlistEdit' && <div className="dmex-mobile-selection-bar"><span>Drag tracks to reorder</span><button onClick={nav.back}>Done</button></div>}
       {state.selected.length > 0 && <div className="dmex-mobile-selection-bar"><button onClick={() => nav.select(list.map(t => t.path))}>Select all</button><button aria-label="Play selected" onClick={() => { if (selection[0]) { void p.playback.start(selection, selection[0], 'Selected tracks'); nav.back(); } }}><Play size={19} /></button><button aria-label="Queue selected" onClick={() => { p.playback.add(selection, false); notify(`${countLabel(selection.length)} added to queue`); }}><ListPlus size={21} /></button><button aria-label="Add selection to playlist" onClick={() => nav.sheet({ kind: 'addPlaylist', paths: state.selected })}><Plus size={22} /></button></div>}
       {isList && <>
@@ -228,11 +283,11 @@ export function MobileShell(p: Props) {
         {root && <div className="dmex-mobile-list-toolbar"><span>{countLabel(list.length)}</span><button onClick={() => nav.sheet({ kind: 'sort' })}>{sort === 'added' ? 'Recently added' : sort === 'title' ? 'Title' : sort === 'artist' ? 'Artist' : 'Duration'}<ArrowDown size={15} /></button><button className="dmex-mobile-icon" aria-label="Shuffle tracks" disabled={!list.length} onClick={() => play(list, list[0], tab === 'favourites' ? 'Favourites' : 'Tracks', true)}><Shuffle size={20} /></button></div>}
         {list.length ? trackList(list, routeKey(route), root ? tab === 'favourites' ? 'Favourites' : 'Tracks' : title) : empty(root && tab === 'favourites' ? 'Your favourites belong here' : 'No tracks here yet', root && tab === 'favourites' ? 'Favourite a track from its menu or the player.' : p.tracks.length ? 'Add tracks to this collection to get started.' : 'Choose the music you want in your library.')}
       </>}
-      {root && tab === 'playlists' && <div className="dmex-mobile-page-scroll"><div className="dmex-mobile-smart-grid">{(['recentlyAdded', 'recentlyPlayed', 'mostPlayed'] as const).map((id, i) => { const tracks = smartTracks(id, p.tracks, p.playback.recent); const Icon = [Clock3, History, ListMusic][i]; return <button className="dmex-mobile-smart" key={id} onClick={() => nav.navigate({ kind: 'collection', id })}><span className="dmex-mobile-smart-icon"><Icon size={24} /></span><strong>{SMART_TITLES[id]}</strong><span>{countLabel(tracks.length)}</span></button>; })}</div><div className="dmex-mobile-section-title"><h2>My playlists</h2><button className="dmex-mobile-icon" aria-label="Create playlist" onClick={() => openCreate()}><Plus size={23} /></button></div>{!p.playlists.length && <p className="dmex-mobile-secondary">Your playlists will appear here.</p>}{p.playlists.map(pl => { const tracks = pl.trackPaths.map(path => byPath.get(path)).filter((t): t is Track => !!t); return <div className="dmex-mobile-entity-row" key={pl.id}><button onClick={() => nav.navigate({ kind: 'playlist', id: pl.id })}><Artwork track={tracks[0]} /><span><strong>{pl.name}</strong><small>{countLabel(tracks.length)}{tracks.length < pl.trackPaths.length ? ` · ${pl.trackPaths.length - tracks.length} unavailable` : ''}</small></span></button><button className="dmex-mobile-icon" aria-label={`Options for playlist ${pl.name}`} onClick={() => nav.sheet({ kind: 'playlistMenu', playlistId: pl.id })}><MoreHorizontal size={21} /></button></div>; })}</div>}
-      {root && tab === 'albums' && <div className="dmex-mobile-page-scroll"><div className="dmex-mobile-list-toolbar"><span>{countLabel(albums.length, 'album')}</span></div><div className="dmex-mobile-album-grid">{albums.map(album => <button className="dmex-mobile-album" key={album.id} onClick={() => nav.navigate({ kind: 'album', id: album.id })}><Artwork src={album.thumb} /><strong>{album.name}</strong><span>{album.artist}</span></button>)}</div>{!albums.length && empty('No albums yet', 'Your albums appear when you add music.')}</div>}
-      {root && tab === 'artists' && <div className="dmex-mobile-page-scroll"><div className="dmex-mobile-list-toolbar"><span>{countLabel(artists.length, 'artist')}</span></div>{artists.map(artist => <button className="dmex-mobile-simple-row" key={artist.id} onClick={() => nav.navigate({ kind: 'artist', id: artist.id })}>{artistImages[artistCacheKey(artist.name)] ? <Artwork src={convertFileSrc(artistImages[artistCacheKey(artist.name)])} /> : <span className="dmex-mobile-initial">{artist.name.slice(0, 1).toLocaleUpperCase()}</span>}<span><strong>{artist.name}</strong><small>{countLabel(artist.trackIds.length)}</small></span><ChevronRight size={18} /></button>)}{!artists.length && empty('No artists yet', 'Your artists appear when you add music.')}</div>}
-      {root && tab === 'folders' && <div className="dmex-mobile-page-scroll"><div className="dmex-mobile-section-title"><h2>Music sources</h2><button className="dmex-mobile-icon" aria-label="Add music folder" onClick={() => nav.sheet({ kind: 'folder' })}><Plus size={22} /></button></div>{folders.map(([folder, tracks]) => <button className="dmex-mobile-simple-row" key={folder} onClick={() => nav.navigate({ kind: 'folder', id: folder })}><Folder size={25} /><span><strong>{folder.split(/[\\/]/).slice(-1)[0] || folder}</strong><small>{countLabel(tracks.length)}</small></span><ChevronRight size={18} /></button>)}{!folders.length && empty('Choose your music', 'Add a music folder or scan your Android audio library.')}</div>}
-      {root && tab === 'discover' && <div className="dmex-mobile-page-scroll dmex-mobile-discover"><CloudFetchView onPlayCloudTrack={p.onCloudPlay} /></div>}
+      {root && tab === 'playlists' && <RememberedScroll key="playlists" scrollKey={routeKey(route)} positions={positions}><div className="dmex-mobile-smart-grid">{(['recentlyAdded', 'recentlyPlayed', 'mostPlayed'] as const).map((id, i) => { const tracks = smartTracks(id, p.tracks, p.playback.recent); const Icon = [Clock3, History, ListMusic][i]; return <button className="dmex-mobile-smart" key={id} onClick={() => nav.navigate({ kind: 'collection', id })}><span className="dmex-mobile-smart-icon"><Icon size={24} /></span><strong>{SMART_TITLES[id]}</strong><span>{countLabel(tracks.length)}</span></button>; })}</div><div className="dmex-mobile-section-title"><h2>My playlists</h2><button className="dmex-mobile-icon" aria-label="Create playlist" onClick={() => openCreate()}><Plus size={23} /></button></div>{!p.playlists.length && <p className="dmex-mobile-secondary">Your playlists will appear here.</p>}{p.playlists.map(pl => { const tracks = pl.trackPaths.map(path => byPath.get(path)).filter((t): t is Track => !!t); return <div className="dmex-mobile-entity-row" key={pl.id}><button onClick={() => nav.navigate({ kind: 'playlist', id: pl.id })}><Artwork track={tracks[0]} /><span><strong>{pl.name}</strong><small>{countLabel(tracks.length)}{tracks.length < pl.trackPaths.length ? ` · ${pl.trackPaths.length - tracks.length} unavailable` : ''}</small></span></button><button className="dmex-mobile-icon" aria-label={`Options for playlist ${pl.name}`} onClick={() => nav.sheet({ kind: 'playlistMenu', playlistId: pl.id })}><MoreHorizontal size={21} /></button></div>; })}</RememberedScroll>}
+      {root && tab === 'albums' && <RememberedScroll key="albums" scrollKey={routeKey(route)} positions={positions}><div className="dmex-mobile-list-toolbar"><span>{countLabel(albums.length, 'album')}</span></div><div className="dmex-mobile-album-grid">{albums.map(album => <button className={'dmex-mobile-album' + (isFeaturedAlbum(album.id) ? ' is-featured' : '')} key={album.id} onClick={() => nav.navigate({ kind: 'album', id: album.id })}><Artwork src={album.thumb} /><strong>{album.name}</strong><span>{album.artist}</span></button>)}</div>{!albums.length && empty('No albums yet', 'Your albums appear when you add music.')}</RememberedScroll>}
+      {root && tab === 'artists' && <RememberedScroll key="artists" scrollKey={routeKey(route)} positions={positions}><div className="dmex-mobile-list-toolbar"><span>{countLabel(artists.length, 'artist')}</span></div>{artists.map(artist => <button className="dmex-mobile-simple-row dmex-mobile-artist-row" key={artist.id} onClick={() => nav.navigate({ kind: 'artist', id: artist.id })}>{artistImages[artistCacheKey(artist.name)] ? <Artwork src={convertFileSrc(artistImages[artistCacheKey(artist.name)])} /> : <span className="dmex-mobile-initial">{artist.name.slice(0, 1).toLocaleUpperCase()}</span>}<span><strong>{artist.name}</strong><small>{countLabel(artist.trackIds.length)}</small></span><ChevronRight size={18} /></button>)}{!artists.length && empty('No artists yet', 'Your artists appear when you add music.')}</RememberedScroll>}
+      {root && tab === 'folders' && <RememberedScroll key="folders" scrollKey={routeKey(route)} positions={positions}><div className="dmex-mobile-section-title"><h2>Music sources</h2><button className="dmex-mobile-icon" aria-label="Add music folder" onClick={() => nav.sheet({ kind: 'folder' })}><Plus size={22} /></button></div>{folders.map(([folder, tracks]) => <button className="dmex-mobile-simple-row" key={folder} onClick={() => nav.navigate({ kind: 'folder', id: folder })}><Folder size={25} /><span><strong>{folder.split(/[\\/]/).slice(-1)[0] || folder}</strong><small>{countLabel(tracks.length)}</small></span><ChevronRight size={18} /></button>)}{!folders.length && empty('Choose your music', 'Add a music folder or scan your Android audio library.')}</RememberedScroll>}
+      {root && tab === 'discover' && <RememberedScroll key="discover" scrollKey={routeKey(route)} positions={positions} className="dmex-mobile-discover"><CloudFetchView onPlayCloudTrack={p.onCloudPlay} /></RememberedScroll>}
       {route.kind === 'search' && <><label className="dmex-mobile-search"><Search size={20} /><input aria-label="Search library" autoFocus value={query} placeholder="Tracks, albums, artists, playlists" onChange={e => setQuery(e.target.value)} />{query && <button className="dmex-mobile-icon" aria-label="Clear search" onClick={() => setQuery('')}><X size={18} /></button>}</label>{query.trim() ? <><div className="dmex-mobile-search-entities">{searchAlbums.map(a => <button key={a.id} onClick={() => nav.navigate({ kind: 'album', id: a.id })}><Disc3 size={16} /><span>{a.name}</span></button>)}{searchArtists.map(a => <button key={a.id} onClick={() => nav.navigate({ kind: 'artist', id: a.id })}><Users size={16} /><span>{a.name}</span></button>)}{p.playlists.filter(pl => pl.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(pl => <button key={pl.id} onClick={() => nav.navigate({ kind: 'playlist', id: pl.id })}><ListMusic size={16} /><span>{pl.name}</span></button>)}</div><div className="dmex-mobile-list-toolbar"><span>{countLabel(searchTracks.length)}</span></div>{searchTracks.length ? trackList(searchTracks, `search:${query}`, 'Search results') : empty('No matching tracks', 'Try a song name, artist or album.')}</> : empty('Find your next listen', 'Search your local library. Online music stays in Discover.')}</>}
       {route.kind === 'queue' && <>
         <div className="dmex-mobile-queue-toolbar">

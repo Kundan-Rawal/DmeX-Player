@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { mockConvertFileSrc, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 import App from '../src/App';
 import { AudioSettingsProvider, DEFAULT_AUDIO } from '../src/components/player/AudioSettingsContext';
 import { LyricsSearch } from '../src/components/player/LyricsSearch';
@@ -20,15 +20,17 @@ const artistImages: Record<string, string> = {};
 if (query.has('mobile')) {
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 120;
   const ctx = canvas.getContext('2d')!;
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < (query.has('navigation') ? 160 : 80); i++) {
     ctx.fillStyle = ['#315e87', '#b53f61', '#237a68', '#79583f'][i % 4]; ctx.fillRect(0, 0, 120, 120);
     ctx.fillStyle = '#ffffff'; ctx.font = 'bold 32px sans-serif'; ctx.fillText(String(i + 1).padStart(2, '0'), 28, 70);
     tracks.push({ path: `/Music/Album ${i % 8}/track-${i}.flac`, name: ['Night Drive', 'Paper Lanterns', 'Open Water', 'Every Little Moment'][i % 4] + ` ${i + 1}`,
-      artist: ['Kira Lane', 'Aarav', 'The Coast', 'Mina'][i % 4], album: `Sessions ${i % 8 + 1}`, duration: 180 + i, dateAdded: 1794355200 - i * 1000, thumb: canvas.toDataURL(), metadataLoaded: true,
+      artist: query.has('navigation') ? i === 159 ? 'Unknown Artist' : `Artist ${i % 50 + 1}` : ['Kira Lane', 'Aarav', 'The Coast', 'Mina'][i % 4], album: `Sessions ${i % (query.has('navigation') ? 40 : 8) + 1}`, duration: 180 + i, dateAdded: 1794355200 - i * 1000, thumb: canvas.toDataURL(), metadataLoaded: true,
       isFavorite: i < 3, playCount: i < 8 ? 8 - i : 0, totalSecondsListened: i < 8 ? 3000 - i * 100 : 0, lastPlayed: i < 4 ? 1794355200000 - i * 1000 : 0 });
   }
+  if (query.has('navigation')) tracks.forEach(track => { artistImages[artistCacheKey(track.artist)] = `/artist-art/${artistCacheKey(track.artist)}.png`; });
 }
 mockWindows('main');
+mockConvertFileSrc('windows');
 if (query.has('branding')) {
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16;
   const context = canvas.getContext('2d')!; context.fillStyle = '#c8222a'; context.fillRect(0, 0, 16, 16);
@@ -58,6 +60,7 @@ mockIPC((command, payload: any) => {
   if (command === 'audio_status') return { ready: true, settings: DEFAULT_AUDIO, generation: 1, bypassAll: false, ecoMode: true };
   if (command === 'audio_metrics') return { currentTime: 0, duration: 120, audioLevel: 0, bassLevel: 0, midLevel: 0, trebleLevel: 0, limiterGain: 1 };
   if (command === 'fetch_library') {
+    if (query.has('library-failure') && calls.filter(call => call.command === command).length === 1) throw new Error('Library temporarily unavailable');
     const library = tracks.map(t => ({ ...t }));
     return query.has('slow-library') ? new Promise(resolve => setTimeout(() => resolve(library), 1200)) : library;
   }
@@ -111,6 +114,6 @@ function LyricsFixture() {
 }
 const root = createRoot(document.getElementById('root')!);
 let mount = 0;
-function render() { root.render(query.has('lyrics') ? <LyricsFixture /> : <AudioSettingsProvider key={mount++}><App /></AudioSettingsProvider>); }
+function render() { const app = <AudioSettingsProvider key={mount++}><App /></AudioSettingsProvider>; root.render(query.has('lyrics') ? <LyricsFixture /> : query.has('strict') ? <React.StrictMode>{app}</React.StrictMode> : app); }
 (window as any).libraryTest.remount = render;
 render();
