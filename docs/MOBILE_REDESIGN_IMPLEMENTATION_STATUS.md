@@ -100,6 +100,11 @@ No music files or existing playlists were deleted during inspection.
 - Unknown Artist detail now matches its dictionary identity and track count.
 - Added real-touch navigation, saved-scroll, header-alpha/alignment, collection
   consistency, delayed startup, and failed-load/retry regression coverage.
+- Recently added, Recently played, and Most played now show real cover collages
+  from their own ordered tracks instead of permanent icon placeholders. Duplicate
+  covers are consolidated, a single cover fills the tile, broken images are skipped,
+  and an icon is used only when usable artwork is unavailable. Counts and routes
+  still use the same collection selectors. Verified at 320, 360, and 800 widths.
 
 ## Still Required Before Release
 
