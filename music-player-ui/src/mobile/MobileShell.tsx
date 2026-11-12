@@ -100,7 +100,7 @@ function useTabSwipe(enabled: boolean, active: MobileTab | null, onChange: (tab:
     const dx = x - start.x, dy = y - start.y;
     if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
     moved.current = true;
-    const index = TABS.findIndex(tab => tab.id === active), target = index + (dx < 0 ? -1 : 1);
+    const index = TABS.findIndex(tab => tab.id === active), target = index + (dx < 0 ? 1 : -1);
     if (target >= 0 && target < TABS.length) onChange(TABS[target].id);
   };
   return {

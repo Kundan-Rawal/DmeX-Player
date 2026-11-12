@@ -85,8 +85,8 @@ No music files or existing playlists were deleted during inspection.
 
 ## Follow-Up Mobile Browsing Fixes
 
-- A left swipe across library content selects the adjacent tab to the left; a
-  right swipe selects the adjacent tab to the right. Vertical gestures remain
+- The library-content swipe mapping is reversed following device feedback:
+  a left swipe selects the next tab and a right swipe selects the previous tab. Vertical gestures remain
   scrolling, horizontal gestures do not trigger browser Back, and swipe-generated
   clicks cannot accidentally open or play an item.
 - Albums, Artists, Playlists, Folders, and Discover retain independent scroll
