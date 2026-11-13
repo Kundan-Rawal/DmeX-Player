@@ -1812,7 +1812,7 @@ body {
     padding-right: 30px !important;
   }
 
-  .expanded-player-content, .mini-player-content {
+  .bottom-player .expanded-player-content, .mini-player-content {
     will-change: opacity, transform !important;
     backface-visibility: hidden !important;
     transform: translateZ(0) !important;

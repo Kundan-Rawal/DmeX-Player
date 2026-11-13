@@ -61,6 +61,7 @@ try {
     await page.waitForFunction(() => document.querySelector('.mep-queue .is-current strong')?.textContent === 'Open Water 3');
     const order = await page.evaluate(() => JSON.parse(localStorage.getItem('dmex_mobile_queue_v1')).entries.map(entry => entry.id));
     await page.locator('.mep-topbar').getByRole('button', { name: 'Close', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-mobile-player-sheet]').dataset.phase === 'closed');
     await page.getByRole('button', { name: 'Open play queue', exact: true }).click();
     assert.equal(await page.locator('.dmex-mobile-queue-spacer').getAttribute('data-count'), '80');
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('dmex_mobile_queue_v1')).entries.map(entry => entry.id)), order, 'Standalone and expanded views share one queue');

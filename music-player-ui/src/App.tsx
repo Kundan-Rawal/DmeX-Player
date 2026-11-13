@@ -40,6 +40,7 @@ import { BrandMark } from './components/common/BrandMark';
 import { MobileShell, MobileMiniPlayer } from './mobile/MobileShell';
 import { MobileLoadOptions, useMobilePlayback } from './mobile/useMobilePlayback';
 import { useMobileFeedback } from './mobile/useMobileFeedback';
+import { PlayerFrame, useMobilePlayerMotion } from './mobile/MobilePlayerMotion';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
 // IS_ANDROID gates every Android-specific optimisation in this file.
@@ -139,13 +140,8 @@ function App() {
   useEffect(() => { isExpandedRef.current = isExpanded; }, [isExpanded]);
 
   const [expandedContentReady, setExpandedContentReady] = useState(false);
-  useLayoutEffect(() => {
-    setExpandedContentReady(false);
-    if (!isExpanded) return;
-    const delay = IS_MOBILE && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 420 : 0;
-    const t = setTimeout(() => setExpandedContentReady(true), delay);
-    return () => clearTimeout(t);
-  }, [isExpanded]);
+  const mobileMiniRef = useRef<HTMLElement>(null), mobileSheetRef = useRef<HTMLDivElement>(null);
+  useMobilePlayerMotion(IS_MOBILE, isExpanded, mobileMiniRef, mobileSheetRef, setExpandedContentReady);
 
   
   const [showLyrics, setShowLyrics]         = useState(false);
@@ -1794,10 +1790,9 @@ function App() {
 
 
 
-        <footer className={`bottom-player ${isExpanded?'expanded':''}`}>
+        <PlayerFrame mobile={IS_MOBILE} expanded={isExpanded} miniRef={mobileMiniRef} mini={
           
-          {/* 1. Mini Player: Never unmounted, never display:none. Just faded out. */}
-          {IS_MOBILE ? <MobileMiniPlayer isExpanded={isExpanded} onExpand={() => setIsExpanded(true)} onQueue={() => setMobileQueueRequest(v => v + 1)}
+          IS_MOBILE ? <MobileMiniPlayer isExpanded={isExpanded} onExpand={() => setIsExpanded(true)} onQueue={() => setMobileQueueRequest(v => v + 1)}
             track={currentTrack} title={trackTitle} artist={trackArtist} art={albumArt} playing={isPlaying} busy={mobilePlayback.busy}
             onPlayPause={() => { void handlePlayPause(); }} onPrevious={handlePrev} onNext={() => handleNext()} time={currentTime} duration={duration} /> : <MiniPlayer
             isExpanded={isExpanded} setIsExpanded={setIsExpanded}
@@ -1806,10 +1801,10 @@ function App() {
             albumArt={albumArt} trackTitle={trackTitle} trackArtist={trackArtist}
             detectedProfile={detectedProfile} isPlaying={isPlaying}
             handlePlayPause={handlePlayPause} handlePrev={handlePrev} handleNext={handleNext}
-          />}
+          />}>
 
           {/* 2. Expanded Player: Hardware Accelerated Decoupled Layout */}
-          <div className="expanded-player-content" data-ready={expandedContentReady} aria-hidden={!isExpanded} style={{
+          <div ref={mobileSheetRef} className="expanded-player-content" data-mobile-player-sheet={IS_MOBILE || undefined} data-ready={expandedContentReady} aria-hidden={!isExpanded} inert={IS_MOBILE && !isExpanded} style={IS_MOBILE ? undefined : {
             opacity: isExpanded ? 1 : 0, 
             pointerEvents: isExpanded ? 'auto' : 'none',
             // CRITICAL FIX: 'fixed' decouples this heavy DOM tree from the parent's width/height animation!
@@ -2007,7 +2002,7 @@ function App() {
             </>
             )}
           </div>
-        </footer>
+        </PlayerFrame>
       </div>
     </div>
   );

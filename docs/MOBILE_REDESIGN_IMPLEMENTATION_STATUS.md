@@ -111,9 +111,10 @@ No music files or existing playlists were deleted during inspection.
 
 ## Motion, Haptics, and Queue Dragging
 
-- Tab content follows horizontal touch movement and enters with directional
-  transform/opacity motion. Detail navigation also transitions without mounting a
-  second library tree. The tab rail no longer cancels its own smooth centering.
+- Tab content follows horizontal touch movement. The later motion rework below
+  replaces the original directional fade with paired transform-only page motion,
+  retaining just the outgoing page during settling. The tab rail preserves smooth
+  centering and reserves stable label widths.
 - Menus, feedback messages, and button press states have short transitions. Native
   vertical scrolling/inertia is retained; saved-position restoration is immediate.
 - Queue drag capture belongs to the stable list container. A CSS specificity bug
@@ -186,6 +187,39 @@ No music files or existing playlists were deleted during inspection.
   Final on-device visual verification was skipped at the user's request; browser
   viewport checks do not establish physical-device frame pacing.
 
+## Player and Tab Motion Rework
+
+- The mobile mini-player no longer animates width, height, position, or its corner
+  radius into a full-screen container. `MobilePlayerMotion.tsx` keeps the rounded
+  pill in place and moves a separate, full-viewport sheet with a compositor
+  transform. The desktop player retains its existing structure and behavior.
+- Static artwork, text, and controls are already laid out during opening. The
+  library stays painted underneath until the sheet covers it. Ambient visuals
+  start after the motion finishes and two paint opportunities have passed; dust
+  and beat effects start in a later frame, with a short ambient opacity reveal.
+- Closing retains the existing visual layers until the sheet is offscreen instead
+  of immediately replacing them with black. Animation cancellation preserves the
+  displayed position for reversals; stale callbacks cannot restart hidden effects.
+- `MobileRouteViewport.tsx` replaces the independent swipe-reset and route-entry
+  animations. Finger movement translates the live page one-to-one. On release,
+  that same page remains mounted while the incoming page moves alongside it with
+  the same timing. Only one outgoing page is retained, then removed after landing.
+- Outgoing pages are inert and hidden from accessibility, with decorative CSS
+  animations paused. Scroll positions are restored when a retained page becomes
+  active again, including rapid Back navigation. Browser history does not compete
+  with the app's explicit nested-scroll restoration.
+- Tab labels reserve their selected width, so changing selection no longer moves
+  navbar snap targets. Scrolling/autoselection, swipe direction, haptics, queue
+  behavior, and the approved portrait/landscape player layouts remain intact.
+- Automated checks pass at 320x640, 360x800, and 800x360 for fixed geometry, a visible
+  library during opening, staged effects, cancelled opening, touch handoff without
+  a gap, exact landing, cancelled swipes, rapid tab taps, stable navbar widths, and
+  reduced motion. Landscape checks additionally pass through 1280x720.
+- Queue drag/haptics, remembered navigation, library/playlist workflows, branding,
+  desktop/mobile artwork colors, and expanded queue regressions pass. Browser frame
+  samples are diagnostic only, not certification of S25 or low-end-device pacing.
+- Built and installed the standalone Android debug APK. No FPS cap was added.
+
 ## Still Required Before Release
 
 1. **Native playback reliability (blueprint Phase E).** The new queue is currently
@@ -213,6 +247,8 @@ retained because the user explicitly requested that layout remain untouched.
 
 - `src/mobile/MobileShell.tsx`: mobile screens, menus, navigation, and mini-player.
 - `src/mobile/MobileShell.css`: scoped mobile browsing and collapsed-player styling.
+- `src/mobile/MobilePlayerMotion.tsx`: fixed mobile player overlay and motion lifecycle.
+- `src/mobile/MobileRouteViewport.tsx`: retained-page paging and touch-to-settle motion.
 - `src/mobile/queue.ts`: pure queue semantics.
 - `src/mobile/useMobilePlayback.ts`: queue loading, persistence, and listening events.
 - `src/mobile/MobileQueueList.tsx`: virtualized queue and reorder interaction.

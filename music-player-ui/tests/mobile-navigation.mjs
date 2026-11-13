@@ -29,6 +29,7 @@ try {
     const active = async id => {
       try { await page.waitForFunction(id => document.querySelector(`[data-tab="${id}"]`)?.getAttribute('aria-current') === 'page', id, { timeout: 8000 }); }
       catch (error) { console.log({ url: page.url(), errors, content: (await page.locator('body').innerText()).slice(0, 3000) }); await page.screenshot({ path: 'tests/artifacts/mobile-navigation-failure.png' }); throw error; }
+      await page.waitForFunction(() => document.querySelector('.dmex-mobile-main').dataset.motion === 'idle');
     };
     const swipe = async (dx, dy = 0) => {
       const rect = await page.locator('.dmex-mobile-main').boundingBox(), x = rect.x + rect.width * (dx < 0 ? .8 : .2), y = rect.y + Math.min(100, rect.height / 2);
@@ -56,7 +57,8 @@ try {
     assert.deepEqual(await page.locator('.dmex-mobile-album').evaluateAll(items => items.map(el => el.className)), shapes, 'Featured cover layout stays stable');
     await page.locator('.dmex-mobile-album').first().evaluate(el => el.click());
     await page.getByRole('button', { name: 'Back', exact: true }).click(); await active('albums');
-    assert.ok(Math.abs(await page.locator('.dmex-mobile-page-scroll').evaluate(el => el.scrollTop) - albumTop) < 2, 'Album position survives visiting an album');
+    const returnedAlbumTop = await page.locator('.dmex-mobile-page-scroll').evaluate(el => el.scrollTop);
+    assert.ok(Math.abs(returnedAlbumTop - albumTop) < 2, `Album position survives visiting an album: expected ${albumTop}, got ${returnedAlbumTop}`);
     await swipe(-viewport.width * .55); await active('artists');
     await page.waitForFunction(() => document.querySelector('.dmex-mobile-artist-row img')?.naturalWidth > 0);
     const avatar = await page.locator('.dmex-mobile-artist-row .dmex-artwork').first().evaluate(el => ({ width: el.clientWidth, height: el.clientHeight, radius: getComputedStyle(el).borderRadius }));

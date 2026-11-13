@@ -78,7 +78,14 @@ interface MobileExpandedPlayerProps {
 
 
 export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => {
-  const visualsReady = (p.contentReady ?? p.isExpanded ?? true) && (p.isExpanded ?? true);
+  const visualsReady = p.contentReady ?? p.isExpanded ?? true;
+  const [effectsReady, setEffectsReady] = useState(false);
+  useEffect(() => {
+    if (!visualsReady) { setEffectsReady(false); return; }
+    let next = 0;
+    const frame = requestAnimationFrame(() => { next = requestAnimationFrame(() => setEffectsReady(true)); });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(next); };
+  }, [visualsReady]);
 
   // 2. Define the TASTES array
   const TASTES: { id: Taste; icon: React.ReactNode; label: string }[] = [
@@ -215,12 +222,12 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
 
   return (
     <div className="mep-root" data-visuals-ready={visualsReady}>
-      {visualsReady && <AmbientBackground
+      {visualsReady && <div className="mep-atmosphere"><AmbientBackground
         isExpandedRef={p.isExpandedRef} audioLevelRef={p.audioLevelRef} spatialData={p.spatialData} visMode={p.visMode}
         themeColor={p.themeColor} isDarkMode={p.isDarkMode} audioLevel={p.audioLevel}
-      />}
+      /></div>}
 
-      {visualsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} isDarkMode={p.isDarkMode} />}
+      {effectsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BDustCanvas isExpanded={p.isExpanded} isDarkMode={p.isDarkMode} />}
 
       {/* ── TOP BAR ──────────────── */}
       <div className="mep-topbar">
@@ -277,7 +284,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             
             {/* 1. Album Art */}
             {!panelOpen && <div className="mep-art-wrap">
-              {visualsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples spatialData={p.spatialData} isPlaying={p.isPlaying} />}
+              {effectsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples spatialData={p.spatialData} isPlaying={p.isPlaying && (p.isExpanded ?? true)} />}
               <button type="button" className="mep-art mep-art-button" aria-label="Open lyrics" aria-controls="mep-content-panel" title={p.lyrics.length ? 'Synced lyrics available' : 'Find lyrics'} onClick={() => setPanel('lyrics')} style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
                 {!p.albumArt && <span className="mep-art-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={48} /></span>}
                 <span className="lyrics-art-badge" data-lyrics-status={p.lyrics.length ? 'synced' : 'missing'}><Captions size={12} />{p.lyrics.length ? 'Synced lyrics' : 'No synced lyrics'}</span>

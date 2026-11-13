@@ -70,7 +70,7 @@ try {
     await page.getByRole('button', { name: 'Open play queue', exact: true }).click();
     await page.getByRole('heading', { name: 'Play queue', exact: true }).waitFor();
     assert.equal(await page.locator('.dmex-mobile-queue-spacer').getAttribute('data-count'), '80', 'Browsing favourites must not change queue');
-    const queueBounds = await page.locator('.dmex-mobile-track-scroll').boundingBox();
+    const queueBounds = await page.getByRole('list', { name: 'Queue tracks', exact: true }).boundingBox();
     assert.ok(Math.abs(mini.y - queueBounds.y - queueBounds.height) <= 1, 'Queue also reaches the mini-player without a grey gap');
     assert.ok(await page.locator('.dmex-mobile-queue-row').count() < 30, 'Queue is virtualized');
     await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -111,7 +111,7 @@ try {
     await page.getByRole('navigation', { name: 'Library views' }).waitFor();
     await page.getByRole('button', { name: 'Playlists', exact: true }).click();
     await page.getByRole('button', { name: /One tap collection.*2 tracks/ }).click();
-    assert.equal(await page.locator('.dmex-mobile-track-play').first().getAttribute('aria-label'), 'Play Paper Lanterns 2', 'Playlist order survives remount');
+    assert.equal(await page.locator('.dmex-mobile-route-page[data-current=true] .dmex-mobile-track-play').first().getAttribute('aria-label'), 'Play Paper Lanterns 2', 'Playlist order survives remount');
     await page.getByRole('button', { name: 'Open play queue', exact: true }).click();
     assert.equal(await page.locator('.dmex-mobile-queue-spacer').getAttribute('data-count'), '80', 'Queue survives remount independently of playlist edits');
     await page.getByRole('button', { name: 'Play', exact: true }).waitFor();

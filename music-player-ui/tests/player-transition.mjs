@@ -24,6 +24,7 @@ try {
     await page.screenshot({ path: `tests/artifacts/expanded-transition-${width}.png` });
     await page.locator('.mep-topbar').getByRole('button', { name: 'Close', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.expanded-player-content').getAttribute('aria-hidden') === 'true');
+    await page.waitForFunction(() => document.querySelector('.expanded-player-content').dataset.phase === 'closed');
     assert.equal(await page.locator('.mep-root .ambient-background').count(), 0);
     await page.waitForTimeout(500);
     assert.equal(await page.locator('.dmex-mobile-mini').evaluate(node => getComputedStyle(node).opacity), '1');

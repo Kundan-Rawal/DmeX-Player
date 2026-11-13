@@ -12,10 +12,10 @@ try {
     await page.goto(base + '/tests/mobile-redesign.html?mobile');
     await page.getByRole('button', { name: 'Play Night Drive 1', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Albums', exact: true }).click();
-    assert.ok(await page.locator('.dmex-mobile-main').evaluate(el => el.getAnimations().some(animation => animation.playState === 'running')), 'Tab content has a real transform/opacity transition');
+    assert.ok(await page.locator('.dmex-mobile-main').evaluate(el => el.getAnimations({ subtree: true }).some(animation => animation.playState === 'running')), 'Tab content has a real transform transition');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.getByRole('button', { name: 'Tracks', exact: true }).click();
-    assert.equal(await page.locator('.dmex-mobile-main').evaluate(el => el.getAnimations().filter(animation => animation.playState === 'running').length), 0);
+    assert.equal(await page.locator('.dmex-mobile-main').evaluate(el => el.getAnimations({ subtree: true }).filter(animation => animation.playState === 'running').length), 0);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.getByRole('button', { name: 'Play Night Drive 1', exact: true }).click();
     await page.getByRole('button', { name: 'Pause', exact: true }).click();
@@ -31,7 +31,7 @@ try {
       const handle = page.locator(`[data-queue-id="${id}"] .dmex-mobile-drag-handle`);
       await handle.waitFor();
       assert.equal(await handle.evaluate(el => getComputedStyle(el).touchAction), 'none', 'Drag handle cannot be claimed by native scrolling');
-      await page.waitForFunction(() => document.querySelector('.dmex-mobile-main').getAnimations().every(animation => animation.playState !== 'running'));
+      await page.waitForFunction(() => document.querySelector('.dmex-mobile-main').dataset.motion === 'idle');
       const rect = await handle.boundingBox(), bounds = await queue.boundingBox();
       const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });

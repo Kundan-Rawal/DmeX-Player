@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Check, CheckCircle2, ChevronRight, Circle, Clock3, Disc3, Folder, GripVertical, Heart, History, ListMusic, ListPlus, LoaderCircle, MoreHorizontal, Music2, Pause, Play, Plus, Search, Settings, Shuffle, SkipBack, SkipForward, Trash2, Undo2, Users, X } from 'lucide-react';
 import { Track, CustomPlaylist } from '../types';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -16,7 +16,7 @@ import { MobileQueueList } from './MobileQueueList';
 import { MobilePaletteAmbient } from './MobilePaletteAmbient';
 import { MobileCollectionArtwork } from './MobileCollectionArtwork';
 import { haptic, hapticsEnabled, setHapticsEnabled } from './haptics';
-import { useMobileRouteMotion } from './useMobileRouteMotion';
+import { MobilePageActiveContext, MobileRouteViewport } from './MobileRouteViewport';
 import { useArtistArtwork } from './useArtistArtwork';
 import './MobileShell.css';
 
@@ -47,13 +47,15 @@ function useNavigation(expanded: boolean, collapse: () => void) {
     window.history[push ? 'pushState' : 'replaceState']({ dmexMobile: session.current, navigation: value }, '');
   }, []);
   useEffect(() => {
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
     window.history.replaceState({ dmexMobile: session.current, navigation: initial.current }, '');
     const back = (event: PopStateEvent) => {
       const value: Navigation = event.state?.dmexMobile === session.current ? event.state.navigation : initial.current;
       stateRef.current = value; setState(value); if (!value.expanded) collapseRef.current();
     };
     window.addEventListener('popstate', back);
-    return () => window.removeEventListener('popstate', back);
+    return () => { window.removeEventListener('popstate', back); window.history.scrollRestoration = previousRestoration; };
   }, []);
   useEffect(() => {
     if (expanded && !stateRef.current.expanded) update({ ...stateRef.current, sheet: null, expanded: true });
@@ -79,80 +81,9 @@ function Artwork({ track, src, label = '' }: { track?: Track; src?: string; labe
 }
 function RememberedScroll({ scrollKey, positions, className = '', children }: { scrollKey: string; positions: React.RefObject<Record<string, number>>; className?: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { if (ref.current) ref.current.scrollTop = positions.current[scrollKey] || 0; }, [scrollKey, positions]);
-  return <div ref={ref} className={`dmex-mobile-page-scroll ${className}`} data-scroll-key={scrollKey} onScroll={event => { positions.current[scrollKey] = event.currentTarget.scrollTop; }}>{children}</div>;
-}
-function useTabSwipe(enabled: boolean, active: MobileTab | null, onChange: (tab: MobileTab) => void) {
-  const surface = useRef<HTMLElement>(null);
-  const gesture = useRef<{ x: number; y: number; horizontal: boolean; rejected: boolean; offset: number } | null>(null);
-  const frame = useRef(0);
-  const moved = useRef(false);
-  const resetMotion = (animate: boolean) => {
-    cancelAnimationFrame(frame.current); frame.current = 0;
-    const element = surface.current; if (!element) return;
-    const transform = element.style.transform, opacity = element.style.opacity;
-    element.style.transform = ''; element.style.opacity = ''; element.style.willChange = '';
-    if (animate && transform && !matchMedia('(prefers-reduced-motion: reduce)').matches) element.animate([{ transform, opacity }, { transform: 'translate3d(0,0,0)', opacity: 1 }], { duration: 180, easing: 'cubic-bezier(.22,1,.36,1)' });
-  };
-  useEffect(() => {
-    const element = surface.current; if (!element) return;
-    const move = (event: TouchEvent) => {
-      const start = gesture.current;
-      if (!start || start.rejected || event.touches.length !== 1) return;
-      const dx = Math.abs(event.touches[0].clientX - start.x), dy = Math.abs(event.touches[0].clientY - start.y);
-      if (dx > 10 && dx > dy * 1.4) {
-        if (event.cancelable) event.preventDefault();
-        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          if (!start.horizontal) element.getAnimations().forEach(animation => animation.cancel());
-          start.offset = Math.max(-120, Math.min(120, (event.touches[0].clientX - start.x) * .22));
-          if (!frame.current) frame.current = requestAnimationFrame(() => {
-            frame.current = 0;
-            if (!gesture.current) return;
-            element.style.willChange = 'transform, opacity';
-            element.style.transform = `translate3d(${gesture.current.offset}px,0,0)`;
-            element.style.opacity = String(1 - Math.abs(gesture.current.offset) / 600);
-          });
-        }
-      }
-    };
-    element.addEventListener('touchmove', move, { passive: false });
-    return () => { element.removeEventListener('touchmove', move); cancelAnimationFrame(frame.current); };
-  }, []);
-  const finish = (x: number, y: number) => {
-    const start = gesture.current; gesture.current = null;
-    if (!start || start.rejected || !active || !enabled) { resetMotion(true); return; }
-    const dx = x - start.x, dy = y - start.y;
-    if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.4) { resetMotion(true); return; }
-    moved.current = true;
-    const index = TABS.findIndex(tab => tab.id === active), target = index + (dx < 0 ? 1 : -1);
-    const valid = target >= 0 && target < TABS.length;
-    resetMotion(!valid);
-    if (valid) { haptic('selection'); onChange(TABS[target].id); }
-  };
-  return {
-    ref: surface,
-    onTouchStart: (event: React.TouchEvent) => {
-      moved.current = false;
-      const target = event.target as Element;
-      if (!enabled || event.touches.length !== 1 || target.closest('input,textarea,select,[role="slider"],.dmex-mobile-drag-handle,.custom-select')) { gesture.current = null; return; }
-      const touch = event.touches[0]; gesture.current = { x: touch.clientX, y: touch.clientY, horizontal: false, rejected: false, offset: 0 };
-    },
-    onTouchMove: (event: React.TouchEvent) => {
-      const start = gesture.current; if (!start) return;
-      if (event.touches.length !== 1) { gesture.current = null; resetMotion(true); return; }
-      const touch = event.touches[0], dx = Math.abs(touch.clientX - start.x), dy = Math.abs(touch.clientY - start.y);
-      if (!start.horizontal && !start.rejected && Math.max(dx, dy) > 10) {
-        start.horizontal = dx > dy * 1.4; start.rejected = !start.horizontal;
-      }
-    },
-    onTouchEnd: (event: React.TouchEvent) => { if (event.changedTouches.length) finish(event.changedTouches[0].clientX, event.changedTouches[0].clientY); },
-    onTouchCancel: () => { gesture.current = null; resetMotion(true); },
-    onClickCapture: (event: React.MouseEvent) => {
-      const native = event.nativeEvent as PointerEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } };
-      if (moved.current && (native.pointerType === 'touch' || native.sourceCapabilities?.firesTouchEvents)) { event.preventDefault(); event.stopPropagation(); }
-      moved.current = false;
-    },
-  };
+  const active = useContext(MobilePageActiveContext);
+  useLayoutEffect(() => { if (active && ref.current) ref.current.scrollTop = positions.current[scrollKey] || 0; }, [active, scrollKey, positions]);
+  return <div ref={ref} className={`dmex-mobile-page-scroll ${className}`} data-scroll-key={scrollKey} onScroll={event => { if (!event.currentTarget.closest('[data-current=false]')) positions.current[scrollKey] = event.currentTarget.scrollTop; }}>{children}</div>;
 }
 function MobileTabs({ active, onChange }: { active: MobileTab; onChange: (tab: MobileTab) => void }) {
   const ref = useRef<HTMLElement>(null), programmatic = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -171,25 +102,27 @@ function MobileTabs({ active, onChange }: { active: MobileTab; onChange: (tab: M
       const nearest = [...nav.querySelectorAll<HTMLButtonElement>('button')].sort((a, b) => Math.abs(a.offsetLeft + a.offsetWidth / 2 - middle) - Math.abs(b.offsetLeft + b.offsetWidth / 2 - middle))[0];
       if (nearest?.dataset.tab && nearest.dataset.tab !== activeRef.current) { haptic('selection'); onChange(nearest.dataset.tab as MobileTab); }
     }, 160);
-  }}><span className="dmex-tab-spacer" />{TABS.map(tab => <button type="button" key={tab.id} data-tab={tab.id} aria-current={active === tab.id ? 'page' : undefined} onClick={() => onChange(tab.id)}>{tab.label}</button>)}<span className="dmex-tab-spacer" /></nav>;
+  }}><span className="dmex-tab-spacer" />{TABS.map(tab => <button type="button" key={tab.id} data-tab={tab.id} aria-current={active === tab.id ? 'page' : undefined} onClick={() => onChange(tab.id)}><span className="dmex-tab-label">{tab.label}</span><span className="dmex-tab-measure" aria-hidden="true">{tab.label}</span></button>)}<span className="dmex-tab-spacer" /></nav>;
 }
 function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, onSelect, scrollKey, positions, onReorder }: {
   tracks: Track[]; currentPath?: string; favourites: Set<string>; selected: string[]; onPlay: (track: Track) => void;
   onMenu: (track: Track) => void; onSelect: (paths: string[]) => void; scrollKey: string; positions: React.RefObject<Record<string, number>>; onReorder?: (from: Track, to: Track) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null), [scroll, setScroll] = useState(0), [height, setHeight] = useState(600);
+  const active = useContext(MobilePageActiveContext);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined), pressed = useRef(false), start = useRef({ x: 0, y: 0 });
   const [rowHeight, setRowHeight] = useState(76);
   const reorder = useRef<{ track: Track; target: number } | null>(null);
   useLayoutEffect(() => {
+    if (!active) return;
     const el = ref.current!; el.scrollTop = positions.current[scrollKey] || 0; setScroll(el.scrollTop);
     const observer = new ResizeObserver(() => { setHeight(el.clientHeight); setRowHeight(parseFloat(getComputedStyle(el).getPropertyValue('--dmex-row-height')) || 76); }); observer.observe(el);
     return () => observer.disconnect();
-  }, [scrollKey, positions]);
+  }, [active, scrollKey, positions]);
   useEffect(() => () => clearTimeout(timer.current), []);
   const begin = Math.max(0, Math.floor(scroll / rowHeight) - 4), end = Math.min(tracks.length, Math.ceil((scroll + height) / rowHeight) + 4);
   const toggle = (track: Track) => onSelect(selected.includes(track.path) ? selected.filter(p => p !== track.path) : [...selected, track.path]);
-  return <div ref={ref} className="dmex-mobile-track-scroll" role="list" aria-label="Tracks" onScroll={event => { const top = event.currentTarget.scrollTop; positions.current[scrollKey] = top; setScroll(top); }}>
+  return <div ref={ref} className="dmex-mobile-track-scroll" role="list" aria-label="Tracks" onScroll={event => { const top = event.currentTarget.scrollTop; if (!event.currentTarget.closest('[data-current=false]')) positions.current[scrollKey] = top; setScroll(top); }}>
     <div className="dmex-mobile-track-spacer" style={{ height: tracks.length * rowHeight }}>
       {tracks.slice(begin, end).map((track, i) => <div role="listitem" className={'dmex-mobile-track' + (track.path === currentPath ? ' is-current' : '')} key={track.path} style={{ top: (begin + i) * rowHeight, height: rowHeight }}>
         {track.path === currentPath && <MobilePaletteAmbient className="dmex-mobile-track-ambient" />}
@@ -290,8 +223,6 @@ export function MobileShell(p: Props) {
   const queueIndex = p.playback.queue.entries.findIndex(entry => entry.id === sheet?.queueId);
   const currentQueueIndex = p.playback.queue.entries.findIndex(entry => entry.id === p.playback.queue.currentId);
   const isList = (root && ['tracks', 'favourites'].includes(tab!)) || ['collection', 'playlist', 'playlistEdit', 'album', 'artist', 'folder'].includes(route.kind);
-  const tabSwipe = useTabSwipe(root && !sheet && !state.selected.length && !p.isExpanded, tab, value => nav.navigate({ kind: 'library', tab: value }, true));
-  useMobileRouteMotion(tabSwipe.ref, route, state.routes.length, p.isExpanded);
   return <div className="dmex-mobile-shell" data-player-open={p.isExpanded}>
     <header className={'dmex-mobile-header' + (!root ? ' is-detail' : '')}>
       {!root && <button className="dmex-mobile-icon" aria-label="Back" onClick={nav.back}><ArrowLeft size={23} /></button>}
@@ -304,7 +235,12 @@ export function MobileShell(p: Props) {
     {root && !state.selected.length && <MobileTabs active={tab!} onChange={value => nav.navigate({ kind: 'library', tab: value }, true)} />}
     {p.scanning && <button className="dmex-mobile-job-strip" onClick={() => nav.navigate({ kind: 'activity' })}><LoaderCircle size={15} /><span>{p.scanMessage || 'Updating library'}</span><ChevronRight size={17} /></button>}
     {p.playback.error && <div className="dmex-mobile-error" role="alert"><span>{p.playback.error}</span><button onClick={() => void p.playback.retry()}>Retry</button><button className="dmex-mobile-icon" aria-label="Dismiss playback error" onClick={p.playback.dismissError}><X size={17} /></button></div>}
-    <main className="dmex-mobile-main" {...tabSwipe} inert={!!sheet} aria-hidden={sheet ? true : undefined} aria-busy={!p.ready}>
+    <MobileRouteViewport route={route} depth={state.routes.length} disabled={!!sheet} busy={!p.ready}
+      swipeEnabled={root && !sheet && !state.selected.length && !p.isExpanded} onSwipe={direction => {
+        const index = TABS.findIndex(value => value.id === tab), next = TABS[index + direction];
+        if (!next) return false;
+        nav.navigate({ kind: 'library', tab: next.id }, true); return true;
+      }}>
       {!p.ready || (p.scanning && !p.tracks.length) ? p.loadError ? <div className="dmex-mobile-empty" role="alert"><Music2 size={34} /><h2>Library unavailable</h2><p>{p.loadError}</p><button className="dmex-mobile-primary" onClick={p.onRetryLibrary}>Retry loading library</button></div> : <div className="dmex-mobile-loading" role="status" aria-label="Loading music library">{Array.from({ length: 9 }, (_, index) => <div className="dmex-mobile-loading-row" aria-hidden="true" key={index}><span className="dmex-mobile-loading-art" /><span className="dmex-mobile-loading-text" /></div>)}</div> : <>
       {route.kind === 'playlistEdit' && <div className="dmex-mobile-selection-bar"><span>Drag tracks to reorder</span><button onClick={nav.back}>Done</button></div>}
       {state.selected.length > 0 && <div className="dmex-mobile-selection-bar"><button onClick={() => nav.select(list.map(t => t.path))}>Select all</button><button aria-label="Play selected" onClick={() => { if (selection[0]) { void p.playback.start(selection, selection[0], 'Selected tracks'); nav.back(); } }}><Play size={19} /></button><button aria-label="Queue selected" onClick={() => { p.playback.add(selection, false); notify(`${countLabel(selection.length)} added to queue`); }}><ListPlus size={21} /></button><button aria-label="Add selection to playlist" onClick={() => nav.sheet({ kind: 'addPlaylist', paths: state.selected })}><Plus size={22} /></button></div>}
@@ -342,7 +278,7 @@ export function MobileShell(p: Props) {
         <section className="dmex-mobile-settings-group"><h2>Audio profile analysis</h2><p className="dmex-mobile-secondary">Optional analysis. Your music plays without it.</p><p>{p.profileJob.active ? `${p.profileJob.done} of ${p.profileJob.total} analyzed` : countLabel(p.tracks.filter(t => !t.profile).length) + ' not analyzed'}</p>{p.profileJob.active ? <div className="dmex-mobile-inline-actions"><button onClick={p.profileJob.paused ? p.profileJob.resume : p.profileJob.pause}>{p.profileJob.paused ? 'Resume' : 'Pause'}</button><button onClick={p.profileJob.stop}>Stop</button></div> : <button className="dmex-mobile-text-button" onClick={p.profileJob.start}>Analyze audio profiles</button>}</section>
       </div>}
       </>}
-    </main>
+    </MobileRouteViewport>
     {notice && <div className="dmex-mobile-snackbar" role="status"><span>{notice}</span>{undo && <button aria-label="Undo" onClick={() => { undo(); setNotice('Change undone'); setUndo(null); }}><Undo2 size={17} />Undo</button>}<button className="dmex-mobile-icon" aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {sheet?.kind === 'folder' && <FolderModal onClose={nav.closeSheet} onScan={path => { void p.onScan(path); }} />}
     {sheet && sheet.kind !== 'folder' && sheet.kind !== 'replaceQueue' && <SheetFrame title={sheetTitle || (sheet.kind === 'track' ? track?.name || 'Track options' : sheet.kind === 'sort' ? 'Sort tracks' : sheet.kind === 'libraryMenu' ? 'Library options' : sheet.kind === 'addPlaylist' ? 'Add to playlist' : sheet.kind === 'createPlaylist' ? 'Create playlist' : sheet.kind === 'renamePlaylist' ? 'Rename playlist' : sheet.kind === 'deletePlaylist' ? 'Delete playlist?' : 'Playlist options')} close={nav.closeSheet}>

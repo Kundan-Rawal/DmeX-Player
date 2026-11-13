@@ -1706,6 +1706,10 @@
 .mep-queue-menu header button{width:36px;justify-content:center}
 
 .mep-track-details { display: contents; }
+.mep-atmosphere{position:absolute;inset:0;pointer-events:none;animation:mep-atmosphere-enter .18s ease both}
+.mep-root[data-visuals-ready=false] .hd-diamond{animation-play-state:paused!important}
+@keyframes mep-atmosphere-enter{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.mep-atmosphere{animation:none}}
 
 /* Portrait's centered composition, with side rails for actions and taste profiles. */
 @media (orientation: landscape) {
