@@ -1707,13 +1707,13 @@
 
 .mep-track-details { display: contents; }
 
-/* Equal side columns keep the artwork and its local ripple origin at screen center. */
+/* Portrait's centered composition, with side rails for actions and taste profiles. */
 @media (orientation: landscape) {
   .mep-root {
     --mep-landscape-x: max(16px, var(--dmex-inset-left, 0px), var(--dmex-inset-right, 0px), env(safe-area-inset-left), env(safe-area-inset-right));
-    --mep-landscape-y: max(52px, calc(var(--dmex-inset-top, 0px) + 44px), calc(var(--dmex-inset-bottom, 0px) + 12px));
-    --mep-landscape-art: min(244px, 26vw, 54dvh, calc(100dvh - var(--mep-landscape-y) - var(--mep-landscape-y)));
-    --mep-landscape-side: calc((100% - var(--mep-landscape-x) - var(--mep-landscape-x) - var(--mep-landscape-art) - 32px) / 2);
+    --mep-landscape-top: max(52px, calc(var(--dmex-inset-top, env(safe-area-inset-top)) + 48px));
+    --mep-landscape-bottom: max(8px, var(--dmex-inset-bottom, env(safe-area-inset-bottom)));
+    --mep-landscape-rail: 120px;
   }
   .mep-topbar {
     position: absolute;
@@ -1729,73 +1729,81 @@
     position: absolute;
     inset: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--mep-landscape-art) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: var(--mep-landscape-rail) minmax(0, 1fr) var(--mep-landscape-rail);
+    grid-template-rows: minmax(0, 250px) 38px 30px 48px;
     align-items: center;
-    column-gap: 16px;
-    padding: var(--mep-landscape-y) var(--mep-landscape-x);
+    align-content: center;
+    gap: 6px 16px;
+    padding: var(--mep-landscape-top) var(--mep-landscape-x) var(--mep-landscape-bottom);
     box-sizing: border-box;
     min-width: 0;
     min-height: 0;
+    justify-items: center;
   }
   .mep-dynamic-upper { display: contents; }
   .mep-art-wrap {
     grid-column: 2;
     grid-row: 1;
-    width: var(--mep-landscape-art);
-    height: var(--mep-landscape-art);
+    width: auto;
+    height: 100%;
+    max-height: 250px;
+    max-width: 100%;
+    aspect-ratio: 1;
     margin: 0;
     z-index: 1;
   }
   .mep-art { width: 100%; height: 100%; max-width: none; }
   .mep-neon-ripple { width: 100%; max-width: none; box-sizing: border-box; }
-  .mep-track-details {
-    grid-column: 1;
-    grid-row: 1;
-    display: flex;
+  .mep-track-details { display: contents; }
+  .mep-track-header { grid-area: 2 / 2; margin: 0; min-width: 0; max-width: 520px; }
+  .mep-title-wrap, .mep-artist-wrap { min-width: 0; overflow: hidden; }
+  .mep-title { font-size: 18px; line-height: 22px; }
+  .mep-artist { font-size: 12px; }
+  .mep-taste-row {
+    grid-area: 1 / 3 / 4;
     flex-direction: column;
-    justify-content: flex-start;
-    gap: 16px;
-    max-height: 100%;
-    min-width: 0;
-    overflow: auto;
+    align-self: center;
+    width: 100%;
+    gap: 12px;
     position: relative;
     z-index: 20;
   }
-  .mep-track-header { margin: 0; flex-shrink: 0; }
-  .mep-title-wrap, .mep-artist-wrap { min-width: 0; overflow: hidden; }
-  .mep-title { font-size: 20px; }
-  .mep-artist { font-size: 12px; }
-  .mep-taste-row { flex-direction: column; gap: 2px; }
-  .mep-taste-pill { min-height: 40px; padding: 4px 8px; font-size: 12px; }
-  .mep-controls-zone {
-    grid-column: 3;
-    grid-row: 1;
-    min-width: 0;
-    max-height: 100%;
+  .mep-taste-pill { min-height: 44px; padding: 4px 6px; font-size: 12px; justify-content: flex-start; }
+  .mep-controls-zone { display: contents; }
+  .mep-actions {
+    grid-area: 1 / 1 / 4;
+    flex-direction: column;
+    justify-content: center;
+    gap: 12px;
     padding: 0;
-    overflow: auto;
+    margin: 0;
+    position: relative;
+    z-index: 20;
   }
-  .mep-actions { padding: 0; margin-bottom: 8px; }
   .mep-icon-btn { width: 44px; height: 44px; padding: 8px; flex-shrink: 0; }
-  .mep-seek { margin-bottom: 8px; }
+  .mep-seek { grid-area: 3 / 2; max-width: 520px; min-width: 0; margin: 0; z-index: 20; }
   .mep-seek-bar { margin-left: 0; margin-right: 0; }
+  .mep-seek-labels { margin-top: 6px; font-size: 10px; }
   .mep-playback {
+    grid-area: 4 / 1 / 5 / -1;
+    width: 100%;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: 56px 44px;
+    grid-template-columns: minmax(44px, 1fr) 56px 64px 56px minmax(44px, 1fr);
+    grid-template-rows: 48px;
     justify-items: center;
     padding: 0;
+    position: relative;
+    z-index: 20;
   }
-  .mep-playback > :nth-child(1) { grid-area: 2 / 1; }
-  .mep-playback > :nth-child(2) { grid-area: 1 / 1; }
-  .mep-playback > :nth-child(3) { grid-area: 1 / 2; }
-  .mep-playback > :nth-child(4) { grid-area: 1 / 3; }
-  .mep-playback > :nth-child(5) { grid-area: 2 / 3; }
+  .mep-play-btn { width: 48px; height: 48px; }
+  .mep-playback > :first-child { justify-self: start; margin-left: calc((var(--mep-landscape-rail) - 44px) / 2); }
+  .mep-playback > :last-child { justify-self: end; margin-right: calc((var(--mep-landscape-rail) - 44px) / 2); }
   .mep-panel {
-    grid-column: 1;
+    grid-column: 2;
     grid-row: 1;
+    width: 100%;
     height: 100%;
+    max-width: 520px;
     max-height: none;
     min-width: 0;
     padding: 0;
@@ -1803,12 +1811,16 @@
     z-index: 20;
   }
   .mep-panel-dismiss {
-    top: calc(var(--mep-landscape-y) + 8px);
-    left: calc(var(--mep-landscape-x) + var(--mep-landscape-side) - 40px);
-    right: auto;
+    grid-area: 1 / 2;
+    position: relative;
+    justify-self: end;
+    align-self: start;
+    top: 8px;
+    right: 8px;
+    margin-right: max(0px, calc((100% - 520px) / 2));
   }
   .mep-lyrics-scroll { padding: 48px 12px 32px; }
-  .mep-dsp-scroll { padding: 40px 0 16px; }
+  .mep-dsp-scroll { padding: 40px 0 16px; min-height: 0; }
   .mep-queue { height: 100%; }
   .mep-root .player-track-menu {
     top: calc(54px + var(--dmex-inset-top, 0px));
@@ -1818,7 +1830,11 @@
 }
 
 @media (orientation: landscape) and (max-height: 340px) {
-  .mep-track-details { gap: 8px; }
-  .mep-title { font-size: 18px; }
-  .mep-taste-pill { min-height: 36px; }
+  .mep-body { row-gap: 4px; }
+  .mep-actions, .mep-taste-row { gap: 4px; }
+}
+
+@media (orientation: landscape) and (max-width: 700px) {
+  .mep-root { --mep-landscape-rail: 100px; }
+  .mep-body { column-gap: 12px; }
 }

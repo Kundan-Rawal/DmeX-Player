@@ -160,26 +160,29 @@ No music files or existing playlists were deleted during inspection.
 
 ## Landscape Expanded Player
 
-- Landscape now uses equal side columns around a screen-centered square cover:
-  track information and taste controls on the left, artwork in the middle, and
-  actions/seek/transport on the right. Portrait geometry and desktop are unchanged.
-- Lyrics, Queue, and DSP replace the left-hand details only in landscape. Artwork
-  remains mounted in the center, and transport controls do not move between panels.
+- Revised to match the user's landscape sketch: the portrait-style top bar stays
+  above a horizontally centered cover, with title/artist, progress, and transport
+  stacked below. Favorite/Queue/DSP form the left rail; taste profiles form the
+  right rail. Shuffle and repeat align with those rails along the bottom.
+- Lyrics, Queue, and DSP replace only the central artwork stage in landscape.
+  Metadata, progress, transport, and both side rails remain stationary and visible.
+  Portrait geometry and the desktop layout remain unchanged.
 - Beat ripples are sized and positioned relative to the artwork wrapper rather
   than the viewport. Existing full-screen album-color ambience remains intact.
-- Safe insets are applied symmetrically to preserve the visual center. Side panels
-  scroll independently on short screens; track options are constrained to the
+- Horizontal safe insets are applied symmetrically to preserve the visual center.
+  The central panel scrolls on short screens; track options are constrained to the
   available height. Previous/next hold-to-seek handlers remain unchanged.
 - Dust positions are reprojected on rotation. Particle count, fixed 1-5px sizes,
   velocity, beat detection, and uncapped animation timing remain unchanged.
 - Browser checks pass at 640x320, 800x360, 915x412, and 1280x720: exact artwork/ripple
-  centers during animation, nonblank moving canvas, onscreen controls, panel
-  placement, safe insets, and rotation back to the original portrait layout.
+  centers during animation, nonblank moving canvas, onscreen controls, ordered
+  metadata/progress/transport, artwork-only panel replacement, safe insets, and
+  rotation back to the original portrait layout.
 - Integrated checks cover loaded cover bitmaps, a virtualized translucent queue,
   and touch reordering with edge auto-scroll in the short landscape panel.
 - Existing portrait geometry/queue, desktop/Android visualizer, and DSP regression
   checks pass, including expanded-player opening/closing and deferred visuals.
-  The standalone Android debug APK was built, installed, and launched successfully.
+  The standalone Android debug APK was built and installed successfully.
   Final on-device visual verification was skipped at the user's request; browser
   viewport checks do not establish physical-device frame pacing.
 

@@ -9,7 +9,6 @@ await mkdir(new URL('./artifacts/', import.meta.url), { recursive: true });
 const same = (a, b, message) => assert.ok(['x', 'y', 'width', 'height'].every(k => Math.abs(a[k] - b[k]) < .2), message);
 const center = (rect, viewport) => {
   assert.ok(Math.abs(rect.x + rect.width / 2 - viewport.width / 2) < .2, 'Artwork horizontally centered');
-  assert.ok(Math.abs(rect.y + rect.height / 2 - viewport.height / 2) < .2, 'Artwork vertically centered');
 };
 const inside = (rect, viewport, name) => assert.ok(rect && rect.x >= -.2 && rect.y >= -.2 && rect.x + rect.width <= viewport.width + .2 && rect.y + rect.height <= viewport.height + .2, `${name} stays onscreen: ${JSON.stringify(rect)}`);
 const canvasSignature = page => page.evaluate(() => {
@@ -30,11 +29,18 @@ try {
     await page.waitForTimeout(500);
     const art = await page.locator('.mep-art').boundingBox();
     center(art, viewport);
-    for (const selector of ['.mep-track-details', '.mep-controls-zone', '.mep-actions button', '.mep-playback button', '.mep-seek-bar', '.mep-topbar-btn']) {
+    for (const selector of ['.mep-track-header', '.mep-taste-row button', '.mep-actions button', '.mep-playback button', '.mep-seek-bar', '.mep-topbar-btn']) {
       for (const rect of await page.locator(selector).evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }))) inside(rect, viewport, selector);
     }
-    const controls = await page.locator('.mep-controls-zone').boundingBox();
-    assert.ok(controls.x >= art.x + art.width + 15, 'Controls do not overlap artwork');
+    const fixedSelectors = ['.mep-track-header', '.mep-actions', '.mep-taste-row', '.mep-seek', '.mep-playback'];
+    const fixed = await Promise.all(fixedSelectors.map(selector => page.locator(selector).boundingBox()));
+    const [header, actions, profiles, seek, transport] = fixed;
+    assert.ok(header.y >= art.y + art.height, 'Title and artist sit below the cover');
+    assert.ok(seek.y >= header.y + header.height, 'Progress sits below metadata');
+    assert.ok(transport.y >= seek.y + seek.height, 'Transport sits below progress');
+    assert.ok(actions.x + actions.width < art.x && profiles.x > art.x + art.width, 'Actions are left and profiles are right');
+    const tag = await page.locator('.mep-topbar-center').boundingBox();
+    center(tag, viewport);
     await page.waitForFunction(() => [...document.querySelectorAll('.mep-neon-ripple')].some(n => getComputedStyle(n).animationName === 'mep-neon-expand' && Number(getComputedStyle(n).opacity) > .1));
     assert.ok(await page.locator('.mep-neon-ripple').evaluateAll(nodes => {
       const art = document.querySelector('.mep-art').getBoundingClientRect();
@@ -46,15 +52,16 @@ try {
     assert.ok(before.lit > 0 && after.lit > 0 && before.hash !== after.hash, 'Dust canvas is nonblank and moving');
     await page.getByRole('button', { name: 'Open lyrics', exact: true }).click();
     await page.getByText('First lyric', { exact: true }).waitFor();
-    same(await page.locator('.mep-art').boundingBox(), art, 'Lyrics keep artwork centered');
-    same(await page.locator('.mep-controls-zone').boundingBox(), controls, 'Lyrics keep controls fixed');
+    assert.equal(await page.locator('.mep-art').count(), 0, 'Lyrics replace the artwork');
+    for (const [i, selector] of fixedSelectors.entries()) same(await page.locator(selector).boundingBox(), fixed[i], 'Lyrics preserve ' + selector);
     const panel = await page.locator('.mep-panel').boundingBox();
-    assert.ok(panel.x + panel.width <= art.x - 15, 'Panel does not overlap cover');
+    center(panel, viewport);
+    assert.ok(panel.y <= art.y && panel.y + panel.height >= art.y + art.height && panel.y + panel.height <= header.y, 'Panel occupies only the cover stage');
     await page.getByRole('button', { name: 'DSP Controls', exact: true }).click();
     await page.getByRole('heading', { name: 'Fine-Tune DSP' }).waitFor();
-    same(await page.locator('.mep-art').boundingBox(), art, 'DSP keeps artwork centered');
-    same(await page.locator('.mep-controls-zone').boundingBox(), controls, 'DSP keeps controls fixed');
-    assert.ok(await page.locator('.mep-panel').evaluate(n => n.scrollWidth <= n.clientWidth + 1), 'DSP fits side panel');
+    assert.equal(await page.locator('.mep-art').count(), 0, 'DSP replaces the artwork');
+    for (const [i, selector] of fixedSelectors.entries()) same(await page.locator(selector).boundingBox(), fixed[i], 'DSP preserves ' + selector);
+    assert.ok(await page.locator('.mep-panel').evaluate(n => n.scrollWidth <= n.clientWidth + 1), 'DSP fits center panel');
     await page.waitForTimeout(400);
     await page.screenshot({ path: `tests/artifacts/mobile-landscape-dsp-${viewport.width}.png` });
     await page.getByRole('button', { name: 'Close panel', exact: true }).click();
@@ -66,7 +73,7 @@ try {
     // Native cutouts must not push the symmetric center or controls offscreen.
     await page.evaluate(() => { document.documentElement.style.setProperty('--dmex-inset-left', '30px'); document.documentElement.style.setProperty('--dmex-inset-bottom', '24px'); });
     center(await page.locator('.mep-art').boundingBox(), viewport);
-    inside(await page.locator('.mep-controls-zone').boundingBox(), viewport, 'Inset controls');
+    inside(await page.locator('.mep-playback').boundingBox(), viewport, 'Inset controls');
     await page.evaluate(() => { document.documentElement.style.removeProperty('--dmex-inset-left'); document.documentElement.style.removeProperty('--dmex-inset-bottom'); });
     await page.getByRole('button', { name: 'Open lyrics', exact: true }).click();
     await page.setViewportSize({ width: 360, height: 800 });
@@ -79,7 +86,7 @@ try {
     const rotated = await canvasSignature(page);
     assert.ok(rotated.lit > 0 && rotated.width === viewport.width && rotated.height === viewport.height, 'Dust immediately survives rotation');
     assert.deepEqual(errors, []);
-    console.log(`PASS ${viewport.width}x${viewport.height}: centered art/ripples, moving canvas, controls, lyrics/DSP, safe insets and rotation`);
+    console.log(`PASS ${viewport.width}x${viewport.height}: centered cover/ripples, portrait-style top bar, metadata/progress/transport below, side rails, artwork-only panel replacement and rotation`);
     await context.close();
   }
 
@@ -93,28 +100,34 @@ try {
   await page.getByRole('button', { name: 'Open expanded player', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.mep-root')?.dataset.visualsReady === 'true' && Math.abs(document.querySelector('.mep-root').getBoundingClientRect().top) < .1);
   const art = await page.locator('.mep-art').boundingBox();
+  const header = await page.locator('.mep-track-header').boundingBox();
   center(art, viewport);
   assert.ok(await page.locator('.mep-art').evaluate(async n => { const image = new Image(); image.src = getComputedStyle(n).backgroundImage.slice(5, -2); await image.decode(); return image.naturalWidth > 0; }), 'Actual cover bitmap loads');
   await page.screenshot({ path: 'tests/artifacts/mobile-landscape-cover.png' });
   await page.getByRole('button', { name: 'Play queue', exact: true }).click();
   const queue = page.getByRole('region', { name: 'Expanded play queue' });
   await queue.waitFor();
-  same(await page.locator('.mep-art').boundingBox(), art, 'Real queue preserves cover position');
+  assert.equal(await page.locator('.mep-art').count(), 0, 'Real queue replaces cover');
+  same(await page.locator('.mep-track-header').boundingBox(), header, 'Queue preserves title and artist below');
   inside(await queue.boundingBox(), viewport, 'Queue');
   assert.ok(await queue.locator('.dmex-mobile-queue-row').count() < 12, 'Short landscape queue stays virtualized');
   const close = await page.getByRole('button', { name: 'Close panel', exact: true }).boundingBox();
   const q = await queue.boundingBox();
   assert.ok(close.x >= q.x && close.x + close.width <= q.x + q.width + 1, 'Panel close stays in queue column');
   const handle = queue.getByRole('button', { name: 'Drag to reorder Paper Lanterns 2', exact: true });
+  await queue.locator('.dmex-mobile-track-scroll').evaluate(n => { n.scrollTop = 76; });
+  await page.waitForTimeout(100);
   const r = await handle.boundingBox(), cdp = await context.newCDPSession(page);
+  const list = await queue.locator('.dmex-mobile-track-scroll').boundingBox();
+  const distance = Math.min(76, list.y + list.height - 3 - r.y - r.height / 2);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x + r.width / 2, y: r.y + r.height / 2 }] });
   for (let step = 1; step <= 8; step++) {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: r.x + r.width / 2, y: r.y + r.height / 2 + 76 * step / 8 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: r.x + r.width / 2, y: r.y + r.height / 2 + distance * step / 8 }] });
     await page.waitForTimeout(30);
   }
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('dmex_mobile_queue_v1')).entries.findIndex(entry => entry.track.name === 'Paper Lanterns 2') > 1);
   await page.screenshot({ path: 'tests/artifacts/mobile-landscape-queue.png' });
   await context.close();
-  console.log('PASS integrated landscape: cover image, centered art with queue, bounded virtualized glass panel and touch reorder');
+  console.log('PASS integrated landscape: loaded cover, artwork-only queue replacement, retained metadata, bounded virtualized glass panel and touch reorder');
 } finally { await browser.close(); }
