@@ -36,8 +36,10 @@ try {
     await page.getByRole('button', { name: 'DSP Controls', exact: true }).waitFor();
     await page.waitForTimeout(400);
     const controls = await page.locator('.mep-controls-zone').boundingBox();
+    assert.deepEqual(await page.locator('.mep-art').boundingBox(), { x: viewport.width / 2 - 125, y: 113, width: 250, height: 250 }, 'Artwork matches the pre-change layout baseline');
+    assert.equal(controls.y, viewport.width === 360 ? 568 : 487, 'Controls match the pre-change layout baseline');
     await page.screenshot({ path: `tests/artifacts/mobile-player-expanded-${viewport.width}.png` });
-    await page.getByRole('button', { name: 'Lyrics', exact: true }).click();
+    await page.getByRole('button', { name: 'Open lyrics', exact: true }).click();
     await page.getByText('First lyric', { exact: true }).waitFor();
     const lyricsControls = await page.locator('.mep-controls-zone').boundingBox();
     console.log(`Layout ${viewport.width}: expanded controls y=${controls.y}, lyrics y=${lyricsControls.y}`);

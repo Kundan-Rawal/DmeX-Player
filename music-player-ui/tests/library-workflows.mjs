@@ -50,7 +50,7 @@ try {
     await page.route('https://lrclib.net/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
     await page.locator('.dmex-mobile-track-play').first().click();
     await page.getByRole('button', { name: 'Open expanded player', exact: true }).click();
-    await page.getByRole('button', { name: 'Lyrics', exact: true }).click();
+    await page.getByRole('button', { name: 'Open lyrics', exact: true }).click();
     await page.getByRole('button', { name: 'Fetch Lyrics Online' }).click();
     await page.getByLabel('Song name').waitFor();
     assert.equal(await page.locator('.mep-lyrics-scroll .lyrics-search').count(), 1, 'Retry must remain inside the original mobile lyrics panel');

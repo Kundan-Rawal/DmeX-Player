@@ -45,12 +45,14 @@ The pre-redesign GitHub checkpoint is `12568e56340cea3bb46dfaa4fd3681907818dc92`
 
 ## Protected Areas
 
-No edits were made to these existing layout/style files:
+These desktop/shared layout files remain unchanged:
 
 - `music-player-ui/src/App.css`
 - `music-player-ui/src/components/layout/TopNav.tsx`
-- `music-player-ui/src/components/player/MobileExpandedPlayer.tsx`
-- `music-player-ui/src/components/player/MobileExpandedPlayer.css`
+
+The mobile expanded-player files were subsequently changed only for the explicitly
+approved queue/lyrics interaction update described below. The existing artwork,
+controls, lyrics, and DSP geometry is covered by pre-change bounds checks.
 
 App integration routes mobile transport through the new queue. The expanded player's
 layout, lyrics/DSP placement, particle sizing, and visualization implementation were
@@ -134,6 +136,27 @@ No music files or existing playlists were deleted during inspection.
 - Built and installed `app-universal-debug.apk`. On the S25 Ultra, the installed
   app retained 1,781 library tracks and queue entries; native haptics reported
   `performed: true`. No playback or volume changes were made during this check.
+
+## Expanded Queue and Lyrics Access
+
+- The mobile expanded-player lyrics toolbar button is now Play queue. It opens
+  the existing playback queue inside the same upper panel area used by DSP/lyrics;
+  it does not collapse the player or navigate to another page.
+- Album artwork is an accessible lyrics button. Its badge indicates whether
+  synced lyrics are available; without lyrics, tapping opens the existing search
+  and manual-retry interface. A panel close control restores the artwork view.
+- Queue styling is translucent and allows the existing ambient colors through.
+  Current-row colors are lifted for contrast. The list remains virtualized and
+  shares reorder, jump, move, and remove operations with the standalone queue.
+- Existing artwork size/position, action row, seek bar, transport controls, taste
+  buttons, DSP placement, particles, and visualization implementation were retained.
+- Tests passed at 360x800 and 320x640: pre-change geometry, synced/missing lyrics,
+  lyrics fetching, queue transparency, touch reordering, queue actions, shared
+  order, and opening/closing transitions. Existing short-screen panel behavior is
+  intentionally retained, not redesigned as part of this update.
+- Installed on the S25 Ultra and verified the embedded queue while the player
+  remained expanded: 1,781 queue entries, 1,781 library tracks, and a translucent
+  background. The art button correctly reported synced lyrics availability.
 
 ## Still Required Before Release
 

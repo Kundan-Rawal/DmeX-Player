@@ -13,7 +13,7 @@ import { HDCrystalIcon } from './HDCrystalIcon';
 import { ImmersiveIcon } from './ImmersiveIcon';
 import { ChillIcon } from './ChillIcon';
 import { triggerHapticClick } from '../../utils/helpers';
-import { Disc, Music, Search, Hourglass } from 'lucide-react';
+import { Captions, Disc, Music, Search, Hourglass, ListMusic, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 
@@ -70,6 +70,7 @@ interface MobileExpandedPlayerProps {
   onTasteChange: (t: Taste) => Promise<void>;
   onFetchLyrics: () => Promise<void>;
   lyricsSearch?: React.ReactNode;
+  queuePanel?: React.ReactNode;
   writeToEngine: (cmd: string) => Promise<void>;
   isSeekingRef: React.MutableRefObject<boolean>;
   setCurrentTime: React.Dispatch<React.SetStateAction<number>>;
@@ -101,7 +102,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
     label: 'Chill'     
   },
 ];
-  const [panel, setPanel] = useState<'none'|'lyrics'|'dsp'>('none');
+  const [panel, setPanel] = useState<'none'|'lyrics'|'dsp'|'queue'>('none');
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const lyricsRef = useRef<HTMLDivElement>(null);
   const prevPressRef = useRef<number>(0);
@@ -271,10 +272,10 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             {/* 1. Album Art */}
             <div className="mep-art-wrap">
               {visualsReady && IS_ANDROID && p.visMode === 'RADAR' && <Android8BRipples spatialData={p.spatialData} isPlaying={p.isPlaying} />}
-              <div className="mep-art" style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
+              <button type="button" className="mep-art mep-art-button" aria-label="Open lyrics" aria-controls="mep-content-panel" title={p.lyrics.length ? 'Synced lyrics available' : 'Find lyrics'} onClick={() => setPanel('lyrics')} style={{ backgroundImage: p.albumArt ? `url(${p.albumArt})` : 'none', backgroundColor: 'rgba(128,128,128,0.08)' }}>
                 {!p.albumArt && <span className="mep-art-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={48} /></span>}
-                {p.lyrics.length > 0 && <div className="lyrics-art-badge">Synced lyrics</div>}
-              </div>
+                <span className="lyrics-art-badge" data-lyrics-status={p.lyrics.length ? 'synced' : 'missing'}><Captions size={12} />{p.lyrics.length ? 'Synced lyrics' : 'No synced lyrics'}</span>
+              </button>
             </div>
 
             {/* 2. Title & Artist */}
@@ -294,7 +295,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
 
           </div>
         ) : (
-          <div className="mep-panel">
+          <div id="mep-content-panel" className={'mep-panel' + (panel === 'queue' ? ' mep-panel--queue' : '')}>
+            {panel === 'queue' && visualsReady && (p.queuePanel || <div className="mep-queue-empty"><ListMusic size={28} /><span>No queued tracks</span></div>)}
             {panel === 'lyrics' && (
               <div className="mep-lyrics-scroll" ref={lyricsRef}>
                 {p.lyrics.length > 0 ? (
@@ -341,6 +343,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             )}
           </div>
         )}
+        {panelOpen && <button type="button" className="mep-panel-dismiss" aria-label="Close panel" title="Close panel" onClick={() => setPanel('none')}><X size={18} /></button>}
 
         {/* ── FIXED CONTROLS ZONE — NEVER ROAMS ────────────────────── */}
         <div className="mep-controls-zone">
@@ -351,8 +354,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                 : <svg width="22" height="22" viewBox="0 0 24 24"><path fill="currentColor" d="m12.1 18.55-.1.1-.11-.1C7.14 14.24 4 11.39 4 8.5C4 6.5 5.5 5 7.5 5c1.54 0 3.04 1 3.57 2.36h1.86C13.46 6 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5c0 2.89-3.14 5.74-7.9 10.05M16.5 3c-1.74 0-3.41.81-4.5 2.08C10.91 3.81 9.24 3 7.5 3C4.42 3 2 5.41 2 8.5c0 3.77 3.4 6.86 8.55 11.53L12 21.35l1.45-1.32C18.6 15.36 22 12.27 22 8.5C22 5.41 19.58 3 16.5 3"/></svg>
               }
             </button>
-            <button aria-label="Lyrics" aria-pressed={panel === 'lyrics'} className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'lyrics' ? 'none' : 'lyrics')} style={{ color: panel === 'lyrics' ? 'var(--theme-color)' : undefined }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3.577 19.577V4.616q0-.672.472-1.144T5.192 3h9.77q.67 0 1.143.472q.472.472.472 1.144v.251q-.293.14-.533.32q-.24.179-.467.39v-.961q0-.27-.173-.443T14.96 4H5.192q-.269 0-.442.173t-.173.443v12.54L5.733 16h9.229q.269 0 .442-.173t.173-.442v-2.962q.227.212.467.39q.24.18.533.32v2.252q0 .67-.472 1.143q-.472.472-1.143.472H6.154zm3.5-6.077h3v-1h-3zm11.539-2q-1.039 0-1.77-.73T16.116 9t.73-1.77t1.77-.73q.486 0 .823.137t.677.461V1.5h3v1h-2V9q0 1.039-.731 1.77q-.731.73-1.77.73m-11.538-1h6v-1h-6zm0-3h6v-1h-6zm-2.5 8.5V4z"/></svg>
+            <button aria-label="Play queue" aria-pressed={panel === 'queue'} aria-controls="mep-content-panel" className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'queue' ? 'none' : 'queue')} style={{ color: panel === 'queue' ? 'var(--theme-color)' : undefined }}>
+              <ListMusic size={22} strokeWidth={1.5} />
             </button>
             <button aria-label="DSP Controls" aria-pressed={panel === 'dsp'} className="mep-icon-btn" onClick={() => setPanel(prev => prev === 'dsp' ? 'none' : 'dsp')} style={{ color: panel === 'dsp' ? 'var(--theme-color)' : undefined }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>

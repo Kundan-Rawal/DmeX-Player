@@ -27,6 +27,7 @@ import { fetchLyricsOnline } from './services/lyricsFetcher';
 
 import { DSPStudio, ExpandedControls } from './components/player/ExpandedPlayerUI';
 import { MobileExpandedPlayer } from './components/player/MobileExpandedPlayer';
+import { MobileExpandedQueue } from './components/player/MobileExpandedQueue';
 import { sendAudioCommand } from './services/audioBridge';
 import { useAudioSettings, PARAM } from './components/player/AudioSettingsContext';
 import { TrackOptions } from './components/player/TrackOptions';
@@ -1839,6 +1840,7 @@ function App() {
                 isAnalyzing={isAnalyzing} isManualOverride={isManualOverride} detectedProfile={detectedProfile}
                 smartTaste={smartTaste} isCurrentFavorite={isCurrentFavorite}
                 lyrics={lyrics} activeLyricIndex={activeLyricIndex} scanProgress={scanProgress}
+                queuePanel={<MobileExpandedQueue playback={mobilePlayback} tracks={visiblePlaylist} />}
                 isRemastered={isRemastered} setIsRemastered={setIsRemastered}
                 isCompressed={isCompressed} setIsCompressed={setIsCompressed}
                 selectedAcousticEnv={selectedAcousticEnv} setSelectedAcousticEnv={setSelectedAcousticEnv}
