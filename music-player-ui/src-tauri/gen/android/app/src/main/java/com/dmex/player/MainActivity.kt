@@ -18,11 +18,16 @@ import android.content.IntentFilter
 import android.media.AudioManager
 import android.view.View
 import android.view.ViewGroup
+import android.view.KeyEvent
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (PlaybackService.instance?.handleMediaKey(event) == true) return true
+        return super.dispatchKeyEvent(event)
+    }
 
     private fun webViewIn(view: View): WebView? {
         if (view is WebView) return view
@@ -57,6 +62,7 @@ class MainActivity : TauriActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        volumeControlStream = AudioManager.STREAM_MUSIC
         
         // --- PHASE 2: Register Headphone Disconnect Listener ---
         registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))

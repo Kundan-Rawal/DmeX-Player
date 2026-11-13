@@ -12,6 +12,7 @@ import { includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS } from '../
 import { BRAND, DEFAULT_AMBIENT_COLORS } from '../src/config/brand';
 import { getPalette, nudgeVibrancy, trackAccentColor } from '../src/utils/helpers';
 import { createQueue } from '../src/mobile/queue';
+import { emit } from '@tauri-apps/api/event';
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);
@@ -53,7 +54,7 @@ if (query.has('native-queue')) {
   store.set('app_settings', { lastTrackPath: tracks[2].path, isDarkMode: true });
 }
 const calls: { command: string; payload: any }[] = [];
-(window as any).libraryTest = { tracks, calls, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+(window as any).libraryTest = { tracks, calls, emit, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
@@ -104,7 +105,7 @@ mockIPC((command, payload: any) => {
   if (command === 'plugin:store|load') return 1;
   if (command === 'plugin:store|get') return [store.get(payload.key), store.has(payload.key)];
   if (command === 'plugin:store|set') store.set(payload.key, payload.value);
-});
+}, { shouldMockEvents: true });
 function LyricsFixture() {
   const [saved, setSaved] = useState('');
   return <div style={{ color: 'white', background: '#111', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>

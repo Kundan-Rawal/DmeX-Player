@@ -220,13 +220,54 @@ No music files or existing playlists were deleted during inspection.
   samples are diagnostic only, not certification of S25 or low-end-device pacing.
 - Built and installed the standalone Android debug APK. No FPS cap was added.
 
+## Shared Expansion and Android Earphone Controls
+
+- The pre-ambient expanded-player background now follows `--bg-expanded`, removing
+  the hard-coded black surface that appeared during light-mode opening.
+- Expansion uses an animated rounded inset reveal from the exact mini-player
+  bounds. A temporary cover layer moves from the mini-player thumbnail to the
+  expanded cover while controls remain unscaled. Reversals retain the displayed
+  cover/opacity state, and temporary layers are removed on completion/cancellation.
+  Older WebViews without inset clipping keep the fixed-size sliding fallback.
+- Added a framework Android media-session adapter around the existing C++ engine,
+  not a second decoder/player. A media-playback foreground service publishes
+  playback state, metadata, and a media-style notification. Headset/system media
+  play, pause, seek, next, and previous actions have native callbacks. See Android's
+  [media-button routing documentation](https://developer.android.com/media/legacy/media-buttons).
+- Center-button taps toggle playback, two rapid taps request next, and three
+  request previous. Dedicated media-next/previous keys are also supported; explicit
+  fast-forward/rewind seek ten seconds. Long center holds are not mapped to app
+  commands. Firmware/Android may report gestures as dedicated keys instead.
+- Volume keys are deliberately not intercepted or mapped to DSP gain. The activity
+  selects the music volume stream and the media session uses local media audio
+  attributes, so Android remains responsible for volume steps/held-key repetition.
+- Native play/pause and seek commands run through a serialized Rust worker and
+  reuse the existing resolved-source command path. UI state follows native
+  acknowledgements without sending a duplicate toggle. Next/previous use the
+  existing frontend queue, so process-death and fully native queue ownership remain
+  separate release work rather than being implied by this media-session adapter.
+- Focus loss and headphone disconnection pause playback; losing audio focus does
+  not automatically resume loud audio later. No audio/DSP settings are changed by
+  media-button handling. Native loaded/playing queries use a nonblocking engine
+  snapshot rather than blocking Android's main thread during decoding/loading.
+- Verified six light/dark viewport combinations for pill-origin clipping, shared
+  artwork, unscaled controls, theme-correct opening, and cancellation cleanup.
+  Existing motion, embedded queue, and landscape regressions pass. Native click
+  counter unit tests: five passed. Mocked native events verify state publishing,
+  no duplicate engine toggle, and next/previous through the shared queue.
+- The Android APK builds successfully. Physical headset tests and installation
+  are pending the user's current install/test choice; software tests do not certify
+  every headset's firmware, volume wiring, call handling, or background routing.
+
 ## Still Required Before Release
 
-1. **Native playback reliability (blueprint Phase E).** The new queue is currently
-   frontend-owned. Native end-of-track advancement, foreground service/media session,
-   background/screen-off continuity, media buttons, audio focus, process recreation,
-   and notification controls need a separate implementation/verification pass. Do
-   not treat a working foreground queue as proof of background correctness.
+1. **Native playback reliability (blueprint Phase E).** The queue is currently
+   frontend-owned. A media session, foreground playback service, media-button
+   adapter, focus-loss pause, and notification controls now exist, but native
+   end-of-track advancement, process recreation, fully native queue ownership,
+   screen-off continuity, and real headset/focus/call journeys still need an
+   implementation/verification pass. Do not treat a working foreground queue or
+   mocked media event as proof of background correctness.
 2. Test real process death and cold-start restoration on the phone, not only mocked
    native persistence and React remounts.
 3. Measure frame pacing and memory on a genuinely low-powered Android device. S25
@@ -248,6 +289,7 @@ retained because the user explicitly requested that layout remain untouched.
 - `src/mobile/MobileShell.tsx`: mobile screens, menus, navigation, and mini-player.
 - `src/mobile/MobileShell.css`: scoped mobile browsing and collapsed-player styling.
 - `src/mobile/MobilePlayerMotion.tsx`: fixed mobile player overlay and motion lifecycle.
+- `src/mobile/useAndroidMediaSession.ts`: native playback state and transport-event bridge.
 - `src/mobile/MobileRouteViewport.tsx`: retained-page paging and touch-to-settle motion.
 - `src/mobile/queue.ts`: pure queue semantics.
 - `src/mobile/useMobilePlayback.ts`: queue loading, persistence, and listening events.

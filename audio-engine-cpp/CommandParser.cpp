@@ -369,6 +369,12 @@ extern "C" void get_audio_metrics(float* output, float* level) {
     output[7]=g_tLvl.load(); output[8]=g_tPan.load(); output[9]=g_tPhase.load();
 }
 extern "C" bool audio_track_finished() { return g_trackFinished.load(); }
+extern "C" int audio_transport_flags() {
+    static std::atomic<int> cached{0};
+    std::unique_lock<std::recursive_mutex> owner(g_audioMutex, std::try_to_lock);
+    if (owner.owns_lock()) cached.store(g_soundInitialized ? 1 | (ma_sound_is_playing(&g_sound) ? 2 : 0) : 0);
+    return cached.load();
+}
 static bool analyzeFile(const char* path, float* sc, float* cf, float* zcr, float* rms) {
     if (!path || !sc || !cf || !zcr || !rms) return false;
     ma_decoder decoder;

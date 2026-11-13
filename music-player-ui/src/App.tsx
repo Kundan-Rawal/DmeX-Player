@@ -41,6 +41,7 @@ import { MobileShell, MobileMiniPlayer } from './mobile/MobileShell';
 import { MobileLoadOptions, useMobilePlayback } from './mobile/useMobilePlayback';
 import { useMobileFeedback } from './mobile/useMobileFeedback';
 import { PlayerFrame, useMobilePlayerMotion } from './mobile/MobilePlayerMotion';
+import { useAndroidMediaSession } from './mobile/useAndroidMediaSession';
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM DETECTION — evaluated once at module load, never inside a component.
 // IS_ANDROID gates every Android-specific optimisation in this file.
@@ -392,6 +393,14 @@ function App() {
       playCount: (t.playCount || 0) + (counted ? 1 : 0), lastPlayed: Date.now() } : t)));
   const mobilePlaybackRef = useRef(mobilePlayback);
   mobilePlaybackRef.current = mobilePlayback;
+  const mediaQueueIndex = mobilePlayback.queue.entries.findIndex(entry => entry.id === mobilePlayback.queue.currentId);
+  useAndroidMediaSession({ hasTrack: !!currentTrack, title: trackTitle, artist: trackArtist,
+    duration: Math.max(0, duration * 1000), position: Math.max(0, currentTime * 1000), playing: isPlaying,
+    canNext: mediaQueueIndex + 1 < mobilePlayback.queue.entries.length || mobilePlayback.queue.repeat === 'ALL',
+    canPrevious: mediaQueueIndex > 0 || mobilePlayback.queue.history.length > 0 }, {
+    playing: setIsPlaying, seek: setCurrentTime,
+    next: () => { mobilePlaybackRef.current.next(); }, previous: () => { mobilePlaybackRef.current.previous(); },
+  });
   useEffect(() => {
     if (!IS_MOBILE || !isBooted) return;
     const appearance = isDarkMode ? 'dark' : 'light';

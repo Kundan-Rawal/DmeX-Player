@@ -17,6 +17,8 @@ mod media_source;
 mod android_library;
 #[cfg(target_os = "android")]
 mod android_feedback;
+#[cfg(target_os = "android")]
+mod android_media;
 
 static HEADPHONES_UNPLUGGED: AtomicBool = AtomicBool::new(false);
 
@@ -32,6 +34,20 @@ async fn mobile_haptic(app: tauri::AppHandle, kind: String) -> Result<bool, Stri
     }
     #[cfg(not(target_os = "android"))]
     { let _ = (app, kind); Ok(false) }
+}
+
+#[tauri::command]
+async fn mobile_media_update(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let media = app.state::<android_media::Media<tauri::Wry>>();
+            media.0.run_mobile_plugin::<serde_json::Value>("update", serde_json::json!({ "state": state }))
+                .map(|_| ()).map_err(|error| error.to_string())
+        }).await.map_err(|error| error.to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = (app, state); Ok(()) }
 }
 
 static DB_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
@@ -141,6 +157,8 @@ extern "C" {
     fn get_audio_status_json(output: *mut c_char, capacity: i32) -> i32;
     fn apply_audio_settings(values: *const f32, count: i32) -> i32;
     fn audio_track_finished() -> bool;
+    #[cfg(target_os = "android")]
+    fn audio_transport_flags() -> i32;
     fn get_audio_settings(output: *mut f32);
     fn audio_set_hrtf_path(path: *const c_char);
     #[cfg(target_os = "android")]
@@ -171,26 +189,28 @@ fn scan_audio_paths(root: &str) -> Vec<String> {
 
 #[tauri::command]
 async fn audio_command(mut cmd: String) -> Result<(), String> {
-    if cmd == "PLAY_USER" {
+    tauri::async_runtime::spawn_blocking(move || execute_resolved_audio_command(&mut cmd)).await.map_err(|e| e.to_string())?
+}
+
+fn execute_resolved_audio_command(cmd: &mut String) -> Result<(), String> {
+    if cmd.as_str() == "PLAY_USER" {
         HEADPHONES_UNPLUGGED.store(false, Ordering::Relaxed);
-        cmd = "PLAY".into();
-    } else if cmd == "PLAY" && HEADPHONES_UNPLUGGED.load(Ordering::Relaxed) {
+        *cmd = "PLAY".into();
+    } else if cmd.as_str() == "PLAY" && HEADPHONES_UNPLUGGED.load(Ordering::Relaxed) {
         return Err("Output disconnected. Press Play to resume.".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
         let mut source_file = None;
         if let Some(source) = cmd.strip_prefix("LOAD ") {
             let (path, file) = resolved_audio_path(source.trim_matches('"'))?;
-            cmd = format!("LOAD {path}");
+            *cmd = format!("LOAD {path}");
             source_file = file;
         }
         let command = CString::new(cmd.clone()).map_err(|_| "Audio command contains NUL")?;
         let result = unsafe { execute_audio_command(command.as_ptr()) };
-        if result == 0 && (cmd.starts_with("LOAD ") || cmd == "STOP") {
+        if result == 0 && (cmd.starts_with("LOAD ") || cmd.as_str() == "STOP") {
             *ACTIVE_SOURCE.lock().map_err(|_| "Source file lock interrupted")? = source_file;
         }
         if result == 0 { Ok(()) } else { Err(format!("Audio command failed: {cmd}")) }
-    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -792,6 +812,12 @@ pub fn run() {
             { tauri::plugin::Builder::<tauri::Wry, ()>::new("mobile-feedback").build() }
         })
         .plugin(tauri_plugin_fs::init())
+        .plugin({
+            #[cfg(target_os = "android")]
+            { android_media::init() }
+            #[cfg(not(target_os = "android"))]
+            { tauri::plugin::Builder::<tauri::Wry, ()>::new("mobile-media").build() }
+        })
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             #[cfg(target_os = "android")]
@@ -867,7 +893,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            mobile_haptic, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
+            mobile_haptic, mobile_media_update, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, delete_playlist, get_all_artist_images, get_setting, set_setting,
             audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music, pick_music_folder, extract_audio_metadata, record_play, identify_lyrics_song, download_cloud_stream, fetch_cloud_api,

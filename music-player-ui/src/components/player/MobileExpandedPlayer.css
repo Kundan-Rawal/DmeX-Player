@@ -37,7 +37,7 @@
   overflow: hidden;
 
 
-  background-color: #000; 
+  background-color: var(--bg-expanded, #000);
 
 
   color: #fff;

@@ -2,6 +2,9 @@
 -keep class com.dmex.player.MusicLibraryPlugin { *; }
 -keep class com.dmex.player.MusicScanArgs { *; }
 -keep class com.dmex.player.MusicMetadataArgs { *; }
+-keep class com.dmex.player.MediaPlugin { *; }
+-keep class com.dmex.player.MediaUpdateArgs { *; }
+-keep class com.dmex.player.NativeMediaBridge { *; }
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #
