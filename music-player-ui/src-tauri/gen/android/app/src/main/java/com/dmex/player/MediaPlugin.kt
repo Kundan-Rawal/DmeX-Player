@@ -5,7 +5,6 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 import androidx.annotation.Keep
 import app.tauri.annotation.Command
-import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
@@ -19,14 +18,12 @@ object NativeMediaBridge {
     fun send(action: Int, position: Long = 0) { try { transport(action, position) } catch (_: UnsatisfiedLinkError) { /* Open the app before restoring an expired session. */ } }
 }
 
-@InvokeArg
-class MediaUpdateArgs { var state: JSObject = JSObject() }
-
 @TauriPlugin
 class MediaPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun update(invoke: Invoke) {
-        val state = invoke.parseArgs(MediaUpdateArgs::class.java).state
+        // Jackson does not populate JSONObject's internal map when used as an InvokeArg field.
+        val state = invoke.getArgs().getJSONObject("state")
         activity.runOnUiThread {
             try {
                 if (state.optBoolean("hasTrack") || PlaybackService.instance != null) {

@@ -255,9 +255,22 @@ No music files or existing playlists were deleted during inspection.
   Existing motion, embedded queue, and landscape regressions pass. Native click
   counter unit tests: five passed. Mocked native events verify state publishing,
   no duplicate engine toggle, and next/previous through the shared queue.
-- The Android APK builds successfully. Physical headset tests and installation
-  are pending the user's current install/test choice; software tests do not certify
-  every headset's firmware, volume wiring, call handling, or background routing.
+- Installed the corrected Android APK on the S25 Ultra after the user's approval.
+  Device verification caught and fixed a real serialization defect: Jackson did
+  not populate a nested `JSObject` InvokeArg field, producing a successful command
+  acknowledgement without registering a session. The bridge now reads the nested
+  object through `Invoke.getArgs().getJSONObject`, and the device regression checks
+  Android's actual registered session rather than trusting the acknowledgement.
+- On-device tests passed for actual engine-cursor advancement on session Play,
+  a stationary cursor on Pause, dedicated Next/Previous keys, UI/queue agreement,
+  simulated single/double/triple center-button events, and session Play/Pause with
+  the activity in the background and the service running in the foreground.
+  The original track/cursor was restored paused. No volume commands were sent;
+  Android reports the session's local playback-volume route.
+- `tests/android-media-controls.mjs` requires explicit playback-test approval via
+  `ANDROID_MEDIA_TEST=approved`. These tests do not certify physical earphone
+  wiring/firmware, held volume buttons, calls, process death, or long screen-off
+  operation. Those hardware/lifecycle checks remain separate.
 
 ## Still Required Before Release
 
