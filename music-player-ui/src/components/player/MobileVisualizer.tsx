@@ -143,6 +143,10 @@ export const Android8BDustCanvas: React.FC<{ isExpanded?: boolean; isDarkMode: b
     rafId = requestAnimationFrame(draw);
 
     const handleResize = () => {
+      const scaleX = window.innerWidth / Math.max(1, cvs.width);
+      const scaleY = window.innerHeight / Math.max(1, cvs.height);
+      // Reproject positions on rotation without changing fixed particle sizes or speed.
+      motes.current.forEach(m => { m.x *= scaleX; m.y *= scaleY; });
       cvs.width = window.innerWidth;
       cvs.height = window.innerHeight;
     };

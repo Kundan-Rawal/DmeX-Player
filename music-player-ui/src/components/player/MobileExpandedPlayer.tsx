@@ -103,12 +103,21 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
   },
 ];
   const [panel, setPanel] = useState<'none'|'lyrics'|'dsp'|'queue'>('none');
+  const [isLandscape, setIsLandscape] = useState(() => window.matchMedia('(orientation: landscape)').matches);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const lyricsRef = useRef<HTMLDivElement>(null);
   const prevPressRef = useRef<number>(0);
   const nextPressRef = useRef<number>(0);
   const scrubIntervalRef = useRef<any>(null);
   const scrubStartOffsetRef = useRef<number>(0);
+
+  useEffect(() => {
+    const orientation = window.matchMedia('(orientation: landscape)');
+    const update = () => setIsLandscape(orientation.matches);
+    orientation.addEventListener('change', update);
+    update();
+    return () => orientation.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     if (panel !== 'lyrics' || !lyricsRef.current || p.activeLyricIndex < 0) return;
@@ -262,11 +271,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
       {/* ── BODY CORE ENGINE ─────────────────────────────────────── */}
       <div className="mep-body">
 
-        {/* =========================================================================
-            THE ARCHITECTURAL FIX: Grouped Art, Title, Artist, and Pills.
-            This entire block is swapped for Lyrics/DSP, keeping layout pure.
-            ========================================================================= */}
-        {!panelOpen ? (
+        {/* Landscape keeps the artwork mounted while panels occupy the details column. */}
+        {(!panelOpen || isLandscape) && (
           <div className="mep-dynamic-upper">
             
             {/* 1. Album Art */}
@@ -278,6 +284,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
               </button>
             </div>
 
+            {!panelOpen && <div className="mep-track-details">
             {/* 2. Title & Artist */}
             <div className="mep-track-header">
               <div className="mep-title-wrap">{TitleNode}</div>
@@ -292,9 +299,11 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                 </button>
               ))}
             </div>
+            </div>}
 
           </div>
-        ) : (
+        )}
+        {panelOpen && (
           <div id="mep-content-panel" className={'mep-panel' + (panel === 'queue' ? ' mep-panel--queue' : '')}>
             {panel === 'queue' && visualsReady && (p.queuePanel || <div className="mep-queue-empty"><ListMusic size={28} /><span>No queued tracks</span></div>)}
             {panel === 'lyrics' && (

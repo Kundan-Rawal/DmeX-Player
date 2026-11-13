@@ -1704,3 +1704,121 @@
 .mep-queue-menu header{display:flex;align-items:center;justify-content:space-between;font-size:13px}
 .mep-queue-menu button{display:flex;align-items:center;gap:12px;min-height:44px;width:100%;border:0;padding:8px 4px;background:transparent;text-align:left;font-size:13px}
 .mep-queue-menu header button{width:36px;justify-content:center}
+
+.mep-track-details { display: contents; }
+
+/* Equal side columns keep the artwork and its local ripple origin at screen center. */
+@media (orientation: landscape) {
+  .mep-root {
+    --mep-landscape-x: max(16px, var(--dmex-inset-left, 0px), var(--dmex-inset-right, 0px), env(safe-area-inset-left), env(safe-area-inset-right));
+    --mep-landscape-y: max(52px, calc(var(--dmex-inset-top, 0px) + 44px), calc(var(--dmex-inset-bottom, 0px) + 12px));
+    --mep-landscape-art: min(244px, 26vw, 54dvh, calc(100dvh - var(--mep-landscape-y) - var(--mep-landscape-y)));
+    --mep-landscape-side: calc((100% - var(--mep-landscape-x) - var(--mep-landscape-x) - var(--mep-landscape-art) - 32px) / 2);
+  }
+  .mep-topbar {
+    position: absolute;
+    inset: 0 0 auto;
+    padding: max(4px, var(--dmex-inset-top, env(safe-area-inset-top))) var(--mep-landscape-x) 0;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+  .mep-topbar-btn { width: 44px; min-height: 44px; flex-shrink: 0; }
+  .mep-topbar-center { min-width: 0; overflow: hidden; }
+  .mep-badge, .mep-badge-analyzing { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mep-body {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--mep-landscape-art) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: center;
+    column-gap: 16px;
+    padding: var(--mep-landscape-y) var(--mep-landscape-x);
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+  }
+  .mep-dynamic-upper { display: contents; }
+  .mep-art-wrap {
+    grid-column: 2;
+    grid-row: 1;
+    width: var(--mep-landscape-art);
+    height: var(--mep-landscape-art);
+    margin: 0;
+    z-index: 1;
+  }
+  .mep-art { width: 100%; height: 100%; max-width: none; }
+  .mep-neon-ripple { width: 100%; max-width: none; box-sizing: border-box; }
+  .mep-track-details {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 16px;
+    max-height: 100%;
+    min-width: 0;
+    overflow: auto;
+    position: relative;
+    z-index: 20;
+  }
+  .mep-track-header { margin: 0; flex-shrink: 0; }
+  .mep-title-wrap, .mep-artist-wrap { min-width: 0; overflow: hidden; }
+  .mep-title { font-size: 20px; }
+  .mep-artist { font-size: 12px; }
+  .mep-taste-row { flex-direction: column; gap: 2px; }
+  .mep-taste-pill { min-height: 40px; padding: 4px 8px; font-size: 12px; }
+  .mep-controls-zone {
+    grid-column: 3;
+    grid-row: 1;
+    min-width: 0;
+    max-height: 100%;
+    padding: 0;
+    overflow: auto;
+  }
+  .mep-actions { padding: 0; margin-bottom: 8px; }
+  .mep-icon-btn { width: 44px; height: 44px; padding: 8px; flex-shrink: 0; }
+  .mep-seek { margin-bottom: 8px; }
+  .mep-seek-bar { margin-left: 0; margin-right: 0; }
+  .mep-playback {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: 56px 44px;
+    justify-items: center;
+    padding: 0;
+  }
+  .mep-playback > :nth-child(1) { grid-area: 2 / 1; }
+  .mep-playback > :nth-child(2) { grid-area: 1 / 1; }
+  .mep-playback > :nth-child(3) { grid-area: 1 / 2; }
+  .mep-playback > :nth-child(4) { grid-area: 1 / 3; }
+  .mep-playback > :nth-child(5) { grid-area: 2 / 3; }
+  .mep-panel {
+    grid-column: 1;
+    grid-row: 1;
+    height: 100%;
+    max-height: none;
+    min-width: 0;
+    padding: 0;
+    position: relative;
+    z-index: 20;
+  }
+  .mep-panel-dismiss {
+    top: calc(var(--mep-landscape-y) + 8px);
+    left: calc(var(--mep-landscape-x) + var(--mep-landscape-side) - 40px);
+    right: auto;
+  }
+  .mep-lyrics-scroll { padding: 48px 12px 32px; }
+  .mep-dsp-scroll { padding: 40px 0 16px; }
+  .mep-queue { height: 100%; }
+  .mep-root .player-track-menu {
+    top: calc(54px + var(--dmex-inset-top, 0px));
+    max-height: calc(100dvh - 66px - var(--dmex-inset-top, 0px) - var(--dmex-inset-bottom, 0px));
+    box-sizing: border-box;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 340px) {
+  .mep-track-details { gap: 8px; }
+  .mep-title { font-size: 18px; }
+  .mep-taste-pill { min-height: 36px; }
+}
