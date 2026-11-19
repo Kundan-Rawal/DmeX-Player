@@ -695,6 +695,19 @@ void productionControlSweep() {
     auto stage=neutral; stage[17]=1; stage[4]=.8f; stage[5]=.1f;
     const auto near=render(stage); stage[5]=.9f;
     check(differenceEnergy(near,render(stage),24000)>.0001, "depth slider affects the production measured stage");
+    // Base recipes mirror soundPresets.ts; volume is lowered only in this offline harness.
+    Audio lastPreset;
+    for (const auto& preset : {
+        Case{"HD Clear recipe",{{0,.12f},{1,1.4f},{2,.04f},{3,1.02f},{12,.10f},{14,.72f},{15,.6f},{16,.10f}}},
+        Case{"Immersive recipe",{{0,.24f},{1,.6f},{2,.025f},{3,1.08f},{4,.45f},{5,.34f},{6,.08f},{12,.08f},{14,.72f},{15,.6f},{16,.06f},{17,1.f}}},
+        Case{"Chill recipe",{{0,.18f},{1,-.8f},{3,1.06f},{4,.62f},{5,.52f},{6,.16f},{12,.04f},{14,.76f},{15,.68f},{16,.03f},{17,1.f}}}
+    }) {
+        auto values=neutral; for(const auto& [index,value]:preset.changes) values[index]=value;
+        const auto output=render(values);
+        check(differenceEnergy(base,output,24000)>.0001, preset.name);
+        if (!lastPreset.empty()) check(differenceEnergy(lastPreset,output,24000)>.0001, "quick recipes produce distinct processed PCM");
+        lastPreset=output;
+    }
     execute_audio_command("STOP"); uninit_audio_engine(); std::remove("controls-fixture.wav"); g_ecoMode=false;
 }
 

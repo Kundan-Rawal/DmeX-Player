@@ -17,6 +17,8 @@ import { splitArtists, artistCacheKey, artistIdentity } from './utils/artistEngi
 import { formatTime, parseLRC } from './utils/formatters';
 import { PlaylistGalleryView } from './views/PlaylistGalleryView';
 import { PROFILES, classifyAudio, AudioProfile } from './config/audio';
+import { metadataCategory, soundPreset } from './config/soundPresets';
+import { isClassicYear } from './utils/trackYear';
 import { isHexDark, getPalette, stripExt } from './utils/helpers';
 import { FolderModal, PlaylistPopup, SettingsModal } from './modals/modals';
 import { VirtualList, DraggablePlaylistView } from './components/library/TrackLists';
@@ -235,6 +237,7 @@ function App() {
   const loadIdRef          = useRef(0);
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const playlistRef        = useRef<Track[]>([]);
+  const removedSources = useRef(new Set<string>());
   const enricherRunning    = useRef(false);
   const bulkScanRunning    = useRef(false);
   const bulkScanPausedRef  = useRef(false);
@@ -337,10 +340,7 @@ function App() {
     if (currentView === 'FAVOURITES') {
       base = visiblePlaylist.filter(t => favorites.includes(t.path));
     } else if (currentView === 'BOLLYWOOD') {
-      base = visiblePlaylist.filter(t => {
-        const s = `${t.genre||''} ${t.album||''} ${t.path}`.toLowerCase();
-        return s.includes('bollywood') || s.includes('hindi') || s.includes('indian');
-      });
+      base = visiblePlaylist.filter(isClassicYear);
     } else if (currentView === 'TOPTRACKS') {
       base = [...visiblePlaylist].filter(t=>(t.totalSecondsListened||0)>0).sort((a,b)=>(b.totalSecondsListened||0)-(a.totalSecondsListened||0)).slice(0,50);
     } else if (activePlaylistId) {
@@ -390,7 +390,15 @@ function App() {
     (track, options) => mobileLoaderRef.current(track, options),
     (path, seconds, counted) => setPlaylist(prev => prev.map(t => t.path === path ? { ...t,
       totalSecondsListened: (t.totalSecondsListened || 0) + seconds,
-      playCount: (t.playCount || 0) + (counted ? 1 : 0), lastPlayed: Date.now() } : t)));
+      playCount: (t.playCount || 0) + (counted ? 1 : 0), lastPlayed: Date.now() } : t)),
+    path => {
+      removedSources.current.add(path);
+      playlistRef.current = playlistRef.current.filter(track => track.path !== path);
+      setPlaylist(previous => previous.filter(track => track.path !== path));
+      setFavorites(previous => previous.filter(value => value !== path));
+      setCustomPlaylists(previous => previous.map(playlist => ({ ...playlist, trackPaths: playlist.trackPaths.filter(value => value !== path) })));
+      if (currentTrack?.path === path) { setIsPlaying(false); setCurrentTrack(null); }
+    });
   const mobilePlaybackRef = useRef(mobilePlayback);
   mobilePlaybackRef.current = mobilePlayback;
   const mediaQueueIndex = mobilePlayback.queue.entries.findIndex(entry => entry.id === mobilePlayback.queue.currentId);
@@ -697,16 +705,15 @@ function App() {
     await vaultSet("isDarkMode", next);
   };
 
-  const applySmartSettings = async (_profile:AudioProfile | null, taste:Taste) => {
+  const applySmartSettings = async (profile:AudioProfile | null, taste:Taste) => {
     if (audio.status?.bypassAll) return;
-    const neutral = { bass:0, treble:0, exciter:0, width:1, separation:0, depth:0,
-      reverb:0, compressor:0, bassField:0, roomBass:0, vocal:0, air:0, spatial:0, boost:0 };
-    const selected = taste === 'QUALITY' ? { ...neutral, bass:0.25, vocal:0.12 }
-      : taste === 'IMMERSIVE' ? { ...neutral, bass:0.35, spatial:1, separation:0.55, depth:0.4, reverb:0.08 }
-      : taste === 'CHILL' ? { ...neutral, bass:0.15, treble:-1, reverb:0.12 } : neutral;
-    await audio.update(selected);
+    await audio.update(soundPreset(isProfileActiveRef.current ? profile?.id || null : null, taste));
     setIsFIRMode(false);
   };
+
+  useEffect(() => {
+    if (detectedProfile && !isManualOverride && ['QUALITY','IMMERSIVE','CHILL'].includes(smartTasteRef.current)) void applySmartSettings(detectedProfile, smartTasteRef.current).catch(console.error);
+  }, [detectedProfile]);
 
   const handleTasteChange = async (taste:Taste) => {
     if (audio.status?.bypassAll) return;
@@ -789,6 +796,7 @@ function App() {
           }));
       const known = new Set(playlistRef.current.map(t => t.path));
       const fresh = discovered.filter(t => { if (known.has(t.path)) return false; known.add(t.path); return true; });
+      fresh.forEach(track => removedSources.current.delete(track.path));
       // Persist before publishing tracks, so enrichment cannot race a raw insert.
       for (let offset = 0; offset < fresh.length; offset += 100) {
         await invoke('add_library_tracks', { tracks: fresh.slice(offset, offset + 100) });
@@ -885,7 +893,7 @@ function App() {
             const current = playlistRef.current.find(t => t.path === track.path);
             if (!current) continue;
             const updated = { ...current, ...native, lyrics: localLyrics };
-            await invoke('add_to_library', { track: updated });
+            if (!removedSources.current.has(updated.path)) await invoke('add_to_library', { track: updated });
             playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updated : t);
             setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, ...native, lyrics: localLyrics } : t));
           } catch (error) {
@@ -913,7 +921,7 @@ function App() {
 
   const startBulkCategoryScan = useCallback(async () => {
     if(bulkScanRunning.current) return;
-    const unscanned=playlistRef.current.filter(t=>!t.profile);
+    const unscanned=playlistRef.current.filter(t=>!t.profile || (!metadataCategory(t) && !['DYNAMIC','DENSE','CENTERED','WIDE','BALANCED'].includes(t.profile)));
     if(!unscanned.length){setBulkScanActive(false);return;}
     bulkScanRunning.current=true;bulkScanPausedRef.current=false;
     setBulkScanActive(true);setBulkScanPaused(false);setBulkScanDone(0);setBulkScanTotal(unscanned.length);
@@ -925,7 +933,7 @@ function App() {
         const fpLine:string=await invoke('analyze_audio_file', { path: track.path });
         if(fpLine.startsWith("FINGERPRINT ")){
           const p=fpLine.split(' ');
-          const prof=classifyAudio(parseFloat(p[1])||0,parseFloat(p[2])||10,parseFloat(p[3])||0.1,parseFloat(p[4])||0.1);
+          const prof=classifyAudio(Number(p[1]),Number(p[2]),Number(p[3]),Number(p[4]),track);
           setPlaylist(prev=>prev.map(t=>t.path===track.path?{...t,profile:prof.id}:t));
           pendingSave.push({path:track.path,profile:prof.id});
         }
@@ -1029,13 +1037,19 @@ function App() {
           const updated = { ...current, ...native };
           playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updated : t);
           setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, ...native } : t));
-          await invoke('add_to_library', { track: updated });
+          if (!removedSources.current.has(updated.path)) await invoke('add_to_library', { track: updated });
+          const category = metadataCategory(updated);
+          if (category && id === loadIdRef.current) {
+            const profile = PROFILES.find(value => value.id === category)!;
+            setDetectedProfile(profile); detectedProfileRef.current = profile;
+          }
         } catch(err) {
             console.error(`GLOBAL METADATA CRASH:`, err);
         }
       },300);
 
-      const cachedProfile=track.profile?PROFILES.find(p=>p.id===track.profile):null;
+      const tagged = metadataCategory(track);
+      const cachedProfile=PROFILES.find(p=>p.id === tagged || (!tagged && ['DYNAMIC','DENSE','CENTERED','WIDE','BALANCED'].includes(track.profile || '') && p.id===track.profile));
       if(cachedProfile){setDetectedProfile(cachedProfile);detectedProfileRef.current=cachedProfile;}
       else{setTimeout(async()=>{
         if(id!==loadIdRef.current) return;setIsAnalyzing(true);
@@ -1043,7 +1057,7 @@ function App() {
           const fpLine:string=await invoke('analyze_current_track');if(id!==loadIdRef.current) return;
           if(fpLine.startsWith("FINGERPRINT ")){
             const parts=fpLine.split(' ');
-            const profile=classifyAudio(parseFloat(parts[1])||0,parseFloat(parts[2])||10,parseFloat(parts[3])||0.1,parseFloat(parts[4])||0.1);
+            const profile=classifyAudio(Number(parts[1]),Number(parts[2]),Number(parts[3]),Number(parts[4]),playlistRef.current.find(t=>t.path===track.path) || track);
             setDetectedProfile(profile);detectedProfileRef.current=profile;
             const nl=playlistRef.current.map(t=>t.path===track.path?{...t,profile:profile.id}:t);setPlaylist(nl);
             await invoke('update_profile', { path: track.path, profile: profile.id });
@@ -1377,7 +1391,7 @@ function App() {
 
   return (
     <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-mobile-redesign={IS_MOBILE || undefined} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-on-surface':isDarkMode && themeColor === BRAND.accent ? BRAND.highlight : themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
-      {audio.error && <div className="audio-global-error" role="alert">{audio.error}</div>}
+      {audio.error && !(IS_MOBILE && mobilePlayback.error) && <div className="audio-global-error" role="alert">{audio.error}</div>}
       {showSettings && <SettingsModal apiKey={geminiApiKey} setApiKey={setGeminiApiKey} filters={libraryFilters} onClose={() => setShowSettings(false)} onSave={async filters => {
         await invoke('set_setting', { key: 'gemini_api_key', value: geminiApiKey.trim() });
         await invoke('set_setting', { key: 'library_filters', value: JSON.stringify(filters) });

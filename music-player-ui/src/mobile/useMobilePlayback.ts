@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Track } from '../types';
-import { advanceQueue, createQueue, emptyQueue, insertQueue, MobileQueue, moveQueueEntry, moveQueueTo, parseQueue, previousQueue, queueCurrent, removeQueueEntry, shuffleQueue } from './queue';
+import { advanceQueue, createQueue, discardMissingTrack, emptyQueue, insertQueue, MobileQueue, moveQueueEntry, moveQueueTo, parseQueue, previousQueue, queueCurrent, removeQueueEntry, shuffleQueue } from './queue';
 
 export interface MobileLoadOptions { autoplay?: boolean; position?: number }
 const KEY = 'dmex_mobile_queue_v1';
-export function useMobilePlayback(enabled: boolean, ready: boolean, library: Track[], load: (track: Track, options?: MobileLoadOptions) => Promise<void>, stats: (path: string, seconds: number, counted: boolean) => void) {
+export function useMobilePlayback(enabled: boolean, ready: boolean, library: Track[], load: (track: Track, options?: MobileLoadOptions) => Promise<void>, stats: (path: string, seconds: number, counted: boolean) => void, onMissing?: (path: string) => void) {
   const [queue, setQueue] = useState<MobileQueue>(() => enabled ? parseQueue(localStorage.getItem(KEY)) : emptyQueue());
   const ref = useRef(queue), libraryRef = useRef(library), loader = useRef(load), statsRef = useRef(stats);
   ref.current = queue; libraryRef.current = library; loader.current = load; statsRef.current = stats;
+  const missingCallback = useRef(onMissing); missingCallback.current = onMissing;
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [hydrated, setHydrated] = useState(!enabled);
   const [recent, setRecent] = useState<Record<string, number>>(() => { try { return JSON.parse(localStorage.getItem('dmex_mobile_recent_v1') || '{}'); } catch { return {}; } });
   const nextBlock = useRef<string | undefined>(undefined), intent = useRef(0), restored = useRef(false);
@@ -35,13 +36,37 @@ export function useMobilePlayback(enabled: boolean, ready: boolean, library: Tra
     if (seconds > 0 && t.path) { t.pending -= seconds; void invoke('update_play_stats', { path: t.path, seconds }).then(() => statsRef.current(t.path, seconds, false)).catch(() => setError('Listening history could not be saved.')); }
   }, []);
   const run = useCallback(async (value: MobileQueue, options: MobileLoadOptions = {}) => {
-    const entry = queueCurrent(value); if (!entry) return;
+    if (!queueCurrent(value)) return;
     const id = ++intent.current;
     flush(); nextBlock.current = undefined;
-    telemetry.current = { path: entry.track.path, time: options.position || 0, listened: 0, pending: 0, counted: false };
-    commit(value); setError(''); setBusy(true);
-    try { await loader.current(libraryRef.current.find(t => t.path === entry.track.path) || entry.track, options); }
-    catch { if (id === intent.current) setError(`Could not open ${entry.track.name}. Retry or skip this track.`); }
+    setError(''); setBusy(true);
+    const attempted = new Set<string>();
+    try {
+      while (id === intent.current && attempted.size < 64) {
+        const entry = queueCurrent(value); if (!entry) break;
+        attempted.add(entry.track.path);
+        telemetry.current = { path: entry.track.path, time: options.position || 0, listened: 0, pending: 0, counted: false };
+        commit(value);
+        try { await loader.current(libraryRef.current.find(t => t.path === entry.track.path) || entry.track, options); return; }
+        catch {
+          if (id !== intent.current) return;
+          const result = entry.track.source === 'cloud' ? null : await invoke<{removed: boolean; status: string}>('remove_missing_track', { path: entry.track.path }).catch(() => null);
+          if (!result?.removed) { if (id === intent.current) setError(`Could not open ${entry.track.name}. ${result?.status === 'permission' ? 'Restore music access, then retry.' : 'Retry or skip this track.'}`); return; }
+          libraryRef.current = libraryRef.current.filter(track => track.path !== entry.track.path);
+          missingCallback.current?.(entry.track.path);
+          setRecent(previous => { const next = { ...previous }; delete next[entry.track.path]; localStorage.setItem('dmex_mobile_recent_v1', JSON.stringify(next)); return next; });
+          if (id !== intent.current) { commit(discardMissingTrack(ref.current, entry.track.path)); return; }
+          value = discardMissingTrack(value, entry.track.path);
+          if (!queueCurrent(value)) {
+            const candidates = libraryRef.current.filter(track => !attempted.has(track.path));
+            const selected = candidates[Math.floor(Math.random() * candidates.length)];
+            value = selected ? createQueue([selected, ...candidates.filter(track => track.path !== selected.path)], selected, 'Tracks', true) : emptyQueue();
+          }
+          commit(value); options = { autoplay: options.autoplay, position: 0 };
+        }
+      }
+      if (id === intent.current) setError(attempted.size >= 64 ? 'Too many unavailable tracks. Add your music source again or choose another track.' : 'No playable tracks remain in this queue or library.');
+    }
     finally { if (id === intent.current) setBusy(false); }
   }, [commit, flush]);
   useEffect(() => {

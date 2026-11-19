@@ -1,12 +1,13 @@
 import { CustomPlaylist, Track } from '../types';
 import { artistIdentity, splitArtists } from '../utils/artistEngine';
+import { releaseYear } from '../utils/trackYear';
 
 export type MobileTab = 'favourites' | 'playlists' | 'tracks' | 'albums' | 'artists' | 'folders' | 'discover';
 export type SmartCollection = 'recentlyAdded' | 'recentlyPlayed' | 'mostPlayed';
 export type MobileRoute = { kind: 'library'; tab: MobileTab } | { kind: 'collection'; id: SmartCollection } |
   { kind: 'playlist' | 'playlistEdit' | 'album' | 'artist' | 'folder'; id: string } | { kind: 'search'; query?: string } |
   { kind: 'queue' | 'settings' | 'activity' };
-export type MobileSort = 'title' | 'artist' | 'added' | 'duration';
+export type MobileSort = 'title' | 'artist' | 'added' | 'duration' | 'year';
 export const SMART_TITLES: Record<SmartCollection, string> = { recentlyAdded: 'Recently added', recentlyPlayed: 'Recently played', mostPlayed: 'Most played' };
 export const countLabel = (count: number, noun = 'track') => `${count} ${noun}${count === 1 ? '' : 's'}`;
 export function isFeaturedAlbum(id: string) {
@@ -15,8 +16,22 @@ export function isFeaturedAlbum(id: string) {
   return (hash >>> 0) % 5 === 0;
 }
 export const albumId = (track: Track) => JSON.stringify([(track.album || 'Unknown Album').normalize('NFKC').trim().toLocaleLowerCase(), ((track as Track & { albumArtist?: string }).albumArtist || track.artist || 'Unknown Artist').normalize('NFKC').trim().toLocaleLowerCase()]);
-export function sortTracks(tracks: Track[], sort: MobileSort): Track[] {
-  return [...tracks].sort((a, b) => sort === 'added' ? (b.dateAdded || 0) - (a.dateAdded || 0) || a.name.localeCompare(b.name) : sort === 'duration' ? b.duration - a.duration : sort === 'artist' ? a.artist.localeCompare(b.artist) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name));
+export function sortTracks(tracks: Track[], sort: MobileSort, descending = false): Track[] {
+  return [...tracks].sort((a, b) => {
+    if (sort === 'year') {
+      const first = releaseYear(a), second = releaseYear(b);
+      if (first === null || second === null) return first === second ? a.name.localeCompare(b.name) : first === null ? 1 : -1;
+      return (descending ? second - first : first - second) || a.name.localeCompare(b.name);
+    }
+    const result = sort === 'added' ? (b.dateAdded || 0) - (a.dateAdded || 0) || a.name.localeCompare(b.name) : sort === 'duration' ? b.duration - a.duration : sort === 'artist' ? a.artist.localeCompare(b.artist) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name);
+    return descending ? -result : result;
+  });
+}
+export function trackSection(track: Track, sort?: MobileSort): string | null {
+  if (sort === 'year') return String(releaseYear(track) ?? 'Unknown year');
+  if (sort !== 'title' && sort !== 'artist') return null;
+  const first = (sort === 'artist' ? track.artist : track.name).trim().normalize('NFKC').charAt(0).toLocaleUpperCase();
+  return /\p{L}/u.test(first) ? first : '#';
 }
 export function smartTracks(id: SmartCollection, tracks: Track[], recent: Record<string, number>): Track[] {
   if (id === 'recentlyAdded') return sortTracks(tracks, 'added').slice(0, 100);

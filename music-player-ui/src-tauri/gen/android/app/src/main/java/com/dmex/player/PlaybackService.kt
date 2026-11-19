@@ -39,22 +39,28 @@ class PlaybackService : Service() {
     private var state = JSONObject()
     private var foreground = false
     private var focused = false
+    private val focusRecovery = FocusRecovery()
     private var focusRequest: AudioFocusRequest? = null
     private var lastPlaying = false
     private var lastPosition = 0L
     private var lastUpdate = SystemClock.elapsedRealtime()
     private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
-            focused = false
-            clearClicks()
-            NativeMediaBridge.send(2)
+        when (change) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                focused = true
+                if (focusRecovery.gain() && NativeMediaBridge.stateFlags() and 1 != 0) { promote(); NativeMediaBridge.send(9) }
+            }
+            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                focusRecovery.loss(change != AudioManager.AUDIOFOCUS_LOSS, NativeMediaBridge.stateFlags() and 2 != 0)
+                focused = false; clearClicks(); NativeMediaBridge.send(8)
+            }
         }
     }
     private val clickAction = Runnable { dispatch(clicks.takeAction()) }
     private val noisy = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) { clearClicks(); NativeMediaBridge.send(7) }
+            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) { cancelAutoResume(); clearClicks(); NativeMediaBridge.send(7) }
         }
     }
     private val poll = object : Runnable {
@@ -123,6 +129,7 @@ class PlaybackService : Service() {
         return true
     }
     private fun clearClicks() { handler.removeCallbacks(clickAction); clicks.clear() }
+    fun cancelAutoResume() { focusRecovery.cancel(); publish() }
     private fun requestFocus(): Boolean {
         if (focused) return true
         val result = if (Build.VERSION.SDK_INT >= 26) {
@@ -135,6 +142,7 @@ class PlaybackService : Service() {
         return focused
     }
     private fun dispatch(action: Int) {
+        focusRecovery.cancel()
         if (NativeMediaBridge.stateFlags() and 1 == 0) return
         val willPlay = action == 1 || action == 3 || action == 4 || action == 0 && NativeMediaBridge.stateFlags() and 2 == 0
         if (willPlay) { promote(); if (!requestFocus()) return }
@@ -159,7 +167,7 @@ class PlaybackService : Service() {
             session.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, state.optString("title"))
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, state.optString("artist"))
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, state.optLong("duration")).build())
-            if (state.optBoolean("playing")) { promote(); if (!requestFocus()) NativeMediaBridge.send(2) }
+            if (lastPlaying && !focusRecovery.suspended) { promote(); if (!requestFocus()) NativeMediaBridge.send(2) }
             publish()
         }
         intent?.getIntExtra("action", -1)?.takeIf { it >= 0 }?.let { dispatch(it) }
@@ -192,17 +200,20 @@ class PlaybackService : Service() {
             (if (state.optBoolean("canNext")) PlaybackState.ACTION_SKIP_TO_NEXT else 0L) or (if (state.optBoolean("canPrevious")) PlaybackState.ACTION_SKIP_TO_PREVIOUS else 0L)
         session.setPlaybackState(PlaybackState.Builder().setActions(actions)
             .setState(if (lastPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, position(), if (lastPlaying) 1f else 0f, SystemClock.elapsedRealtime()).build())
-        if (!lastPlaying && foreground) {
+        if (!lastPlaying && foreground && !focusRecovery.suspended) {
             stopForeground(STOP_FOREGROUND_DETACH); foreground = false
-            if (Build.VERSION.SDK_INT >= 26) focusRequest?.let { audio.abandonAudioFocusRequest(it) }
-            else @Suppress("DEPRECATION") audio.abandonAudioFocus(focusListener)
-            focused = false
+            if (!focusRecovery.suspended) {
+                if (Build.VERSION.SDK_INT >= 26) focusRequest?.let { audio.abandonAudioFocusRequest(it) }
+                else @Suppress("DEPRECATION") audio.abandonAudioFocus(focusListener)
+                focused = false
+            }
         }
         if (lastPlaying) promote()
         if (state.optBoolean("hasTrack")) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
+        focusRecovery.cancel()
         handler.removeCallbacksAndMessages(null)
         unregisterReceiver(noisy)
         session.isActive = false; session.release()

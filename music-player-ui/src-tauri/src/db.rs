@@ -31,6 +31,13 @@ pub struct CustomPlaylist {
     pub track_paths: Vec<String>,
 }
 
+pub fn remove_missing_track(conn: &Connection, path: &str) -> Result<()> {
+    let transaction = conn.unchecked_transaction()?;
+    transaction.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", [path])?;
+    transaction.execute("DELETE FROM tracks WHERE path = ?1", [path])?;
+    transaction.commit()
+}
+
 pub fn upsert_track(conn: &Connection, track: &Track) -> Result<()> {
     let date_added = track.date_added.unwrap_or_else(|| {
         #[cfg(target_os = "android")]
@@ -179,6 +186,18 @@ mod tests {
 
     fn track() -> Track {
         serde_json::from_value(serde_json::json!({"path":"fixture.flac", "name":"Song", "artist":"Artist", "album":"Album", "duration":123.0})).unwrap()
+    }
+
+    #[test]
+    fn missing_track_cleanup_keeps_other_music_and_playlist_order() {
+        let conn = database();
+        let missing = track(); upsert_track(&conn, &missing).unwrap();
+        let mut remaining = track(); remaining.path = "remaining.flac".into(); upsert_track(&conn, &remaining).unwrap();
+        save_playlist(&conn, &CustomPlaylist { id: "p".into(), name: "Saved".into(), track_paths: vec![missing.path.clone(), remaining.path.clone()] }).unwrap();
+        remove_missing_track(&conn, &missing.path).unwrap();
+        remove_missing_track(&conn, &missing.path).unwrap();
+        assert_eq!(get_all_tracks(&conn).unwrap()[0].path, remaining.path);
+        assert_eq!(get_playlists(&conn).unwrap()[0].track_paths, vec![remaining.path]);
     }
 
     #[test]

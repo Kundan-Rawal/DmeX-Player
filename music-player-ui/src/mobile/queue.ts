@@ -9,6 +9,13 @@ export interface MobileQueue {
 export const emptyQueue = (): MobileQueue => ({ version: 1, entries: [], currentId: null, origin: '', shuffle: false, repeat: 'OFF', originalOrder: [], history: [], position: 0 });
 const uid = () => crypto.randomUUID();
 export const queueCurrent = (q: MobileQueue) => q.entries.find(e => e.id === q.currentId);
+export function discardMissingTrack(q: MobileQueue, path: string): MobileQueue {
+  const removed = new Set(q.entries.filter(entry => entry.track.path === path).map(entry => entry.id));
+  const index = q.entries.findIndex(entry => entry.id === q.currentId);
+  const next = removed.has(q.currentId || '') ? q.entries.slice(index + 1).find(entry => !removed.has(entry.id))?.id || null : q.currentId;
+  return { ...q, entries: q.entries.filter(entry => !removed.has(entry.id)), currentId: next,
+    originalOrder: q.originalOrder.filter(id => !removed.has(id)), history: q.history.filter(id => !removed.has(id)), position: next === q.currentId ? q.position : 0 };
+}
 export function createQueue(tracks: Track[], selected: Track, origin: string, shuffle = false): MobileQueue {
   const entries = tracks.map(track => ({ id: uid(), track }));
   const selectedEntry = entries.find(e => e.track.path === selected.path);

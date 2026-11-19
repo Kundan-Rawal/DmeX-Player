@@ -21,6 +21,10 @@ object NativeMediaBridge {
 @TauriPlugin
 class MediaPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
+    fun userTransport(invoke: Invoke) {
+        activity.runOnUiThread { PlaybackService.instance?.cancelAutoResume(); invoke.resolve(JSObject()) }
+    }
+    @Command
     fun update(invoke: Invoke) {
         // Jackson does not populate JSONObject's internal map when used as an InvokeArg field.
         val state = invoke.getArgs().getJSONObject("state")

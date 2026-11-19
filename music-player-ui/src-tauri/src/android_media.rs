@@ -22,6 +22,8 @@ fn dispatch(action: i32, position: i64) {
                     0 if flags & 1 != 0 => Some(if flags & 2 != 0 { "PAUSE".into() } else { "PLAY_USER".into() }),
                     1 if flags & 1 != 0 => Some("PLAY_USER".into()),
                     2 => Some("PAUSE".into()),
+                    8 => Some("PAUSE".into()),
+                    9 if flags & 1 != 0 => Some("PLAY".into()),
                     5 => Some(format!("SEEK {}", position.max(0) as f64 / 1000.0)),
                     6 => Some("PAUSE".into()),
                     7 => {
@@ -49,7 +51,7 @@ fn dispatch(action: i32, position: i64) {
 #[no_mangle]
 pub extern "C" fn Java_com_dmex_player_NativeMediaBridge_transport(
     _env: *mut std::ffi::c_void, _object: *mut std::ffi::c_void, action: i32, position: i64,
-) { if (0..=7).contains(&action) { dispatch(action, position); } }
+) { if (0..=9).contains(&action) { dispatch(action, position); } }
 
 #[no_mangle]
 pub extern "C" fn Java_com_dmex_player_NativeMediaBridge_flags(

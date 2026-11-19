@@ -13,6 +13,10 @@ import { BRAND, DEFAULT_AMBIENT_COLORS } from '../src/config/brand';
 import { getPalette, nudgeVibrancy, trackAccentColor } from '../src/utils/helpers';
 import { createQueue } from '../src/mobile/queue';
 import { emit } from '@tauri-apps/api/event';
+import { releaseYear, isClassicYear } from '../src/utils/trackYear';
+import { metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS } from '../src/config/soundPresets';
+import { sortTracks } from '../src/mobile/library';
+import { discardMissingTrack } from '../src/mobile/queue';
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);
@@ -29,6 +33,7 @@ if (query.has('mobile')) {
       isFavorite: i < 3, playCount: i < 8 ? 8 - i : 0, totalSecondsListened: i < 8 ? 3000 - i * 100 : 0, lastPlayed: i < 4 ? 1794355200000 - i * 1000 : 0 });
   }
   if (query.has('navigation')) tracks.forEach(track => { artistImages[artistCacheKey(track.artist)] = `/artist-art/${artistCacheKey(track.artist)}.png`; });
+  if (query.has('iteration')) tracks.forEach((track, index) => { track.year = ['1880', '2003', '2004', '1879', '2001-07-15', '', '1995', '1996'][index % 8]; track.genre = ['Jazz', 'Metal', 'Pop', 'Classical'][index % 4]; });
 }
 mockWindows('main');
 mockConvertFileSrc('windows');
@@ -54,11 +59,22 @@ if (query.has('native-queue')) {
   store.set('app_settings', { lastTrackPath: tracks[2].path, isDarkMode: true });
 }
 const calls: { command: string; payload: any }[] = [];
-(window as any).libraryTest = { tracks, calls, emit, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+const failures: Record<string, string> = {};
+let engineSettings = [...DEFAULT_AUDIO];
+(window as any).libraryTest = { tracks, calls, emit, failures, releaseYear, isClassicYear, sortTracks, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
-  if (command === 'audio_status') return { ready: true, settings: DEFAULT_AUDIO, generation: 1, bypassAll: false, ecoMode: true };
+  if (command === 'audio_status') return { ready: true, settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, bypassAll: false, ecoMode: true };
+  if (command === 'audio_apply_settings') { engineSettings = [...payload.values]; return; }
+  if (command === 'audio_command' && payload.cmd.startsWith('LOAD ')) { if (failures[payload.cmd.slice(5)]) throw new Error('Fixture source unavailable'); return; }
+  if (command === 'remove_missing_track') {
+    const status = failures[payload.path] || 'available';
+    if (status === 'missing') { const index = tracks.findIndex(track => track.path === payload.path); if (index >= 0) tracks.splice(index, 1); testPlaylists.forEach(playlist => { playlist.trackPaths = playlist.trackPaths.filter(path => path !== payload.path); }); }
+    const result = { removed: status === 'missing', status };
+    const delay = (window as any).libraryTest.probeDelay || 0;
+    return delay ? new Promise(resolve => setTimeout(() => resolve(result), delay)) : result;
+  }
   if (command === 'audio_metrics') return { currentTime: 0, duration: 120, audioLevel: 0, bassLevel: 0, midLevel: 0, trebleLevel: 0, limiterGain: 1 };
   if (command === 'fetch_library') {
     if (query.has('library-failure') && calls.filter(call => call.command === command).length === 1) throw new Error('Library temporarily unavailable');
@@ -92,7 +108,7 @@ mockIPC((command, payload: any) => {
   }
   if (command === 'add_library_tracks') { tracks.push(...payload.tracks); return; }
   if (command === 'extract_audio_metadata') {
-    if (query.has('mobile')) { const track = tracks.find(t => t.path === payload.path); return { title: track?.name, artist: track?.artist, album: track?.album, duration: track?.duration || 180 }; }
+    if (query.has('mobile')) { const track = tracks.find(t => t.path === payload.path); return { title: track?.name, artist: track?.artist, album: track?.album, year: track?.year, genre: track?.genre, duration: track?.duration || 180 }; }
     if (query.has('metadata-failure')) throw new Error('Test unreadable metadata');
     if (query.has('branding')) {
       const track = tracks.find(track => track.path === payload.path);

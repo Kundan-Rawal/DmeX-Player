@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.dmex.focusprobe">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="28" />
+    <application android:label="DmeX Focus Test" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+        <activity android:name=".FocusProbe" android:exported="true" />
+    </application>
+</manifest>

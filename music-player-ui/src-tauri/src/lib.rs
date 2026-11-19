@@ -189,7 +189,16 @@ fn scan_audio_paths(root: &str) -> Vec<String> {
 
 #[tauri::command]
 async fn audio_command(mut cmd: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || execute_resolved_audio_command(&mut cmd)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "android")]
+        if matches!(cmd.as_str(), "PAUSE" | "STOP" | "PLAY_USER") {
+            if let Some(app) = APP_HANDLE.get() {
+                let media = app.state::<android_media::Media<tauri::Wry>>();
+                let _ = media.0.run_mobile_plugin::<serde_json::Value>("userTransport", serde_json::json!({}));
+            }
+        }
+        execute_resolved_audio_command(&mut cmd)
+    }).await.map_err(|e| e.to_string())?
 }
 
 fn execute_resolved_audio_command(cmd: &mut String) -> Result<(), String> {
@@ -243,6 +252,30 @@ fn fetch_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
         Ok(tracks) => Ok(tracks),
         Err(e) => Err(format!("Failed to fetch library: {}", e)),
     }
+}
+
+#[tauri::command]
+async fn remove_missing_track(app: tauri::AppHandle, path: String) -> Result<serde_json::Value, String> {
+    if path.starts_with("http:") || path.starts_with("https:") { return Ok(serde_json::json!({"removed":false,"status":"unavailable"})); }
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "android")]
+        let status = {
+            let library = app.state::<android_library::Library<tauri::Wry>>();
+            let response: serde_json::Value = library.0.run_mobile_plugin("sourceStatus", serde_json::json!({"path": path})).map_err(|error| error.to_string())?;
+            response["status"].as_str().unwrap_or("unavailable").to_string()
+        };
+        #[cfg(not(target_os = "android"))]
+        let status = match std::fs::File::open(&path) {
+            Ok(_) => "available", Err(error) if error.kind() == std::io::ErrorKind::NotFound => "missing",
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => "permission", Err(_) => "unavailable",
+        }.to_string();
+        if status == "missing" {
+            let state = app.state::<AppState>();
+            let connection = state.db_conn.lock().map_err(|_| "Library lock unavailable")?;
+            db::remove_missing_track(&connection, &path).map_err(|error| error.to_string())?;
+        }
+        Ok(serde_json::json!({"removed":status == "missing", "status":status}))
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -893,7 +926,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            mobile_haptic, mobile_media_update, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
+            mobile_haptic, mobile_media_update, remove_missing_track, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, delete_playlist, get_all_artist_images, get_setting, set_setting,
             audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music, pick_music_folder, extract_audio_metadata, record_play, identify_lyrics_song, download_cloud_stream, fetch_cloud_api,

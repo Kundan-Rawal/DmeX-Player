@@ -23,6 +23,9 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.util.concurrent.Executors
 import java.security.MessageDigest
+import java.io.FileNotFoundException
+import java.io.FileInputStream
+import android.os.Environment
 
 @InvokeArg
 class MusicScanArgs { var folderPath: String = "ALL" }
@@ -34,6 +37,44 @@ class MusicMetadataArgs { lateinit var path: String }
 class MusicLibraryPlugin(private val activity: Activity) : Plugin(activity) {
     private val worker = Executors.newSingleThreadExecutor()
     private val extensions = setOf("mp3", "mp2", "mp1", "wav", "wave", "flac", "m4a", "m4b", "mp4", "aac", "ogg", "oga", "aif", "aiff", "aifc", "caf")
+
+    @Command
+    fun sourceStatus(invoke: Invoke) {
+        val path = invoke.parseArgs(MusicMetadataArgs::class.java).path
+        worker.execute {
+            val status = try {
+                if (path.startsWith("content://")) {
+                    val uri = Uri.parse(path)
+                    try {
+                        activity.contentResolver.openFileDescriptor(uri, "r")?.use { } ?: throw FileNotFoundException()
+                        "available"
+                    } catch (_: FileNotFoundException) {
+                        val local = uri.authority == "media" && uri.pathSegments.firstOrNull() == "external_primary" ||
+                            uri.authority == "com.android.externalstorage.documents" && DocumentsContract.getDocumentId(uri).startsWith("primary:")
+                        val mounted = Environment.getExternalStorageState() in listOf(Environment.MEDIA_MOUNTED, Environment.MEDIA_MOUNTED_READ_ONLY)
+                        val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+                        val allowed = uri.authority != "media" || ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
+                        val absent = activity.contentResolver.query(uri, null, null, null, null)?.use { it.count == 0 } ?: false
+                        if (local && mounted && allowed && absent) "missing" else "unavailable"
+                    }
+                } else {
+                    val file = File(path)
+                    try { FileInputStream(file).use { }; "available" }
+                    catch (_: FileNotFoundException) {
+                        var parent = file.parentFile
+                        while (parent != null && !parent.exists()) parent = parent.parentFile
+                        val internal = path.startsWith(activity.filesDir.absolutePath + "/")
+                        val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+                        val allowed = internal || ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
+                        val mounted = internal || Environment.getExternalStorageState(file) in listOf(Environment.MEDIA_MOUNTED, Environment.MEDIA_MOUNTED_READ_ONLY)
+                        if (!file.exists() && allowed && mounted && parent?.canRead() == true) "missing" else "unavailable"
+                    }
+                }
+            } catch (_: SecurityException) { "permission" }
+            catch (_: Exception) { "unavailable" }
+            invoke.resolve(JSObject().put("status", status))
+        }
+    }
 
     @Command
     fun extractMetadata(invoke: Invoke) {

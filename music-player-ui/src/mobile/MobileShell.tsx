@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowUp, Check, CheckCircle2, ChevronRight, Circle, Clock3, Disc3, Folder, GripVertical, Heart, History, ListMusic, ListPlus, LoaderCircle, MoreHorizontal, Music2, Pause, Play, Plus, Search, Settings, Shuffle, SkipBack, SkipForward, Trash2, Undo2, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Check, CheckCircle2, ChevronRight, Circle, Clock3, Disc3, Folder, GripVertical, Heart, History, ListFilter, ListMusic, ListPlus, LoaderCircle, MoreHorizontal, Music2, Pause, Play, Plus, Search, Settings, Shuffle, SkipBack, SkipForward, Trash2, Undo2, Users, X } from 'lucide-react';
 import { Track, CustomPlaylist } from '../types';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { FolderModal } from '../modals/modals';
@@ -10,7 +10,9 @@ import { artistCacheKey, buildArtistDictionary } from '../utils/artistEngine';
 import { formatTime } from '../utils/formatters';
 import { CloudFetchView } from '../views/CloudFetchView';
 import { BypassAllButton } from '../components/player/AdvancedAudioPanel';
-import { albumGroups, countLabel, folderPath, isFeaturedAlbum, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks } from './library';
+import { albumGroups, countLabel, folderPath, isFeaturedAlbum, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks, trackSection } from './library';
+import { CATEGORY_LABELS, metadataCategory } from '../config/soundPresets';
+import { isClassicYear } from '../utils/trackYear';
 import { MobilePlayback } from './useMobilePlayback';
 import { MobileQueueList } from './MobileQueueList';
 import { MobilePaletteAmbient } from './MobilePaletteAmbient';
@@ -21,7 +23,7 @@ import { useArtistArtwork } from './useArtistArtwork';
 import './MobileShell.css';
 
 const TABS: { id: MobileTab; label: string }[] = [{ id: 'favourites', label: 'Favourites' }, { id: 'playlists', label: 'Playlists' }, { id: 'tracks', label: 'Tracks' }, { id: 'albums', label: 'Albums' }, { id: 'artists', label: 'Artists' }, { id: 'folders', label: 'Folders' }, { id: 'discover', label: 'Discover' }];
-type Sheet = { kind: 'folder' | 'libraryMenu' | 'sort' | 'playlistMenu' | 'track' | 'addPlaylist' | 'createPlaylist' | 'renamePlaylist' | 'deletePlaylist' | 'replaceQueue' | 'queueEntry' | 'clearArtistArt'; track?: Track; paths?: string[]; playlistId?: string; queueId?: string };
+type Sheet = { kind: 'filter' | 'folder' | 'libraryMenu' | 'sort' | 'playlistMenu' | 'track' | 'addPlaylist' | 'createPlaylist' | 'renamePlaylist' | 'deletePlaylist' | 'replaceQueue' | 'queueEntry' | 'clearArtistArt'; track?: Track; paths?: string[]; playlistId?: string; queueId?: string };
 interface Navigation { routes: MobileRoute[]; sheet: Sheet | null; selected: string[]; expanded: boolean }
 interface Props {
   ready: boolean;
@@ -104,9 +106,9 @@ function MobileTabs({ active, onChange }: { active: MobileTab; onChange: (tab: M
     }, 160);
   }}><span className="dmex-tab-spacer" />{TABS.map(tab => <button type="button" key={tab.id} data-tab={tab.id} aria-current={active === tab.id ? 'page' : undefined} onClick={() => onChange(tab.id)}><span className="dmex-tab-label">{tab.label}</span><span className="dmex-tab-measure" aria-hidden="true">{tab.label}</span></button>)}<span className="dmex-tab-spacer" /></nav>;
 }
-function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, onSelect, scrollKey, positions, onReorder }: {
+function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, onSelect, scrollKey, positions, onReorder, groupBy }: {
   tracks: Track[]; currentPath?: string; favourites: Set<string>; selected: string[]; onPlay: (track: Track) => void;
-  onMenu: (track: Track) => void; onSelect: (paths: string[]) => void; scrollKey: string; positions: React.RefObject<Record<string, number>>; onReorder?: (from: Track, to: Track) => void;
+  onMenu: (track: Track) => void; onSelect: (paths: string[]) => void; scrollKey: string; positions: React.RefObject<Record<string, number>>; onReorder?: (from: Track, to: Track) => void; groupBy?: MobileSort;
 }) {
   const ref = useRef<HTMLDivElement>(null), [scroll, setScroll] = useState(0), [height, setHeight] = useState(600);
   const active = useContext(MobilePageActiveContext);
@@ -120,11 +122,32 @@ function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, 
     return () => observer.disconnect();
   }, [active, scrollKey, positions]);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const begin = Math.max(0, Math.floor(scroll / rowHeight) - 4), end = Math.min(tracks.length, Math.ceil((scroll + height) / rowHeight) + 4);
+  const layout = useMemo(() => {
+    let top = 0, previous: string | null = null;
+    const sections: { label: string; top: number }[] = [];
+    const offsets = tracks.map(track => {
+      const label = onReorder ? null : trackSection(track, groupBy);
+      if (label !== null && label !== previous) { sections.push({ label, top }); top += 28; previous = label; }
+      const offset = top; top += rowHeight; return offset;
+    });
+    return { offsets, sections, total: top };
+  }, [tracks, rowHeight, groupBy, onReorder]);
+  let low = 0, high = tracks.length;
+  while (low < high) { const middle = (low + high) >>> 1; if (layout.offsets[middle] < scroll) low = middle + 1; else high = middle; }
+  const begin = Math.max(0, low - 4), end = Math.min(tracks.length, low + Math.ceil(height / rowHeight) + 5);
+  const sectionIndex = Math.max(0, layout.sections.findIndex((section, index) => section.top <= scroll + 1 && (!layout.sections[index + 1] || layout.sections[index + 1].top > scroll + 1)));
+  const [indexPreview, setIndexPreview] = useState<string | null>(null);
+  const jump = (index: number) => { const section = layout.sections[index]; if (section && ref.current) { ref.current.scrollTop = section.top; setIndexPreview(section.label); } };
+  const scrub = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    jump(Math.max(0, Math.min(layout.sections.length - 1, Math.floor((event.clientY - rect.top) / rect.height * layout.sections.length))));
+  };
   const toggle = (track: Track) => onSelect(selected.includes(track.path) ? selected.filter(p => p !== track.path) : [...selected, track.path]);
-  return <div ref={ref} className="dmex-mobile-track-scroll" role="list" aria-label="Tracks" onScroll={event => { const top = event.currentTarget.scrollTop; if (!event.currentTarget.closest('[data-current=false]')) positions.current[scrollKey] = top; setScroll(top); }}>
-    <div className="dmex-mobile-track-spacer" style={{ height: tracks.length * rowHeight }}>
-      {tracks.slice(begin, end).map((track, i) => <div role="listitem" className={'dmex-mobile-track' + (track.path === currentPath ? ' is-current' : '')} key={track.path} style={{ top: (begin + i) * rowHeight, height: rowHeight }}>
+  return <div className={'dmex-mobile-track-container' + (layout.sections.length > 1 ? ' has-index' : '')}>
+  <div ref={ref} className="dmex-mobile-track-scroll" role="list" aria-label="Tracks" onScroll={event => { const top = event.currentTarget.scrollTop; if (!event.currentTarget.closest('[data-current=false]')) positions.current[scrollKey] = top; setScroll(top); }}>
+    <div className="dmex-mobile-track-spacer" style={{ height: layout.total }}>
+      {layout.sections.filter(section => section.top >= scroll - 28 && section.top < scroll + height + 28).map(section => <div className="dmex-mobile-track-section" role="heading" aria-level={2} key={section.top} style={{ top: section.top }}>{section.label}</div>)}
+      {tracks.slice(begin, end).map((track, i) => <div role="listitem" className={'dmex-mobile-track' + (track.path === currentPath ? ' is-current' : '')} key={track.path} style={{ top: layout.offsets[begin + i], height: rowHeight }}>
         {track.path === currentPath && <MobilePaletteAmbient className="dmex-mobile-track-ambient" />}
         {onReorder && <button className="dmex-mobile-icon dmex-mobile-drag-handle" aria-label={`Drag to reorder ${track.name}`} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); reorder.current = { track, target: begin + i }; }} onPointerMove={e => {
           if (!reorder.current || !ref.current) return;
@@ -145,6 +168,16 @@ function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, 
         {!selected.length && <button type="button" className="dmex-mobile-icon" aria-label={`Options for ${track.name}`} onClick={() => onMenu(track)}><MoreHorizontal size={20} /></button>}
       </div>)}
     </div>
+  </div>
+    {layout.sections.length > 0 && scroll > 0 && <div className="dmex-mobile-current-section" aria-hidden="true">{layout.sections[sectionIndex].label}</div>}
+    {layout.sections.length > 1 && <div className="dmex-mobile-track-index" role="slider" tabIndex={0} aria-label={groupBy === 'year' ? 'Release year index' : 'Alphabet index'} aria-orientation="vertical" aria-valuemin={0} aria-valuemax={layout.sections.length - 1} aria-valuenow={sectionIndex} aria-valuetext={layout.sections[sectionIndex].label}
+      onPointerDown={event => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); scrub(event); }}
+      onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrub(event); }}
+      onPointerUp={event => { event.currentTarget.releasePointerCapture(event.pointerId); setIndexPreview(null); }} onPointerCancel={() => setIndexPreview(null)}
+      onKeyDown={event => { const next = event.key === 'Home' ? 0 : event.key === 'End' ? layout.sections.length - 1 : event.key === 'ArrowDown' ? Math.min(layout.sections.length - 1, sectionIndex + 1) : event.key === 'ArrowUp' ? Math.max(0, sectionIndex - 1) : null; if (next !== null) { event.preventDefault(); jump(next); setIndexPreview(null); } }}>
+      {layout.sections.map((section, index) => index % Math.ceil(layout.sections.length / Math.max(2, Math.floor(height / 22))) === 0 || index === layout.sections.length - 1 ? <span key={section.top} style={{ top: `${(index + .5) / layout.sections.length * 100}%` }} data-active={index === sectionIndex} aria-hidden="true">{section.label === 'Unknown year' ? '?' : section.label}</span> : null)}
+    </div>}
+    {indexPreview && <output className="dmex-mobile-index-preview">{indexPreview}</output>}
   </div>;
 }
 function Action({ icon: Icon, children, onClick, danger = false, disabled = false }: { icon?: React.ComponentType<{ size?: number }>; children: React.ReactNode; onClick: () => void; danger?: boolean; disabled?: boolean }) {
@@ -177,7 +210,9 @@ function SettingsPage({ p, notify }: { p: Props; notify: (message: string) => vo
 }
 export function MobileShell(p: Props) {
   const nav = useNavigation(p.isExpanded, p.onCollapse), { state } = nav, route = state.routes.slice(-1)[0]!;
-  const [sort, setSort] = useState<MobileSort>(() => { const stored = localStorage.getItem('dmex_mobile_sort'); return ['title', 'artist', 'added', 'duration'].includes(stored || '') ? stored as MobileSort : 'added'; });
+  const [sort, setSort] = useState<MobileSort>(() => { const stored = localStorage.getItem('dmex_mobile_sort'); return ['title', 'artist', 'added', 'duration', 'year'].includes(stored || '') ? stored as MobileSort : 'added'; });
+  const [descending, setDescending] = useState(() => localStorage.getItem('dmex_mobile_sort_reverse') === 'true');
+  const [categoryFilter, setCategoryFilter] = useState(() => { const stored = localStorage.getItem('dmex_mobile_category'); return stored && (stored === 'ALL' || stored in CATEGORY_LABELS) ? stored : 'ALL'; });
   const [query, setQuery] = useState(''), [draftName, setDraftName] = useState(''), [saving, setSaving] = useState(false), [notice, setNotice] = useState('');
   const [undo, setUndo] = useState<null | (() => void)>(null), positions = useRef<Record<string, number>>({}), navRef = useRef(nav);
   navRef.current = nav;
@@ -193,7 +228,11 @@ export function MobileShell(p: Props) {
   const routePlaylist = route.kind === 'playlist' || route.kind === 'playlistEdit' ? p.playlists.find(pl => pl.id === route.id) : undefined;
   const title = root ? 'DmeX Player' : route.kind === 'collection' ? SMART_TITLES[route.id] : route.kind === 'playlist' || route.kind === 'playlistEdit' ? routePlaylist?.name || 'Playlist unavailable' : route.kind === 'album' ? albums.find(a => a.id === route.id)?.name || 'Album' : route.kind === 'artist' ? artists.find(a => a.id === route.id)?.name || 'Artist' : route.kind === 'folder' ? route.id.split(/[\\/]/).slice(-1)[0] || route.id : route.kind === 'queue' ? 'Play queue' : route.kind === 'settings' ? 'Settings' : route.kind === 'activity' ? 'Library activity' : 'Search';
   const baseTracks = useMemo(() => routeTracks(route, p.tracks, p.favourites, p.playlists, p.playback.recent), [route, p.tracks, p.favourites, p.playlists, p.playback.recent]);
-  const list = useMemo(() => route.kind === 'playlist' || route.kind === 'playlistEdit' || route.kind === 'collection' || route.kind === 'album' ? baseTracks : sortTracks(baseTracks, sort), [baseTracks, route.kind, sort]);
+  const list = useMemo(() => {
+    if (route.kind === 'playlist' || route.kind === 'playlistEdit' || route.kind === 'collection' || route.kind === 'album') return baseTracks;
+    const filtered = root && categoryFilter !== 'ALL' ? baseTracks.filter(track => categoryFilter === 'BOLLYWOOD' ? isClassicYear(track) : metadataCategory(track) === categoryFilter) : baseTracks;
+    return sortTracks(filtered, sort, descending);
+  }, [baseTracks, route.kind, root, sort, descending, categoryFilter]);
   const selection = state.selected.map(path => byPath.get(path)).filter((t): t is Track => !!t);
   const searchTracks = useMemo(() => { const q = query.trim().toLocaleLowerCase(); return q ? p.tracks.filter(t => `${t.name} ${t.artist} ${t.album}`.toLocaleLowerCase().includes(q)) : []; }, [query, p.tracks]);
   const searchAlbums = useMemo(() => query.trim() ? albums.filter(a => `${a.name} ${a.artist}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0, 8) : [], [query, albums]);
@@ -215,7 +254,7 @@ export function MobileShell(p: Props) {
     const [moved] = paths.splice(first, 1); paths.splice(last, 0, moved); setSaving(true);
     try { await p.onSavePlaylist({ ...routePlaylist, trackPaths: paths }); } catch { notify('Playlist order could not be saved.'); } finally { setSaving(false); }
   };
-  const trackList = (tracks: Track[], key: string, origin = title) => <TrackList tracks={tracks} currentPath={p.currentTrack?.path} favourites={p.favourites} selected={state.selected} onSelect={nav.select} onPlay={track => play(tracks, track, origin)} onMenu={trackMenu} scrollKey={key} positions={positions} onReorder={route.kind === 'playlistEdit' ? (from, to) => { void reorderPlaylistTrack(from, to); } : undefined} />;
+  const trackList = (tracks: Track[], key: string, origin = title) => <TrackList tracks={tracks} currentPath={p.currentTrack?.path} favourites={p.favourites} selected={state.selected} onSelect={nav.select} onPlay={track => play(tracks, track, origin)} onMenu={trackMenu} scrollKey={root ? `${key}:${sort}:${descending}:${categoryFilter}` : key} positions={positions} groupBy={root ? sort : undefined} onReorder={route.kind === 'playlistEdit' ? (from, to) => { void reorderPlaylistTrack(from, to); } : undefined} />;
   const empty = (heading: string, text: string) => <div className="dmex-mobile-empty"><Music2 size={34} /><h2>{heading}</h2><p>{text}</p>{p.ready && !p.scanning && p.totalTracks === 0 && <button className="dmex-mobile-primary" onClick={() => nav.sheet({ kind: 'folder' })}><Plus size={18} />Add music</button>}</div>;
   const sheet = state.sheet;
   const sheetTitle = sheet?.kind === 'clearArtistArt' ? 'Clear artist artwork?' : sheet?.kind === 'queueEntry' ? 'Queue options' : null;
@@ -246,7 +285,7 @@ export function MobileShell(p: Props) {
       {state.selected.length > 0 && <div className="dmex-mobile-selection-bar"><button onClick={() => nav.select(list.map(t => t.path))}>Select all</button><button aria-label="Play selected" onClick={() => { if (selection[0]) { void p.playback.start(selection, selection[0], 'Selected tracks'); nav.back(); } }}><Play size={19} /></button><button aria-label="Queue selected" onClick={() => { p.playback.add(selection, false); notify(`${countLabel(selection.length)} added to queue`); }}><ListPlus size={21} /></button><button aria-label="Add selection to playlist" onClick={() => nav.sheet({ kind: 'addPlaylist', paths: state.selected })}><Plus size={22} /></button></div>}
       {isList && <>
         {!root && <div className="dmex-mobile-collection-summary"><Artwork track={list.find(t => t.thumb)} /><div><strong>{countLabel(list.length)}</strong><span>{formatTime(list.reduce((sum, t) => sum + (t.duration || 0), 0))} total{route.kind === 'collection' && route.id === 'mostPlayed' ? ' · Ranked by plays' : ''}</span></div><button className="dmex-mobile-icon" aria-label="Shuffle collection" disabled={!list.length} onClick={() => play(list, list[0], title, true)}><Shuffle size={21} /></button><button className="dmex-mobile-play-collection" aria-label="Play collection" disabled={!list.length} onClick={() => play(list, list[0])}><Play size={22} fill="currentColor" /></button></div>}
-        {root && <div className="dmex-mobile-list-toolbar"><span>{countLabel(list.length)}</span><button onClick={() => nav.sheet({ kind: 'sort' })}>{sort === 'added' ? 'Recently added' : sort === 'title' ? 'Title' : sort === 'artist' ? 'Artist' : 'Duration'}<ArrowDown size={15} /></button><button className="dmex-mobile-icon" aria-label="Shuffle tracks" disabled={!list.length} onClick={() => play(list, list[0], tab === 'favourites' ? 'Favourites' : 'Tracks', true)}><Shuffle size={20} /></button></div>}
+        {root && <div className="dmex-mobile-list-toolbar"><span>{countLabel(list.length)}</span><button className="dmex-mobile-icon" aria-label="Filter tracks" aria-pressed={categoryFilter !== 'ALL'} title={categoryFilter === 'ALL' ? 'All categories' : CATEGORY_LABELS[categoryFilter]} onClick={() => nav.sheet({ kind: 'filter' })}><ListFilter size={19} /></button><button aria-label="Sort tracks" onClick={() => nav.sheet({ kind: 'sort' })}>{sort === 'added' ? 'Recently added' : sort === 'title' ? 'Title' : sort === 'artist' ? 'Artist' : sort === 'year' ? 'Year' : 'Duration'}{descending ? <ArrowUp size={15} /> : <ArrowDown size={15} />}</button><button className="dmex-mobile-icon" aria-label="Shuffle tracks" disabled={!list.length} onClick={() => play(list, list[0], tab === 'favourites' ? 'Favourites' : 'Tracks', true)}><Shuffle size={20} /></button></div>}
         {list.length ? trackList(list, routeKey(route), root ? tab === 'favourites' ? 'Favourites' : 'Tracks' : title) : empty(root && tab === 'favourites' ? 'Your favourites belong here' : 'No tracks here yet', root && tab === 'favourites' ? 'Favourite a track from its menu or the player.' : p.tracks.length ? 'Add tracks to this collection to get started.' : 'Choose the music you want in your library.')}
       </>}
       {root && tab === 'playlists' && <RememberedScroll key="playlists" scrollKey={routeKey(route)} positions={positions}><div className="dmex-mobile-smart-grid">{(['recentlyAdded', 'recentlyPlayed', 'mostPlayed'] as const).map((id, i) => { const tracks = smartTracks(id, p.tracks, p.playback.recent); const Icon = [Clock3, History, ListMusic][i]; return <button className="dmex-mobile-smart" data-collection={id} key={id} onClick={() => nav.navigate({ kind: 'collection', id })}><MobileCollectionArtwork tracks={tracks} icon={Icon} /><strong>{SMART_TITLES[id]}</strong><span>{countLabel(tracks.length)}</span></button>; })}</div><div className="dmex-mobile-section-title"><h2>My playlists</h2><button className="dmex-mobile-icon" aria-label="Create playlist" onClick={() => openCreate()}><Plus size={23} /></button></div>{!p.playlists.length && <p className="dmex-mobile-secondary">Your playlists will appear here.</p>}{p.playlists.map(pl => { const tracks = pl.trackPaths.map(path => byPath.get(path)).filter((t): t is Track => !!t); return <div className="dmex-mobile-entity-row" key={pl.id}><button onClick={() => nav.navigate({ kind: 'playlist', id: pl.id })}><Artwork track={tracks[0]} /><span><strong>{pl.name}</strong><small>{countLabel(tracks.length)}{tracks.length < pl.trackPaths.length ? ` · ${pl.trackPaths.length - tracks.length} unavailable` : ''}</small></span></button><button className="dmex-mobile-icon" aria-label={`Options for playlist ${pl.name}`} onClick={() => nav.sheet({ kind: 'playlistMenu', playlistId: pl.id })}><MoreHorizontal size={21} /></button></div>; })}</RememberedScroll>}
@@ -281,10 +320,11 @@ export function MobileShell(p: Props) {
     </MobileRouteViewport>
     {notice && <div className="dmex-mobile-snackbar" role="status"><span>{notice}</span>{undo && <button aria-label="Undo" onClick={() => { undo(); setNotice('Change undone'); setUndo(null); }}><Undo2 size={17} />Undo</button>}<button className="dmex-mobile-icon" aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={16} /></button></div>}
     {sheet?.kind === 'folder' && <FolderModal onClose={nav.closeSheet} onScan={path => { void p.onScan(path); }} />}
-    {sheet && sheet.kind !== 'folder' && sheet.kind !== 'replaceQueue' && <SheetFrame title={sheetTitle || (sheet.kind === 'track' ? track?.name || 'Track options' : sheet.kind === 'sort' ? 'Sort tracks' : sheet.kind === 'libraryMenu' ? 'Library options' : sheet.kind === 'addPlaylist' ? 'Add to playlist' : sheet.kind === 'createPlaylist' ? 'Create playlist' : sheet.kind === 'renamePlaylist' ? 'Rename playlist' : sheet.kind === 'deletePlaylist' ? 'Delete playlist?' : 'Playlist options')} close={nav.closeSheet}>
+    {sheet && sheet.kind !== 'folder' && sheet.kind !== 'replaceQueue' && <SheetFrame title={sheetTitle || (sheet.kind === 'track' ? track?.name || 'Track options' : sheet.kind === 'filter' ? 'Filter tracks' : sheet.kind === 'sort' ? 'Sort tracks' : sheet.kind === 'libraryMenu' ? 'Library options' : sheet.kind === 'addPlaylist' ? 'Add to playlist' : sheet.kind === 'createPlaylist' ? 'Create playlist' : sheet.kind === 'renamePlaylist' ? 'Rename playlist' : sheet.kind === 'deletePlaylist' ? 'Delete playlist?' : 'Playlist options')} close={nav.closeSheet}>
       {sheet.kind === 'libraryMenu' && <><Action icon={Plus} onClick={() => nav.replaceSheet({ kind: 'folder' })}>Add music</Action><Action icon={ListMusic} onClick={() => nav.fromSheet({ kind: 'queue' })}>Play queue</Action><Action icon={History} onClick={() => nav.fromSheet({ kind: 'activity' })}>Library activity</Action><Action icon={Settings} onClick={() => nav.fromSheet({ kind: 'settings' })}>Settings</Action></>}
       {sheet.kind === 'clearArtistArt' && <><p>Downloaded artist images will be removed. Music files and album covers will stay on this device.</p><Action icon={Trash2} danger disabled={saving} onClick={async () => { setSaving(true); try { await artistArt.clear(); nav.closeSheet(); notify('Artist artwork cache cleared'); } catch (error) { notify(error instanceof Error ? error.message : 'Artwork cache could not be cleared.'); } finally { setSaving(false); } }}>Clear artist artwork</Action></>}
-      {sheet.kind === 'sort' && (['added', 'title', 'artist', 'duration'] as MobileSort[]).map(mode => <Action icon={sort === mode ? Check : undefined} key={mode} onClick={() => { setSort(mode); localStorage.setItem('dmex_mobile_sort', mode); nav.closeSheet(); }}>{mode === 'added' ? 'Date added, newest first' : mode === 'title' ? 'Title, A to Z' : mode === 'artist' ? 'Artist, A to Z' : 'Duration, longest first'}</Action>)}
+      {sheet.kind === 'sort' && <>{(['added', 'title', 'artist', 'duration', 'year'] as MobileSort[]).map(mode => <Action icon={sort === mode ? Check : undefined} key={mode} onClick={() => { setSort(mode); localStorage.setItem('dmex_mobile_sort', mode); nav.closeSheet(); }}>{mode === 'added' ? 'Date added, newest first' : mode === 'title' ? 'Title, A to Z' : mode === 'artist' ? 'Artist, A to Z' : mode === 'year' ? 'Release year, oldest first' : 'Duration, longest first'}</Action>)}<div className="dmex-mobile-setting"><span>Reverse order</span><ToggleSwitch label="Reverse sort order" checked={descending} onChange={value => { setDescending(value); localStorage.setItem('dmex_mobile_sort_reverse', String(value)); }} /></div></>}
+      {sheet.kind === 'filter' && [['ALL', 'All categories'], ['BOLLYWOOD', "90s Bollywood Classics (1880-2003)"], ...Object.entries(CATEGORY_LABELS).filter(([id]) => !['BOLLYWOOD','DYNAMIC','DENSE','CENTERED','WIDE','BALANCED'].includes(id))].map(([id, label]) => <Action key={id} icon={categoryFilter === id ? Check : undefined} onClick={() => { setCategoryFilter(id); localStorage.setItem('dmex_mobile_category', id); nav.closeSheet(); }}>{label}</Action>)}
       {sheet.kind === 'queueEntry' && <>
         <Action icon={ArrowUp} disabled={queueIndex <= currentQueueIndex + 1} onClick={() => { p.playback.move(sheet.queueId!, -1); nav.closeSheet(); }}>Move up</Action>
         <Action icon={ArrowDown} disabled={queueIndex <= currentQueueIndex || queueIndex === p.playback.queue.entries.length - 1} onClick={() => { p.playback.move(sheet.queueId!, 1); nav.closeSheet(); }}>Move down</Action>
