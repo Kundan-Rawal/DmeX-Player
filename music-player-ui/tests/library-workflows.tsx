@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { mockConvertFileSrc, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
 import App from '../src/App';
-import { AudioSettingsProvider, DEFAULT_AUDIO } from '../src/components/player/AudioSettingsContext';
+import { AudioSettingsProvider, DEFAULT_AUDIO, PARAM } from '../src/components/player/AudioSettingsContext';
 import { LyricsSearch } from '../src/components/player/LyricsSearch';
 import { cleanArtistString, buildArtistDictionary, artistCacheKey } from '../src/utils/artistEngine';
 import { sanitizeForLyricsAPI, chooseLyricsMatch } from '../src/utils/metadataCleaner';
@@ -17,6 +17,7 @@ import { releaseYear, isClassicYear } from '../src/utils/trackYear';
 import { metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS } from '../src/config/soundPresets';
 import { sortTracks } from '../src/mobile/library';
 import { discardMissingTrack } from '../src/mobile/queue';
+import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);
@@ -53,6 +54,7 @@ if (query.has('filters')) {
 }
 if (query.has('metadata-failure')) tracks.push({ path: '/Music/broken.flac', name: 'Broken file', artist: 'Unknown Artist', duration: 0, metadataLoaded: false });
 const store = new Map<string, unknown>();
+if (query.has('legacy-manual')) store.set('app_settings', { smartTaste: 'IMMERSIVE', isManualOverride: true });
 if (query.has('native-queue')) {
   const queue = createQueue(tracks.slice(0, 3), tracks[0], 'Saved native queue'); queue.position = 41;
   store.set('dmex_mobile_queue_v1', JSON.stringify(queue));
@@ -61,12 +63,19 @@ if (query.has('native-queue')) {
 const calls: { command: string; payload: any }[] = [];
 const failures: Record<string, string> = {};
 let engineSettings = [...DEFAULT_AUDIO];
-(window as any).libraryTest = { tracks, calls, emit, failures, releaseYear, isClassicYear, sortTracks, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+let bypassAll = false;
+(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
-  if (command === 'audio_status') return { ready: true, settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, bypassAll: false, ecoMode: true };
-  if (command === 'audio_apply_settings') { engineSettings = [...payload.values]; return; }
+  if (command === 'audio_status') return { ready: true, settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, bypassAll, ecoMode: true };
+  if (command === 'audio_apply_settings') {
+    if ((window as any).libraryTest.applyFailureCount > 0) { --(window as any).libraryTest.applyFailureCount; throw new Error('Fixture DSP update failed'); }
+    const delay = (window as any).libraryTest.applyDelay || 0;
+    if (delay) return new Promise<void>(resolve => setTimeout(() => { engineSettings = [...payload.values]; resolve(); }, delay));
+    engineSettings = [...payload.values]; return;
+  }
+  if (command === 'audio_command' && payload.cmd.startsWith('BYPASS_ALL ')) { bypassAll = payload.cmd.endsWith('1'); return; }
   if (command === 'audio_command' && payload.cmd.startsWith('LOAD ')) { if (failures[payload.cmd.slice(5)]) throw new Error('Fixture source unavailable'); return; }
   if (command === 'remove_missing_track') {
     const status = failures[payload.path] || 'available';

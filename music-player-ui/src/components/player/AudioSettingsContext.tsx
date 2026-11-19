@@ -28,6 +28,7 @@ interface AudioControls {
   loadAsset: (id: string, correction: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   setAutoReverb: (enabled: boolean) => Promise<void>;
+  dismissError: () => void;
 }
 const Context = createContext<AudioControls | null>(null);
 export function AudioSettingsProvider({ children }: { children: React.ReactNode }) {
@@ -131,7 +132,7 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
     return () => { clearInterval(interval); window.removeEventListener('dmex-audio-changed', changed);
       window.removeEventListener('dmex-audio-error', failed); };
   }, [refresh, loadAsset]);
-  return <Context.Provider value={{ status, values, busy, error, headphone, environment, update, command, loadAsset, refresh, setAutoReverb }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ status, values, busy, error, headphone, environment, update, command, loadAsset, refresh, setAutoReverb, dismissError: () => setError('') }}>{children}</Context.Provider>;
 }
 export function useAudioSettings() {
   const value = useContext(Context);

@@ -67,8 +67,7 @@ function Fixture() {
       depthAmount={0} setDepthAmount={noop} reverbWet={0} setReverbWet={noop}
       restorationDenoise={0} setRestorationDenoise={noop} restorationUpscale={0} setRestorationUpscale={noop}
       restorationPresence={0} setRestorationPresence={noop} setBassLevel={noop} setTrebleLevel={noop}
-      setIsManualOverride={noop} setSmartTaste={noop} isProfileActive={false} setIsProfileActive={noop}
-      isProfileActiveRef={{ current: false }} applySmartSettings={asyncNoop} smartTasteRef={{ current: 'QUALITY' }}
+      setIsManualOverride={noop} processingStatus={{label:'HD Clear',category:null,pill:'HD Clear',kind:'automatic',categoryEnabled:false}} onProcessingToggle={noop} processingDisabled={false}
       bassLevel={0.25} bassLevelRef={{ current: 0.25 }} trebleLevel={0} trebleLevelRef={{ current: 0 }}
       speakerMode="NONE" setSpeakerMode={noop} isFIRMode={false} setIsFIRMode={noop} visMode={mode} setVisMode={setMode}
       isPhoneSpeaker={false} setIsPhoneSpeaker={noop} isPhoneSpeakerRef={{ current: false }}

@@ -17,7 +17,9 @@ import { splitArtists, artistCacheKey, artistIdentity } from './utils/artistEngi
 import { formatTime, parseLRC } from './utils/formatters';
 import { PlaylistGalleryView } from './views/PlaylistGalleryView';
 import { PROFILES, classifyAudio, AudioProfile } from './config/audio';
-import { metadataCategory, soundPreset } from './config/soundPresets';
+import { metadataCategory } from './config/soundPresets';
+import { useSoundSelection } from './components/player/useSoundSelection';
+import { ProcessingStatusBadge } from './components/player/ProcessingStatusBadge';
 import { isClassicYear } from './utils/trackYear';
 import { isHexDark, getPalette, stripExt } from './utils/helpers';
 import { FolderModal, PlaylistPopup, SettingsModal } from './modals/modals';
@@ -100,8 +102,6 @@ function App() {
   const [sortMode, setSortMode]             = useState<'TITLE'|'ARTIST'|'ALBUM'|'YEAR'|'DATE_ADDED'>('DATE_ADDED');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
-  const [isProfileActive, setIsProfileActive] = useState(false);
-  const isProfileActiveRef = useRef(false);
 
   // CHANGE: Raw search query debounced before filtering.
   // debouncedSearchQuery is what useMemo depends on — it only updates 300ms
@@ -165,7 +165,6 @@ function App() {
   const [spatialExtra, setSpatialExtra]     = useState(0.0);
   const [depthAmount, setDepthAmount]       = useState(0.0);
   const [reverbWet, setReverbWet]           = useState(0.0);
-  const [smartTaste, setSmartTaste]         = useState<Taste>('ORIGINAL');
   const [detectedProfile, setDetectedProfile] = useState<AudioProfile | null>(null);
   const [isAnalyzing, setIsAnalyzing]       = useState(false);
   const [bulkScanActive, setBulkScanActive] = useState(false);
@@ -193,7 +192,6 @@ function App() {
   const [restorationUpscale, setRestorationUpscale] = useState(0.0);
   const [restorationPresence, setRestorationPresence] = useState(0.0);
   const [selectedAcousticEnv, setSelectedAcousticEnv] = useState('NONE');
-  const [isManualOverride, setIsManualOverride] = useState(false);
   const [isFIRMode, setIsFIRMode]     = useState(false);
   const [visMode, setVisMode] = useState<'ORBIT'|'RADAR'>(localStorage.getItem('dmex_visualizer') === 'RADAR' ? 'RADAR' : 'ORBIT');
   useEffect(() => {
@@ -232,7 +230,9 @@ function App() {
   const isPhoneSpeakerRef = useRef(false);
   useEffect(() => { isPhoneSpeakerRef.current = isPhoneSpeaker; }, [isPhoneSpeaker]);
 
-  const smartTasteRef      = useRef<Taste>('ORIGINAL');
+  const sound = useSoundSelection(detectedProfile?.id || null, isBooted);
+  const smartTaste = sound.selection.taste, isManualOverride = sound.selection.manual;
+  const setIsManualOverride = sound.setManualOverride;
   const detectedProfileRef = useRef<AudioProfile | null>(null);
   const loadIdRef          = useRef(0);
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
@@ -508,8 +508,7 @@ function App() {
               setSelectedHeadphoneModel(settings.selectedHeadphoneModel);
               selectedHeadphoneModelRef.current = settings.selectedHeadphoneModel;
           }
-          if (settings.smartTaste !== undefined) { setSmartTaste(settings.smartTaste); smartTasteRef.current = settings.smartTaste; }
-          if (settings.isManualOverride !== undefined) setIsManualOverride(settings.isManualOverride);
+          sound.hydrateLegacy(settings);
           if (!localStorage.getItem('dmex_visualizer') && settings.visMode !== undefined) {
             setVisMode(settings.visMode); localStorage.setItem('dmex_visualizer', settings.visMode);
             window.dispatchEvent(new CustomEvent('dmex-visualizer', { detail: settings.visMode }));
@@ -705,22 +704,9 @@ function App() {
     await vaultSet("isDarkMode", next);
   };
 
-  const applySmartSettings = async (profile:AudioProfile | null, taste:Taste) => {
-    if (audio.status?.bypassAll) return;
-    await audio.update(soundPreset(isProfileActiveRef.current ? profile?.id || null : null, taste));
-    setIsFIRMode(false);
-  };
-
-  useEffect(() => {
-    if (detectedProfile && !isManualOverride && ['QUALITY','IMMERSIVE','CHILL'].includes(smartTasteRef.current)) void applySmartSettings(detectedProfile, smartTasteRef.current).catch(console.error);
-  }, [detectedProfile]);
-
   const handleTasteChange = async (taste:Taste) => {
-    if (audio.status?.bypassAll) return;
-    const newTaste=(smartTaste===taste)?'ORIGINAL':taste;
-    setSmartTaste(newTaste);smartTasteRef.current=newTaste;
-    setIsManualOverride(false);
-    await applySmartSettings(detectedProfileRef.current,newTaste);
+    await sound.chooseTaste(taste).catch(() => {});
+    setIsFIRMode(false);
   };
 
   const handleToggleShuffle = useCallback((e?:React.MouseEvent) => {
@@ -1174,7 +1160,7 @@ function App() {
           restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
           restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
           restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
-          setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
+          setIsManualOverride={setIsManualOverride}
           setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
             is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
             is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
@@ -1391,7 +1377,7 @@ function App() {
 
   return (
     <div className={`app-layout ${visMode === 'RADAR' ? 'radar-mode' : ''}`} data-platform={IS_ANDROID ? 'android' : 'desktop'} data-mobile-redesign={IS_MOBILE || undefined} data-theme={isDarkMode?'dark':'light'} style={{'--theme-color':themeColor,'--theme-on-surface':isDarkMode && themeColor === BRAND.accent ? BRAND.highlight : themeColor,'--theme-text':themeText,'--blob-1':blobColors[0],'--blob-2':blobColors[1],'--blob-3':blobColors[2],'--audio-level':audioLevel} as React.CSSProperties}>
-      {audio.error && !(IS_MOBILE && mobilePlayback.error) && <div className="audio-global-error" role="alert">{audio.error}</div>}
+      {audio.error && !(IS_MOBILE && mobilePlayback.error) && <div className={'audio-global-error' + (IS_MOBILE && isExpanded ? ' is-mobile-expanded' : '')} role="alert"><span>{audio.error}</span><button type="button" aria-label="Dismiss audio error" onClick={audio.dismissError}><X size={16} /></button></div>}
       {showSettings && <SettingsModal apiKey={geminiApiKey} setApiKey={setGeminiApiKey} filters={libraryFilters} onClose={() => setShowSettings(false)} onSave={async filters => {
         await invoke('set_setting', { key: 'gemini_api_key', value: geminiApiKey.trim() });
         await invoke('set_setting', { key: 'library_filters', value: JSON.stringify(filters) });
@@ -1870,11 +1856,8 @@ function App() {
                 restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
                 restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
                 restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
-                setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste}
-                isProfileActive={isProfileActive} setIsProfileActive={setIsProfileActive}
-                isProfileActiveRef={isProfileActiveRef}
-                applySmartSettings={applySmartSettings}
-                smartTasteRef={smartTasteRef}
+                setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} setIsManualOverride={setIsManualOverride}
+                processingStatus={sound.status} onProcessingToggle={() => { void sound.toggle().catch(() => {}); }} processingDisabled={sound.disabled}
                 bassLevel={bassLevel} bassLevelRef={bassLevelRef}
                 trebleLevel={trebleLevel} trebleLevelRef={trebleLevelRef}
                 speakerMode={speakerMode} setSpeakerMode={setSpeakerMode}
@@ -1934,32 +1917,15 @@ function App() {
       <polyline points="6 9 12 15 18 9"/>
     </svg>
   </button>
-                {detectedProfile && (
-                  <div 
-                    className={`ep-profile-badge ${isProfileActive ? 'active' : ''}`} 
-                    style={{ cursor: 'pointer', transition: 'all 0.2s', opacity: isProfileActive ? 1 : 0.5 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const newState = !isProfileActive;
-                      setIsProfileActive(newState);
-                      isProfileActiveRef.current = newState;
-                      
-                      // Instantly recalculate the audio without the profile base
-                      if (detectedProfileRef.current) {
-                        applySmartSettings(detectedProfileRef.current, smartTasteRef.current);
-                      }
-                    }}
-                  >
-                    {React.createElement(detectedProfile.icon as any, {size: 16})} {detectedProfile.label} {!isProfileActive && '(Manual)'}
-                  </div>
-                )}
+                <ProcessingStatusBadge className="ep-profile-badge" status={sound.status} disabled={sound.disabled}
+                  onToggle={() => { void sound.toggle().catch(() => {}); }} />
                 <button className={`ep-icon-btn ${showOptionsMenu?'active-glow':''}`} onClick={e=>{e.stopPropagation();setShowOptionsMenu(!showOptionsMenu);}}>⋮</button>
                 {showOptionsMenu&&(
                   <>
                     <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:99}} onClick={e=>{e.stopPropagation();setShowOptionsMenu(false);}}/>
                     <div className="glass-options-menu player-track-menu fade-in" onClick={e=>e.stopPropagation()}>
                       <TrackOptions visMode={visMode} setVisMode={setVisMode}
-                        onManualEdit={() => { setIsManualOverride(true); setSmartTaste('ORIGINAL'); }} />
+                        onManualEdit={sound.markManual} />
                     </div>
                   </>
                 )}
@@ -1974,7 +1940,7 @@ function App() {
                 {isRightPaneActive && (
                   <ExpandedControls 
                     trackTitle={trackTitle} trackArtist={trackArtist} isAnalyzing={isAnalyzing} isManualOverride={isManualOverride}
-                    detectedProfile={detectedProfile} smartTaste={smartTaste} handleTasteChange={handleTasteChange}
+                    detectedProfile={detectedProfile} smartTaste={smartTaste} handleTasteChange={handleTasteChange} processingStatus={sound.status}
                     volume={volume} setVolume={setVolume} writeToEngine={writeToEngine} isCurrentFavorite={isCurrentFavorite}
                     toggleFavorite={toggleFavorite} showLyrics={showLyrics} setShowLyrics={setShowLyrics} showStudio={showStudio} setShowStudio={setShowStudio}
                     duration={duration} currentTime={currentTime} isSeekingRef={isSeekingRef} handleSeekDrag={handleSeekDrag} handleSeekCommit={handleSeekCommit}
@@ -1987,7 +1953,7 @@ function App() {
                 {!isRightPaneActive  && 
                 <ExpandedControls 
                     trackTitle={trackTitle} trackArtist={trackArtist} isAnalyzing={isAnalyzing} isManualOverride={isManualOverride}
-                    detectedProfile={detectedProfile} smartTaste={smartTaste} handleTasteChange={handleTasteChange}
+                    detectedProfile={detectedProfile} smartTaste={smartTaste} handleTasteChange={handleTasteChange} processingStatus={sound.status}
                     volume={volume} setVolume={setVolume} writeToEngine={writeToEngine} isCurrentFavorite={isCurrentFavorite}
                     toggleFavorite={toggleFavorite} showLyrics={showLyrics} setShowLyrics={setShowLyrics} showStudio={showStudio} setShowStudio={setShowStudio}
                     duration={duration} currentTime={currentTime} isSeekingRef={isSeekingRef} handleSeekDrag={handleSeekDrag} handleSeekCommit={handleSeekCommit}
@@ -2012,7 +1978,7 @@ function App() {
                     restorationDenoise={restorationDenoise} setRestorationDenoise={setRestorationDenoise}
                     restorationUpscale={restorationUpscale} setRestorationUpscale={setRestorationUpscale}
                     restorationPresence={restorationPresence} setRestorationPresence={setRestorationPresence}
-                    setIsManualOverride={setIsManualOverride} setSmartTaste={setSmartTaste} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
+                    setIsManualOverride={setIsManualOverride} setBassLevel={setBassLevel} setTrebleLevel={setTrebleLevel} writeToEngine={writeToEngine}
             is9DStageOn={is9DStageOn} setIs9DStageOn={setIs9DStageOn}
             is9DBassRoom={is9DBassRoom} setIs9DBassRoom={setIs9DBassRoom}
             selectedHeadphoneModel={selectedHeadphoneModel}

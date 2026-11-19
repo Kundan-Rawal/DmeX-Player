@@ -53,7 +53,7 @@ try {
     await page.getByRole('button',{name:'Pause',exact:true}).click();
     await page.getByRole('button',{name:'Open expanded player',exact:true}).click();
     await page.locator('.mep-topbar-center').filter({hasText:'Jazz / Blues'}).waitFor();
-    await page.locator('.mep-topbar-center').click();
+    // Category processing is now enabled by default; the badge and pills compose independently.
     for(const [label,taste] of [['HD Clear','QUALITY'],['Immersive','IMMERSIVE'],['Chill','CHILL']]) {
       await page.getByRole('button',{name:label,exact:true}).click();
       await page.waitForFunction(taste=>{

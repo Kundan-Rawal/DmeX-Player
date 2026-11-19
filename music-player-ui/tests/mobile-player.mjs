@@ -59,8 +59,8 @@ try {
     await page.getByRole('combobox', { name: 'Processing quality' }).press('Escape');
     await page.screenshot({ path: `tests/artifacts/mobile-player-dsp-${viewport.width}.png` });
     await page.getByRole('button', { name: 'DSP Controls', exact: true }).click();
-    await page.getByText('HD Clear', { exact: true }).waitFor();
-    assert.equal(await page.getByText('Immersive', { exact: true }).count(), 1, 'Expanded taste buttons remain');
+    await page.getByRole('button', { name: 'HD Clear', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Immersive', exact: true }).count(), 1, 'Expanded taste buttons remain');
     await page.getByRole('button', { name: 'Track Options', exact: true }).click();
     await page.getByRole('slider', { name: 'Bass Field', exact: true }).waitFor();
     const menu = await page.locator('.player-track-menu').boundingBox();

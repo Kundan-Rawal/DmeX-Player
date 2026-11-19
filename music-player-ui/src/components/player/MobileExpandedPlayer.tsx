@@ -8,12 +8,14 @@ import { AmbientBackground } from './AmbientBackground';
 import { Android8BRipples, Android8BDustCanvas } from './MobileVisualizer';
 import { Taste, LyricLine, IS_ANDROID } from '../../types/index';
 import { AudioProfile } from '../../config/audio';
+import { ProcessingStatus } from '../../config/soundSelection';
+import { ProcessingStatusBadge } from './ProcessingStatusBadge';
 import { formatTime } from '../../utils/formatters';
 import { HDCrystalIcon } from './HDCrystalIcon';
 import { ImmersiveIcon } from './ImmersiveIcon';
 import { ChillIcon } from './ChillIcon';
 import { triggerHapticClick } from '../../utils/helpers';
-import { Captions, Disc, Music, Search, Hourglass, ListMusic, X } from 'lucide-react';
+import { Captions, Music, Search, Hourglass, ListMusic, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 
@@ -40,15 +42,12 @@ interface MobileExpandedPlayerProps {
   restorationDenoise: number;  setRestorationDenoise: (v: number) => void;
   restorationUpscale: number;  setRestorationUpscale: (v: number) => void;
   restorationPresence: number; setRestorationPresence: (v: number) => void;
-  setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void; setSmartTaste: (v: Taste) => void;
+  setBassLevel: (v: number) => void; setTrebleLevel: (v: number) => void; setIsManualOverride: (v: boolean) => void;
   is9DStageOn?: boolean; setIs9DStageOn?: (v: boolean) => void;
   is9DBassRoom?: boolean; setIs9DBassRoom?: (v: boolean) => void;
   selectedHeadphoneModel?: string; setSelectedHeadphoneModel?: (v: string) => void;
   onHeadphoneModelSelect?: (modelId: string) => Promise<void>;
-  isProfileActive: boolean;    setIsProfileActive: (v: boolean) => void;
-  isProfileActiveRef: React.MutableRefObject<boolean>;
-  applySmartSettings: (profile: AudioProfile, taste: Taste) => Promise<void>;
-  smartTasteRef: React.MutableRefObject<Taste>;
+  processingStatus: ProcessingStatus; onProcessingToggle: () => void; processingDisabled: boolean;
   bassLevel: number; bassLevelRef: React.MutableRefObject<number>;
   trebleLevel: number; trebleLevelRef: React.MutableRefObject<number>;
   speakerMode: 'NONE'|'LOW'|'MED'|'HIGH'; setSpeakerMode: (v: 'NONE'|'LOW'|'MED'|'HIGH') => void;
@@ -93,19 +92,19 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
     id: 'QUALITY',   
     icon: (
         <HDCrystalIcon 
-          isActive={p.smartTaste === 'QUALITY'} // Fixed: Changed 'props' to 'p'
+          isActive={!p.isManualOverride && p.processingStatus.kind !== 'raw' && p.smartTaste === 'QUALITY'}
         />
       ), 
       label: 'HD Clear'
   },
   { 
     id: 'IMMERSIVE', 
-    icon: <ImmersiveIcon isActive={p.smartTaste === 'IMMERSIVE'} />, 
+    icon: <ImmersiveIcon isActive={!p.isManualOverride && p.processingStatus.kind !== 'raw' && p.smartTaste === 'IMMERSIVE'} />,
     label: 'Immersive' 
   },
   { 
     id: 'CHILL',     
-    icon: <ChillIcon isActive={p.smartTaste === 'CHILL'} />, 
+    icon: <ChillIcon isActive={!p.isManualOverride && p.processingStatus.kind !== 'raw' && p.smartTaste === 'CHILL'} />,
     label: 'Chill'     
   },
 ];
@@ -214,11 +213,10 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
       // Activate convolution and update UI state — mirrors the Windows path exactly
       await p.writeToEngine('CONVOLUTION 0.35');
       p.setIsManualOverride(true);
-      p.setSmartTaste('QUALITY' as Taste);
     } catch (error) {
       console.error('[Android] Failed to extract and load IR file:', error);
     }
-  }, [extractIRFile, p.writeToEngine, p.setSelectedAcousticEnv, p.setIsManualOverride, p.setSmartTaste]);
+  }, [extractIRFile, p.writeToEngine, p.setSelectedAcousticEnv, p.setIsManualOverride]);
 
   return (
     <div className="mep-root" data-visuals-ready={visualsReady}>
@@ -237,24 +235,8 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
           </svg>
         </button>
 
-        <div className="mep-topbar-center"
-          onClick={() => {
-            if (!p.detectedProfile) return;
-            const next = !p.isProfileActive;
-            p.setIsProfileActive(next);
-            p.isProfileActiveRef.current = next;
-            p.applySmartSettings(p.detectedProfile, p.smartTasteRef.current);
-          }}
-          style={{ cursor: p.detectedProfile ? 'pointer' : 'default' }}
-        >
-          {p.isAnalyzing
-            ? <span className="mep-badge-analyzing"><span className="mep-dot-pulse"/>Analyzing…</span>
-            : p.isManualOverride
-              ? <span className="mep-badge" style={{ color: '#ffa726' }}>Manual Override</span>
-              : p.detectedProfile
-                ? <span className="mep-badge">{p.detectedProfile.icon && React.createElement(p.detectedProfile.icon as any, {size: 14})} {p.detectedProfile.label}{!p.isProfileActive ? ' (Manual)' : ''}</span>
-                : <span className="mep-badge mep-badge-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Disc size={14} /> Standard Audio</span>
-          }
+        <div className="mep-topbar-center">
+          <ProcessingStatusBadge className="mep-badge" status={p.processingStatus} disabled={p.processingDisabled} onToggle={p.onProcessingToggle} />
         </div>
 
         <button aria-label="Track Options" aria-expanded={showOptionsMenu} className={`mep-topbar-btn ${showOptionsMenu ? 'mep-topbar-btn--active' : ''}`}
@@ -269,7 +251,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={e => { e.stopPropagation(); setShowOptionsMenu(false); }}/>
             <div className="glass-options-menu player-track-menu fade-in" style={{ right: '24px', zIndex: 100 }} onClick={e => e.stopPropagation()}>
               <TrackOptions visMode={p.visMode} setVisMode={p.setVisMode}
-                onManualEdit={() => { p.setIsManualOverride(true); p.setSmartTaste('ORIGINAL'); }} />
+                onManualEdit={() => p.setIsManualOverride(true)} />
             </div>
           </>
         )}
@@ -301,7 +283,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
             {/* 3. Taste Pills */}
             <div className="mep-taste-row" style={{ opacity: p.isManualOverride ? 0.4 : 1 }}>
               {TASTES.map(t => (
-                <button key={t.id} className={`mep-taste-pill ${!p.isManualOverride && p.smartTaste === t.id ? 'mep-taste-pill--active' : ''}`} onClick={() => {triggerHapticClick(); p.onTasteChange(t.id)}}>
+                <button key={t.id} className={`mep-taste-pill ${!p.isManualOverride && p.processingStatus.kind !== 'raw' && p.smartTaste === t.id ? 'mep-taste-pill--active' : ''}`} aria-pressed={!p.isManualOverride && p.processingStatus.kind !== 'raw' && p.smartTaste === t.id} disabled={p.processingDisabled} onClick={() => {triggerHapticClick(); p.onTasteChange(t.id)}}>
                   <span>{t.icon}</span> <span className='mainclasstastepilllabel'>{t.label}</span>
                 </button>
               ))}
@@ -345,7 +327,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
                   restorationDenoise={p.restorationDenoise}   setRestorationDenoise={p.setRestorationDenoise}
                   restorationUpscale={p.restorationUpscale}   setRestorationUpscale={p.setRestorationUpscale}
                   restorationPresence={p.restorationPresence} setRestorationPresence={p.setRestorationPresence}
-                  setIsManualOverride={p.setIsManualOverride} setSmartTaste={p.setSmartTaste}
+                  setIsManualOverride={p.setIsManualOverride}
                   setBassLevel={p.setBassLevel} setTrebleLevel={p.setTrebleLevel} writeToEngine={p.writeToEngine}
                     is9DStageOn={p.is9DStageOn} setIs9DStageOn={p.setIs9DStageOn}
                     is9DBassRoom={p.is9DBassRoom} setIs9DBassRoom={p.setIs9DBassRoom}

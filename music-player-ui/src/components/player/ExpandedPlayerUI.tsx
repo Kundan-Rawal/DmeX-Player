@@ -2,8 +2,9 @@ import React, { useMemo } from 'react';
 import Marquee from 'react-fast-marquee';
 import { Taste } from '../../types'; 
 import { AudioProfile } from '../../config/audio';
+import type { ProcessingStatus } from '../../config/soundSelection';
 import { formatTime } from '../../utils/formatters';
-import { Settings2, Disc } from 'lucide-react';
+import { Disc } from 'lucide-react';
 
 import { HDCrystalIcon } from './HDCrystalIcon';
 import { ImmersiveIcon } from './ImmersiveIcon';
@@ -39,7 +40,6 @@ interface DSPStudioProps {
   restorationUpscale: number; setRestorationUpscale: (v: number) => void;
   restorationPresence: number; setRestorationPresence: (v: number) => void;
   setIsManualOverride: (v: boolean) => void;
-  setSmartTaste: (v: Taste) => void;
   setBassLevel: (v: number) => void;
   setTrebleLevel: (v: number) => void;
   writeToEngine: (cmd: string) => Promise<void>;
@@ -67,12 +67,12 @@ interface DSPStudioProps {
 }
 
 export const DSPStudio = (props: DSPStudioProps) => <div className="studio-dashboard fade-in">
-  <AdvancedAudioPanel onManualEdit={() => { props.setIsManualOverride(true); props.setSmartTaste('ORIGINAL'); }} />
+  <AdvancedAudioPanel onManualEdit={() => props.setIsManualOverride(true)} />
 </div>;
 
 interface ExpandedControlsProps {
   trackTitle: string; trackArtist: string; isAnalyzing: boolean; isManualOverride: boolean;
-  detectedProfile: AudioProfile | null; smartTaste: Taste; handleTasteChange: (t: Taste) => Promise<void>;
+  detectedProfile: AudioProfile | null; smartTaste: Taste; handleTasteChange: (t: Taste) => Promise<void>; processingStatus: ProcessingStatus;
   volume: number; setVolume: (v: number) => void; writeToEngine: (cmd: string) => Promise<void>;
   isCurrentFavorite: boolean; toggleFavorite: (e: React.MouseEvent) => Promise<void>;
   showLyrics: boolean; setShowLyrics: (v: boolean) => void;
@@ -88,7 +88,7 @@ interface ExpandedControlsProps {
 }
 
 export const ExpandedControls = ({
-  trackTitle, trackArtist, isAnalyzing, isManualOverride, detectedProfile, smartTaste, handleTasteChange,
+  trackTitle, trackArtist, isManualOverride, smartTaste, handleTasteChange, processingStatus,
   volume, setVolume, writeToEngine, isCurrentFavorite, toggleFavorite, showLyrics, setShowLyrics,
   showStudio, setShowStudio, duration, currentTime, isSeekingRef, handleSeekDrag, handleSeekCommit,
   isShuffle, handleToggleShuffle, handlePrev, isPlaying, handlePlayPause, handleNext, handleToggleRepeat,
@@ -122,19 +122,19 @@ export const ExpandedControls = ({
       id: 'QUALITY',   
       icon: (
         <HDCrystalIcon 
-          isActive={smartTaste === 'QUALITY'} 
+          isActive={!isManualOverride && processingStatus.kind !== 'raw' && smartTaste === 'QUALITY'}
         />
       ), 
       label: 'HD Clear'
     },
     { 
       id: 'IMMERSIVE', 
-      icon: <ImmersiveIcon isActive={smartTaste === 'IMMERSIVE'} />, 
+      icon: <ImmersiveIcon isActive={!isManualOverride && processingStatus.kind !== 'raw' && smartTaste === 'IMMERSIVE'} />,
       label: 'Immersive' 
     },
     { 
       id: 'CHILL',     
-      icon: <ChillIcon isActive={smartTaste === 'CHILL'} />, 
+      icon: <ChillIcon isActive={!isManualOverride && processingStatus.kind !== 'raw' && smartTaste === 'CHILL'} />,
       label: 'Chill'     
     },
   ];
@@ -148,14 +148,11 @@ export const ExpandedControls = ({
       
       <div className="player-smart-section">
         <div className="player-profile-line">
-          {isAnalyzing?<span className="profile-analyzing"><span className="dot-pulse"/> Analyzing…</span>
-            :isManualOverride?<span className="profile-chip" style={{color:'#ffa726',background:'rgba(255,167,38,0.15)', display: 'inline-flex', alignItems: 'center', gap: '4px'}}><Settings2 size={16} /> Manual Override Active</span>
-            :detectedProfile?<span className="profile-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>Identified: {detectedProfile.icon && React.createElement(detectedProfile.icon as any, {size: 16})} {detectedProfile.label}</span>
-            :<span className="profile-chip muted" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Disc size={16} /> Standard Audio</span>}
+          <span className="profile-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Disc size={16} />{processingStatus.label}</span>
         </div>
         <div className="player-taste-pills" style={{opacity:isManualOverride?0.4:1,transition:'opacity 0.2s ease'}}>
           {TASTES.map(t=>(
-            <button key={t.id} className={`taste-pill ${!isManualOverride&&smartTaste===t.id?'active':''}`} onClick={()=>handleTasteChange(t.id)}>
+            <button key={t.id} className={`taste-pill ${!isManualOverride&&processingStatus.kind!=='raw'&&smartTaste===t.id?'active':''}`} aria-pressed={!isManualOverride&&processingStatus.kind!=='raw'&&smartTaste===t.id} disabled={processingStatus.kind==='raw'} onClick={()=>handleTasteChange(t.id)}>
               <span>{t.icon}</span> <span className='mainclasstastepilllabel'>{t.label}</span>
             </button>
           ))}

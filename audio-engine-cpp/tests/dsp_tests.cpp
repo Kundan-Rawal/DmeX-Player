@@ -698,6 +698,7 @@ void productionControlSweep() {
     // Base recipes mirror soundPresets.ts; volume is lowered only in this offline harness.
     Audio lastPreset;
     for (const auto& preset : {
+        Case{"Category-only Jazz recipe",{{0,.05f},{1,.1f},{3,1.02f},{14,.72f},{15,.6f}}},
         Case{"HD Clear recipe",{{0,.12f},{1,1.4f},{2,.04f},{3,1.02f},{12,.10f},{14,.72f},{15,.6f},{16,.10f}}},
         Case{"Immersive recipe",{{0,.24f},{1,.6f},{2,.025f},{3,1.08f},{4,.45f},{5,.34f},{6,.08f},{12,.08f},{14,.72f},{15,.6f},{16,.06f},{17,1.f}}},
         Case{"Chill recipe",{{0,.18f},{1,-.8f},{3,1.06f},{4,.62f},{5,.52f},{6,.16f},{12,.04f},{14,.76f},{15,.68f},{16,.03f},{17,1.f}}}

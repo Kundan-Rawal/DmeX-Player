@@ -34,7 +34,22 @@ export function soundPreset(category: string | null, taste: Taste): Partial<Reco
   const neutral = { bass: 0, treble: 0, exciter: 0, width: 1, separation: 0, depth: 0,
     reverb: 0, compressor: 0, bassField: 0, roomBass: 0, vocal: 0, air: 0, spatial: 0,
     boost: 0, loudness: 0, roomSize: .72, damping: .6 };
-  if (!['QUALITY', 'IMMERSIVE', 'CHILL'].includes(taste)) return neutral;
+  if (!['QUALITY', 'IMMERSIVE', 'CHILL'].includes(taste)) {
+    if (!category) return neutral;
+    const defaults: Record<string, Partial<typeof neutral>> = {
+      POP: { bass: .10, treble: .3, vocal: .03, width: 1.02 },
+      CLASSICAL: { bass: .04, treble: .2, width: 1.03 }, JAZZ: { bass: .05, treble: .1, width: 1.02 },
+      VOCAL: { bass: .05, treble: .3, vocal: .08 }, FOLK: { bass: .04, treble: .2, vocal: .06 },
+      ELECTRONIC: { bass: .14, treble: .2, width: 1.04, air: .02 }, HIPHOP: { bass: .16, width: 1.02, vocal: .04 },
+      RNB: { bass: .10, treble: .2, width: 1.02, vocal: .06 }, ROCK: { bass: .08, treble: .2, width: 1.03, vocal: .04 },
+      METAL: { bass: .06, treble: -.2, width: 1.02, vocal: .02 }, SOUNDTRACK: { bass: .06, width: 1.04, air: .02 },
+      SPOKEN: { treble: .2, vocal: .12 }, AMBIENT: { bass: .04, width: 1.04, air: .02 },
+      BOLLYWOOD: { bass: .06, treble: -.3, vocal: .08, width: 1.01 },
+      DYNAMIC: { bass: .04, width: 1.02 }, DENSE: { bass: .03, treble: -.2 },
+      CENTERED: { bass: .04, vocal: .04 }, WIDE: { bass: .04 }, BALANCED: { bass: .06, treble: .2, width: 1.01, vocal: .02 },
+    };
+    return { ...neutral, ...(defaults[category] || defaults.BALANCED) };
+  }
   const result = taste === 'QUALITY' ? { ...neutral, bass: .12, treble: 1.4, exciter: .04, width: 1.02, vocal: .10, air: .10 }
     : taste === 'IMMERSIVE' ? { ...neutral, bass: .24, treble: .6, exciter: .025, width: 1.08, vocal: .08, air: .06, spatial: 1, separation: .45, depth: .34, reverb: .08 }
     : { ...neutral, bass: .18, treble: -.8, width: 1.06, vocal: .04, air: .03, spatial: 1, separation: .62, depth: .52, reverb: .16, roomSize: .76, damping: .68 };
