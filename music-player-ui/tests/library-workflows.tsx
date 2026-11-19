@@ -18,6 +18,7 @@ import { metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS } from '
 import { sortTracks } from '../src/mobile/library';
 import { discardMissingTrack } from '../src/mobile/queue';
 import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
+import { vocalPresenceDb, harmonicAirDb } from '../src/config/dspResponse';
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);
@@ -64,7 +65,7 @@ const calls: { command: string; payload: any }[] = [];
 const failures: Record<string, string> = {};
 let engineSettings = [...DEFAULT_AUDIO];
 let bypassAll = false;
-(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, harmonicAirDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });

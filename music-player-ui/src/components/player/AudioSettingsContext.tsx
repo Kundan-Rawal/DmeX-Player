@@ -64,15 +64,19 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
   const update = useCallback(async (changes: Partial<Record<Parameter, number>>) => {
     const next = [...valuesRef.current];
     for (const [key, value] of Object.entries(changes)) next[PARAM[key as Parameter]] = value!;
+    if (changes.spatial === 0 && changes.separation === undefined && changes.depth === undefined) {
+      next[PARAM.separation] = 0; next[PARAM.depth] = 0;
+    }
     if (changes.spatial === 1) {
-      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.65;
-      if (next[PARAM.depth] === 0) next[PARAM.depth] = 0.45;
+      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.85;
+      if (next[PARAM.depth] === 0) next[PARAM.depth] = 0.70;
     }
     if (changes.spatial !== 0 && ((changes.separation ?? 0) > 0 || (changes.depth ?? 0) > 0)) {
       next[PARAM.spatial] = 1;
-      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.65;
+      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.85;
     }
     if (changes.roomBass === 1 && next[PARAM.bassField] === 0) next[PARAM.bassField] = 0.35;
+    if (changes.roomBass === 0 && changes.bassField === undefined) next[PARAM.bassField] = 0;
     if ((changes.bassField ?? 0) > 0 && changes.roomBass !== 0) next[PARAM.roomBass] = 1;
     ++revision.current; ++mutations.current;
     valuesRef.current = next; setValues(next); setError('');

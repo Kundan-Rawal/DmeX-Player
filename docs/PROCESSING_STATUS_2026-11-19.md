@@ -1,5 +1,7 @@
 # Active Processing Status
 
+Preset values in this earlier iteration were subsequently revised. See [DSP response audit](DSP_RESPONSE_AUDIT_2026-11-19.md) for the current response and values; the state-machine behavior below is retained.
+
 ## Behavior
 
 The category switch, selected quick preset, and manual override now live in one persisted sound-selection model. Mobile and desktop status text are derived from that model, not independent flags.

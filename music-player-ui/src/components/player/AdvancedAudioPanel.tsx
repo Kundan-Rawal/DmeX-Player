@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Power, RotateCcw } from 'lucide-react';
 import { ACOUSTIC_ENVIRONMENTS, HEADPHONE_MODELS } from '../../config/audioAssets';
 import { IS_ANDROID } from '../../types';
+import { vocalPresenceDb, harmonicAirDb } from '../../config/dspResponse';
 import { CustomSelect } from '../common/CustomSelect';
 import { ToggleSwitch } from '../common/ToggleSwitch';
 import { PARAM, Parameter, useAudioSettings } from './AudioSettingsContext';
@@ -81,8 +82,8 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
       </>)}
       {group('Tone & Harmonics', 'tone', <>
         {slider('exciter', 'Tube Exciter', 0, 1, 0.01, percent)}
-        {slider('air', 'Harmonic Air', 0, 1, 0.01, percent)}
-        {slider('vocal', 'Vocal Frontness', 0, 1, 0.01, percent)}
+        {slider('air', 'Harmonic Air', 0, 1, 0.01, v => `${percent(v)} (+${harmonicAirDb(v).toFixed(1)} dB)`)}
+        {slider('vocal', 'Vocal Frontness', 0, 1, 0.01, v => `${percent(v)} (+${vocalPresenceDb(v).toFixed(1)} dB)`)}
       </>)}
       {group('Stereo Image', 'stereo', <>
         {slider('width', 'Stereo Widener', 1, 2.5, 0.01, v => v.toFixed(2) + 'x')}

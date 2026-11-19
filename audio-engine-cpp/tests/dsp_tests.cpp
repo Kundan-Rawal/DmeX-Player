@@ -252,6 +252,7 @@ void toneAndBass() {
                               / toneAmplitude(mixed, bassHz, 0));
     }
     const auto gainRange = std::minmax_element(trackedGain.begin(), trackedGain.end());
+    std::cout << "BASS FUNDAMENTAL GAINS"; for (double gain : trackedGain) std::cout << ' ' << gain; std::cout << '\n';
     check(*gainRange.first > 1.55,
           "full Bass Drive lifts fundamentals throughout 50-120 Hz");
     check(*gainRange.second / *gainRange.first < 1.55,
@@ -339,6 +340,20 @@ void spatialAndReverb() {
     auto room = reverb(0.5f,0.5f), damp = reverb(0.84f,0.9f);
     check(difference(wet, process(room.get(), g_reverb_vtable, impulse)) > 0.001f, "Room Size changes audible tail");
     check(difference(wet, process(damp.get(), g_reverb_vtable, impulse)) > 0.001f, "Damping changes audible tail");
+    double previousTail=0;
+    for(float size : {.2f,.4f,.6f,.8f,.98f}) {
+        auto node=reverb(size,.4f); node->wetMix.snap(.5f);
+        const auto rendered=process(node.get(),g_reverb_vtable,impulse);
+        const double tail=energy(rendered,0,12000)+energy(rendered,1,12000);
+        check(tail>previousTail,"larger manual room produces more sustained late energy"); previousTail=tail;
+    }
+    previousTail=std::numeric_limits<double>::infinity();
+    for(float damping : {0.f,.25f,.5f,.75f,.95f}) {
+        auto node=reverb(.8f,damping); node->wetMix.snap(.5f);
+        const auto rendered=process(node.get(),g_reverb_vtable,impulse);
+        const double tail=energy(rendered,0,4000)+energy(rendered,1,4000);
+        check(tail<previousTail,"higher manual damping reduces the room tail's energy"); previousTail=tail;
+    }
     Audio monoImpulse(48000*2); monoImpulse[0] = monoImpulse[1] = 0.5f;
     auto monoRoom = reverb(); monoRoom->wetMix.snap(1.0f);
     const auto monoWet = process(monoRoom.get(), g_reverb_vtable, monoImpulse);
@@ -395,9 +410,25 @@ void spatialAndReverb() {
     vocalNode->setSeparation(1); vocalNode->setDepth(1);
     const Audio centeredVocal = tone(1200, 48000, 1.0f);
     const Audio vocalOutput = process(vocalNode.get(), g_dynamic_spatializer_vtable, centeredVocal);
-    check(differenceEnergy(vocalOutput, centeredVocal, 12000)
-              < (energy(centeredVocal, 0, 12000) + energy(centeredVocal, 1, 12000)) * 0.001,
-          "coherent vocal bed stays dry and clear");
+    const double centeredEnergy=energy(centeredVocal,0,12000)+energy(centeredVocal,1,12000);
+    const double centeredChange=differenceEnergy(vocalOutput,centeredVocal,12000)/centeredEnergy;
+    std::cout << "MONO SPATIAL relative delta=" << std::sqrt(centeredChange) << '\n';
+    check(centeredChange > .0025 && centeredChange < .51,
+          "maximum spatial stage affects coherent material within the wet-field budget");
+    double sideEnergy=0,midEnergy=0;
+    for(size_t i=24000;i<vocalOutput.size();i+=2) {
+        const double side=(vocalOutput[i]-vocalOutput[i+1])*.5,mid=(vocalOutput[i]+vocalOutput[i+1])*.5;
+        sideEnergy+=side*side;midEnergy+=mid*mid;
+    }
+    check(sideEnergy > midEnergy * .0016, "mono source gains measurable lateral spatial cues");
+    double previousMonoChange=0;
+    for(float amount : {.25f,.5f,.75f,1.f}) {
+        auto node=std::make_unique<DynamicSpatializerNode>(); node->init(sr); node->setSeparation(amount); node->setDepth(.8f);
+        const auto rendered=process(node.get(),g_dynamic_spatializer_vtable,centeredVocal);
+        const double change=std::sqrt(differenceEnergy(rendered,centeredVocal,12000)/centeredEnergy);
+        check(change>.03 && change>previousMonoChange, "mono spatial response is useful and increases across the slider");
+        previousMonoChange=change;
+    }
 
     Audio diffuse = tone(1700, 48000, 0.0f);
     for (int i = 0; i < 48000; ++i)
@@ -412,7 +443,7 @@ void spatialAndReverb() {
     check(differenceEnergy(diffuseOutput, diffuse) >
           differenceEnergy(halfOutput, diffuse) * 1.5,
           "full 9D separation adds more ambient field than half separation");
-    check(differenceEnergy(diffuseOutput, diffuse) < dryEnergy * 0.14,
+    check(differenceEnergy(diffuseOutput, diffuse) < dryEnergy * 0.51,
           "ambient field remains below dry-bed headroom budget");
 
     SteamAudioHrtf front, rear, height;
@@ -501,6 +532,9 @@ void airAndLimiter() {
     auto airA = std::make_unique<AudioRestorationNode>(), airB = std::make_unique<AudioRestorationNode>();
     airA->init(sr); airB->init(sr);
     auto active = process(airA.get(), g_restoration_vtable, input, 1);
+    const auto delayedDry=output;
+    check(toneAmplitude(active,9000,0)>toneAmplitude(delayedDry,9000,0)*1.6,
+          "maximum Air supplies measurable high-frequency lift, not only inaudible ultrasonic harmonics");
     check(finite(active) && energy(active,1) == 0, "Harmonic Air channel isolation and finite output");
     check(difference(active, process(airB.get(), g_restoration_vtable, input, 512)) < 1e-6f,
           "Harmonic Air independent of callback size");
@@ -675,6 +709,41 @@ void productionControlSweep() {
         return result;
     };
     const auto base=render(neutral);
+    std::FILE* response = std::fopen("control-response.csv", "w");
+    if (!response) throw std::runtime_error("Cannot write response measurements");
+    std::fprintf(response,"control,amount,relative_rms_delta\n");
+    for (const auto& control : std::array<std::pair<const char*,int>,10>{{{"bass",0},{"treble",1},{"exciter",2},{"width",3},{"separation",4},{"depth",5},{"reverb",6},{"bass_field",10},{"vocal",12},{"air",16}}}) {
+        auto referenceValues=neutral;
+        if (control.second==4 || control.second==5) { referenceValues[17]=1; referenceValues[4]=control.second==5?.85f:0; referenceValues[5]=control.second==4?.7f:0; }
+        if (control.second==10) referenceValues[11]=1;
+        const auto reference=render(referenceValues);
+        const double referenceEnergy=energy(reference,0,24000)+energy(reference,1,24000);
+        double previous=0;
+        for (float amount : {.25f,.5f,.75f,1.f}) {
+            auto values=referenceValues;
+            values[control.second]=control.second==0 ? 2.1f*amount : control.second==1 ? 12*amount : control.second==3 ? 1+1.5f*amount : amount;
+            const auto output=render(values);
+            const double relative=std::sqrt(differenceEnergy(reference,output,24000)/(referenceEnergy+1e-20));
+            std::fprintf(response,"%s,%.2f,%.6f\n",control.first,amount,relative);
+            std::cout << "RESPONSE " << control.first << " " << amount << " relative delta=" << relative << '\n';
+            check(relative > .015, "control has a meaningful first-quarter production response");
+            check(relative > previous, "production control response increases monotonically across its travel");
+            previous=relative;
+        }
+    }
+    std::fclose(response);
+    auto fullLevel=neutral; fullLevel[8]=1;
+    const auto fullBase=render(fullLevel);
+    for(const auto& control : std::array<std::pair<int,float>,4>{{{0,2.1f},{1,12.f},{12,1.f},{16,1.f}}}) {
+        auto values=fullLevel; values[control.first]=control.second;
+        const auto shaped=render(values);
+        const float band=control.first==0?80.f:control.first==12?2500.f:5900.f;
+        const float referenceBand=control.first==0?2500.f:80.f;
+        const double before=toneAmplitude(fullBase,band,0)/(toneAmplitude(fullBase,referenceBand,0)+1e-12);
+        const double after=toneAmplitude(shaped,band,0)/(toneAmplitude(shaped,referenceBand,0)+1e-12);
+        std::cout << "LIMITED BAND RATIO " << control.first << "=" << after/before << '\n';
+        check(after>before*1.2,"tone shaping survives the downstream peak limiter at full master volume");
+    }
     struct Case { const char* name; std::initializer_list<std::pair<int,float>> changes; };
     for(const auto& test : {
         Case{"Bass Drive",{{0,1.5f}}}, Case{"Treble",{{1,6.0f}}}, Case{"Tube Exciter",{{2,.7f}}},
@@ -698,10 +767,10 @@ void productionControlSweep() {
     // Base recipes mirror soundPresets.ts; volume is lowered only in this offline harness.
     Audio lastPreset;
     for (const auto& preset : {
-        Case{"Category-only Jazz recipe",{{0,.05f},{1,.1f},{3,1.02f},{14,.72f},{15,.6f}}},
-        Case{"HD Clear recipe",{{0,.12f},{1,1.4f},{2,.04f},{3,1.02f},{12,.10f},{14,.72f},{15,.6f},{16,.10f}}},
-        Case{"Immersive recipe",{{0,.24f},{1,.6f},{2,.025f},{3,1.08f},{4,.45f},{5,.34f},{6,.08f},{12,.08f},{14,.72f},{15,.6f},{16,.06f},{17,1.f}}},
-        Case{"Chill recipe",{{0,.18f},{1,-.8f},{3,1.06f},{4,.62f},{5,.52f},{6,.16f},{12,.04f},{14,.76f},{15,.68f},{16,.03f},{17,1.f}}}
+        Case{"Category-only Jazz recipe",{{0,.45f},{1,2.f},{3,1.12f},{12,.35f},{14,.72f},{15,.6f},{16,.30f}}},
+        Case{"HD Clear recipe",{{0,.75f},{1,5.f},{2,.20f},{3,1.12f},{12,.65f},{14,.72f},{15,.6f},{16,.60f}}},
+        Case{"Immersive recipe",{{0,.95f},{1,5.f},{2,.15f},{3,1.20f},{4,.85f},{5,.70f},{6,.20f},{10,.20f},{11,1.f},{12,.60f},{14,.72f},{15,.6f},{16,.50f},{17,1.f}}},
+        Case{"Chill recipe",{{0,.85f},{1,2.f},{3,1.15f},{4,.90f},{5,.85f},{6,.35f},{10,.32f},{11,1.f},{12,.60f},{14,.80f},{15,.65f},{16,.50f},{17,1.f}}}
     }) {
         auto values=neutral; for(const auto& [index,value]:preset.changes) values[index]=value;
         const auto output=render(values);

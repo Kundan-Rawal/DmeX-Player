@@ -57,8 +57,8 @@ public:
         wetReady_ = false;
     }
 
-    // The original stereo master is always the direct path. Only dynamically
-    // extracted diffuse residual is rendered into fixed surround zones.
+    // Keep the direct master and render both residual ambience and a decorrelated
+    // coherent send. A mono-heavy master must not silently disable the stage.
     inline void process(float inL, float inR, float& outL, float& outR)
     {
         float wetL = 0.0f;
@@ -72,8 +72,7 @@ public:
             }
         }
 
-        // Dry is immediate and untouched. The 64-sample ambient delay behaves
-        // as early spatial energy and cannot comb-filter coherent vocals.
+        // The direct onset stays immediate; the spatial send adds early energy.
         outL = inL + wetL;
         outR = inR + wetR;
 
@@ -89,11 +88,11 @@ public:
         midExtractor_.process(midL, midR, ambientMidL, ambientMidR);
         highExtractor_.process(highL, highR, ambientHighL, ambientHighR);
 
-        const float separation = separation_.next();
-        const float depth = depth_.next();
-        const float sideGain = separation * (0.20f - 0.03f * depth);
-        const float rearGain = separation * depth * 0.19f;
-        const float heightGain = separation * depth * 0.15f;
+        const float separation = effectAmount(separation_.next());
+        const float depth = effectAmount(depth_.next());
+        const float sideGain = separation * (0.55f - 0.06f * depth);
+        const float rearGain = separation * depth * 0.45f;
+        const float heightGain = separation * depth * 0.32f;
 
         dryBlockL_[writePos_] = inL;
         dryBlockR_[writePos_] = inR;
@@ -122,12 +121,15 @@ private:
         float analysisCoef = 0.0f;
         float fastCoef = 0.0f;
         float slowCoef = 0.0f;
+        AllPassFilter coherentL{}, coherentR{};
 
         void init(float sampleRate)
         {
             analysisCoef = tauCoef(45.0f, sampleRate);
             fastCoef = tauCoef(3.0f, sampleRate);
             slowCoef = tauCoef(70.0f, sampleRate);
+            ap_init(&coherentL, static_cast<int>(149 * sampleRate / 48000.0f), .55f);
+            ap_init(&coherentR, static_cast<int>(233 * sampleRate / 48000.0f), .55f);
             reset();
         }
 
@@ -135,6 +137,8 @@ private:
         {
             energyL = energyR = cross = 0.0f;
             fastL = fastR = slowL = slowR = 0.0f;
+            std::memset(coherentL.buf, 0, sizeof(coherentL.buf)); coherentL.idx = 0;
+            std::memset(coherentR.buf, 0, sizeof(coherentR.buf)); coherentR.idx = 0;
         }
 
         inline void process(float inL, float inR, float& ambientL, float& ambientR)
@@ -152,6 +156,9 @@ private:
             ambientL = inL - inR * predictL * primaryStrength;
             ambientR = inR - inL * predictR * primaryStrength;
 
+            const float coherent = .5f * (inL + inR) * primaryStrength;
+            ambientL += .50f * ap_tick(&coherentL, coherent);
+            ambientR += .50f * ap_tick(&coherentR, coherent);
             const float magnitudeL = std::abs(ambientL);
             const float magnitudeR = std::abs(ambientR);
             fastL += fastCoef * (magnitudeL - fastL);
@@ -194,16 +201,20 @@ private:
 
         double dryEnergy = 0.0;
         double wetEnergy = 0.0;
+        // The SDK bank has more aggregate gain than the normalized compact bank.
+        // Calibrate before the safety cap so ordinary stereo does not hit it unevenly.
+        const float rendererGain = hrtf_.measured() && !hrtf_.portableMeasured() ? .5f : 1.0f;
         for (int i = 0; i < kFrameSize; ++i) {
+            wetOutputL_[i] *= rendererGain;
+            wetOutputR_[i] *= rendererGain;
             dryEnergy += dryBlockL_[i] * dryBlockL_[i] + dryBlockR_[i] * dryBlockR_[i];
             wetEnergy += wetOutputL_[i] * wetOutputL_[i] + wetOutputR_[i] * wetOutputR_[i];
         }
 
-        // Keep the diffuse field below 34% of dry RMS at maximum separation.
-        // This preserves the mastered stereo bed and its headroom.
+        // Bound even the strongest spatial setting; the final limiter still owns peaks.
         const double dryRms = std::sqrt(dryEnergy / (2.0 * kFrameSize) + 1.0e-20);
         const double wetRms = std::sqrt(wetEnergy / (2.0 * kFrameSize) + 1.0e-20);
-        const float maxWetRms = static_cast<float>(dryRms) * 0.34f * separation;
+        const float maxWetRms = static_cast<float>(dryRms) * 0.70f * separation;
         const float normalization = wetRms > maxWetRms && wetRms > 1.0e-10
             ? maxWetRms / static_cast<float>(wetRms)
             : 1.0f;

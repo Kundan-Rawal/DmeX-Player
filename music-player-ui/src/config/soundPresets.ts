@@ -4,7 +4,7 @@ import type { Parameter } from '../components/player/AudioSettingsContext';
 export const CATEGORY_LABELS: Record<string, string> = {
   POP: 'Pop', CLASSICAL: 'Classical / Orchestral', VOCAL: 'Acoustic / Vocal',
   ELECTRONIC: 'Electronic / Dance', HIPHOP: 'Hip-Hop', RNB: 'R&B / Soul', JAZZ: 'Jazz / Blues',
-  ROCK: 'Rock', METAL: 'Metal', FOLK: 'Folk / World', SOUNDTRACK: 'Film / Soundtrack',
+  ROCK: 'Rock', METAL: 'Metal', FOLK: 'Folk / World',
   SPOKEN: 'Speech / Podcast', AMBIENT: 'Ambient', BOLLYWOOD: 'Classics (1880-2003)',
   DYNAMIC: 'Dynamic recording', DENSE: 'Dense recording', CENTERED: 'Center-focused recording',
   WIDE: 'Wide recording', BALANCED: 'Balanced / Unclassified',
@@ -18,7 +18,7 @@ export function metadataCategory(track?: { genre?: string }): string | null {
     ['ELECTRONIC', /electronic|\bedm\b|house|techno|trance|dance|dubstep/],
     ['AMBIENT', /ambient|meditation|new age/], ['ROCK', /rock|punk/],
     ['FOLK', /folk|world|country|traditional/], ['VOCAL', /acoustic|vocal|singer.songwriter/],
-    ['SOUNDTRACK', /soundtrack|film score|bollywood/], ['POP', /\bpop\b/],
+    ['POP', /\bpop\b/],
   ];
   return rules.find(([, pattern]) => pattern.test(genre))?.[0] || null;
 }
@@ -37,37 +37,38 @@ export function soundPreset(category: string | null, taste: Taste): Partial<Reco
   if (!['QUALITY', 'IMMERSIVE', 'CHILL'].includes(taste)) {
     if (!category) return neutral;
     const defaults: Record<string, Partial<typeof neutral>> = {
-      POP: { bass: .10, treble: .3, vocal: .03, width: 1.02 },
-      CLASSICAL: { bass: .04, treble: .2, width: 1.03 }, JAZZ: { bass: .05, treble: .1, width: 1.02 },
-      VOCAL: { bass: .05, treble: .3, vocal: .08 }, FOLK: { bass: .04, treble: .2, vocal: .06 },
-      ELECTRONIC: { bass: .14, treble: .2, width: 1.04, air: .02 }, HIPHOP: { bass: .16, width: 1.02, vocal: .04 },
-      RNB: { bass: .10, treble: .2, width: 1.02, vocal: .06 }, ROCK: { bass: .08, treble: .2, width: 1.03, vocal: .04 },
-      METAL: { bass: .06, treble: -.2, width: 1.02, vocal: .02 }, SOUNDTRACK: { bass: .06, width: 1.04, air: .02 },
-      SPOKEN: { treble: .2, vocal: .12 }, AMBIENT: { bass: .04, width: 1.04, air: .02 },
-      BOLLYWOOD: { bass: .06, treble: -.3, vocal: .08, width: 1.01 },
-      DYNAMIC: { bass: .04, width: 1.02 }, DENSE: { bass: .03, treble: -.2 },
-      CENTERED: { bass: .04, vocal: .04 }, WIDE: { bass: .04 }, BALANCED: { bass: .06, treble: .2, width: 1.01, vocal: .02 },
+      POP: { bass: .65, treble: 3, vocal: .45, width: 1.15, air: .35 },
+      CLASSICAL: { bass: .35, treble: 2, vocal: .30, width: 1.12, air: .30 }, JAZZ: { bass: .45, treble: 2, width: 1.12, vocal: .35, air: .30 },
+      VOCAL: { bass: .45, treble: 3, vocal: .65, air: .40 }, FOLK: { bass: .45, treble: 2.5, vocal: .60, air: .35 },
+      ELECTRONIC: { bass: .85, treble: 3.5, width: 1.22, air: .35, vocal: .35 }, HIPHOP: { bass: .95, width: 1.12, vocal: .55, treble: 2.5, air: .25 },
+      RNB: { bass: .70, treble: 2.5, width: 1.12, vocal: .60, air: .35 }, ROCK: { bass: .65, treble: 3, width: 1.18, vocal: .50, air: .30 },
+      METAL: { bass: .55, treble: 1.5, width: 1.18, vocal: .40, air: .20 },
+      SPOKEN: { treble: 2, vocal: .65 }, AMBIENT: { bass: .55, width: 1.20, air: .35, treble: 2, vocal: .30 },
+      BOLLYWOOD: { bass: .60, treble: 1.5, vocal: .65, width: 1.08, air: .25 },
+      DYNAMIC: { bass: .45, treble: 2, vocal: .35, width: 1.12, air: .30 }, DENSE: { bass: .55, treble: 1.5, vocal: .40, air: .20 },
+      CENTERED: { bass: .55, vocal: .60, treble: 2.5, air: .35 }, WIDE: { bass: .55, vocal: .40, treble: 2.5, air: .30 },
+      BALANCED: { bass: .65, treble: 3, width: 1.12, vocal: .45, air: .35 },
     };
     return { ...neutral, ...(defaults[category] || defaults.BALANCED) };
   }
-  const result = taste === 'QUALITY' ? { ...neutral, bass: .12, treble: 1.4, exciter: .04, width: 1.02, vocal: .10, air: .10 }
-    : taste === 'IMMERSIVE' ? { ...neutral, bass: .24, treble: .6, exciter: .025, width: 1.08, vocal: .08, air: .06, spatial: 1, separation: .45, depth: .34, reverb: .08 }
-    : { ...neutral, bass: .18, treble: -.8, width: 1.06, vocal: .04, air: .03, spatial: 1, separation: .62, depth: .52, reverb: .16, roomSize: .76, damping: .68 };
-  // Conservative source-aware adjustments; these cannot reconstruct missing source detail.
+  const result = taste === 'QUALITY' ? { ...neutral, bass: .75, treble: 5, exciter: .20, width: 1.12, vocal: .65, air: .60 }
+    : taste === 'IMMERSIVE' ? { ...neutral, bass: .95, treble: 5, exciter: .15, width: 1.20, vocal: .60, air: .50, spatial: 1, separation: .85, depth: .70, reverb: .20, bassField: .20, roomBass: 1 }
+    : { ...neutral, bass: .85, treble: 2, width: 1.15, vocal: .60, air: .50, spatial: 1, separation: .90, depth: .85, reverb: .35, bassField: .32, roomBass: 1, roomSize: .80, damping: .65 };
+  // Source-aware adjustments preserve each preset's character without tiny no-op recipes.
   switch (category) {
     case 'CLASSICAL': case 'JAZZ': case 'DYNAMIC':
-      result.bass *= .6; result.exciter *= .5; result.reverb *= .65; result.depth *= .85; break;
-    case 'AMBIENT': case 'SOUNDTRACK': case 'WIDE':
-      result.reverb *= .6; result.separation *= .75; result.depth *= .8; break;
+      result.bass *= .8; result.exciter *= .5; result.reverb *= .8; break;
+    case 'AMBIENT': case 'WIDE':
+      result.reverb *= .8; break;
     case 'ELECTRONIC': case 'HIPHOP': case 'METAL': case 'DENSE':
-      result.exciter = 0; result.treble *= .7; result.reverb *= .65; result.bass *= .85; break;
+      result.exciter = 0; result.reverb *= .8; result.bass *= .9; break;
     case 'VOCAL': case 'FOLK': case 'RNB': case 'CENTERED':
-      result.vocal += .03; result.separation *= .65; result.depth *= .75; break;
+      result.vocal += .05; break;
     case 'SPOKEN':
-      result.bass = 0; result.vocal = .12; result.exciter = 0; result.width = 1;
+      result.bass = 0; result.vocal = .65; result.exciter = 0; result.width = 1; result.bassField = 0; result.roomBass = 0;
       result.reverb = 0; result.spatial = 0; result.separation = 0; result.depth = 0; break;
     case 'BOLLYWOOD':
-      result.exciter = 0; result.air *= .5; result.treble *= .5; result.separation *= .6; break;
+      result.exciter = 0; result.treble *= .7; break;
     case 'ROCK': result.reverb *= .75; result.exciter *= .5; break;
   }
   return result;

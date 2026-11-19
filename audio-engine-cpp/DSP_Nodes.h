@@ -174,6 +174,15 @@ struct LinkwitzRiley4
     }
 };
 
+#define MAX_AP_BUF 1500
+struct AllPassFilter {
+    float buf[MAX_AP_BUF];
+    int size, idx;
+    float feedback;
+};
+void ap_init(AllPassFilter *a, int sz, float fb);
+float ap_tick(AllPassFilter *a, float in);
+
 #include "NineSpeakerUpmixer.h"
 
 struct DynamicSpatializerNode
@@ -264,18 +273,6 @@ struct StereoWidenerNode
     float lpStateL, lpStateR;
     float sideLp, sideLp2;
 };
-
-#define MAX_AP_BUF 1500
-
-struct AllPassFilter
-{
-    float buf[MAX_AP_BUF];
-    int size, idx;
-    float feedback;
-};
-
-void ap_init(AllPassFilter *a, int sz, float fb);
-float ap_tick(AllPassFilter *a, float in);
 
 #define SURROUND_HAAS_DELAY 882
 #define CENTER_ITD_DELAY 22
@@ -584,12 +581,19 @@ struct AudioRestorationNode
     ma_node_base baseNode;
     LinkwitzRiley4 crossoverL, crossoverR;
     BiquadHPF harmonicFilterL, harmonicFilterR;
+    BiquadPeak shelfL, shelfR;
+    float sampleRate = 48000, lastShelfDb = -100;
+    unsigned coefficientCounter = 0;
     Oversampler4x os;
     SmoothedParam amount;
     float dryL[64]{}, dryR[64]{};
     int delayIndex = 0, delaySamples = 20;
 
     void init(float sampleRate) {
+        this->sampleRate = sampleRate;
+        lastShelfDb = -100; coefficientCounter = 0;
+        shelfL.init(sampleRate, 6500.0f, .7f, 0);
+        shelfR.init(sampleRate, 6500.0f, .7f, 0);
         crossoverL.init(sampleRate, 8000.0f);
         crossoverR.init(sampleRate, 8000.0f);
         harmonicFilterL.init(sampleRate, 10000.0f);

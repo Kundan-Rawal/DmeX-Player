@@ -33,7 +33,7 @@ try {
     assert.deepEqual(result.classics, [true,true,false,false,false,true,false,false,false,false]);
     assert.deepEqual(result.ascending, ['1879','1880','2001-07-15','2003','2004','']);
     assert.deepEqual(result.descending, ['2004','2003','2001-07-15','1880','1879','']);
-    assert.deepEqual(result.category, ['METAL','JAZZ','SOUNDTRACK','SPOKEN',null]);
+    assert.deepEqual(result.category, ['METAL','JAZZ',null,'SPOKEN',null]);
     assert.deepEqual(result.signal, ['CENTERED','DYNAMIC','BALANCED','BALANCED']);
     assert.equal(result.queue.count,1); assert.equal(result.queue.current,'/Music/Album 1/track-1.flac');
     assert.equal(result.queue.position,0); assert.equal(result.queue.history,1); assert.equal(result.queue.original,1);
@@ -42,7 +42,7 @@ try {
       assert.ok(Object.values(recipe).every(Number.isFinite));
       assert.equal(recipe.boost,0); assert.equal(recipe.compressor,0); assert.equal(recipe.loudness,0);
       assert.ok(!('volume' in recipe) && !('device' in recipe), 'Presets preserve user volume/output device');
-      assert.ok(recipe.width>=1 && recipe.width<=1.1 && recipe.reverb<=.16 && recipe.air<=.1 && recipe.treble<=1.4);
+      assert.ok(recipe.width>=1 && recipe.width<=1.25 && recipe.reverb<=.350001 && recipe.air<=.600001 && recipe.treble<=5 && recipe.vocal<=.700001);
     }
     assert.notDeepEqual(result.recipes.CLASSICAL[1],result.recipes.METAL[1],'Category changes actual DSP');
     await context.close();

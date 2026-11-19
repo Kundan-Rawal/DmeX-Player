@@ -1,5 +1,7 @@
 # Mobile Library and Audio Iteration
 
+The DSP values in this earlier iteration were subsequently revised. See [DSP response audit](DSP_RESPONSE_AUDIT_2026-11-19.md) for the current engine changes and preset values.
+
 Date: 2026-11-19
 
 ## Checkpoint and Scope

@@ -77,8 +77,8 @@ static void exciter_process(ma_node* node, const float** input, ma_uint32* count
         p->dryDelayL[p->dryIdx] = L;
         p->dryDelayR[p->dryIdx] = R;
         const int rd = (p->dryIdx + 64 - p->dryDelay) % 64;
-        output[0][2*i] = p->dryDelayL[rd] + drive * 0.10f * (wetL - cleanL);
-        output[0][2*i+1] = p->dryDelayR[rd] + drive * 0.10f * (wetR - cleanR);
+        output[0][2*i] = p->dryDelayL[rd] + effectAmount(drive) * 0.22f * (wetL - cleanL);
+        output[0][2*i+1] = p->dryDelayR[rd] + effectAmount(drive) * 0.22f * (wetR - cleanR);
         p->dryIdx = (p->dryIdx + 1) % 64;
     }
 }
@@ -270,8 +270,8 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
         const float presence = p->targetMid.next();
         if ((p->coefficientCounter++ & 31u) == 0) {
             if (fabsf(presence - p->lastPresence) > 0.0001f) {
-                p->presenceL.update_coeffs(p->sampleRate, 2500.0f, 0.8f, 6.0f * presence);
-                p->presenceR.update_coeffs(p->sampleRate, 2500.0f, 0.8f, 6.0f * presence);
+                p->presenceL.update_coeffs(p->sampleRate, 2500.0f, 0.8f, vocalPresenceDb(presence));
+                p->presenceR.update_coeffs(p->sampleRate, 2500.0f, 0.8f, vocalPresenceDb(presence));
                 p->lastPresence = presence;
             }
             if (fabsf(bass - p->lastBassDb) > 0.0001f) {
@@ -280,8 +280,8 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
                 p->lastBassDb = bass;
             }
             if (fabsf(high - p->lastTrebleDb) > 0.0001f) {
-                p->trebleShelfL.update_shelf(p->sampleRate, 8000.0f, high, true);
-                p->trebleShelfR.update_shelf(p->sampleRate, 8000.0f, high, true);
+                p->trebleShelfL.update_shelf(p->sampleRate, 4500.0f, high, true);
+                p->trebleShelfR.update_shelf(p->sampleRate, 4500.0f, high, true);
                 p->lastTrebleDb = high;
             }
         }
@@ -396,7 +396,7 @@ static void reverb_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *
         // The room is additive: never turn down the dry kick attack, vocal or stereo image
         // as the user raises Reverb. The wet scale leaves headroom for the final limiter.
         const float curWet = amount * (1.0f - autoBlend) + amount / (1.0f + 0.8f * onset) * autoBlend;
-        const float wetGain = curWet * (0.45f + 0.40f * curWet);
+        const float wetGain = curWet * (0.80f + 0.65f * curWet);
         pOut[i * 2] = iL + oL * wetGain;
         pOut[i * 2 + 1] = iR + oR * wetGain;
     }
@@ -420,7 +420,7 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
     const int delayR = (std::min)(2047, (int)(0.0057f * sr));
     for (ma_uint32 i = 0; i < *countIn; ++i) {
         const float L = input[0][2*i], R = input[0][2*i+1];
-        const float drive = p->drive.next(), field = p->field.next(), room = p->room.next();
+        const float drive = 2.1f * effectAmount(p->drive.next() / 2.1f), field = effectAmount(p->field.next()), room = p->room.next();
         float bassL, nonBassL, bassR, nonBassR;
         p->crossMidBassL.process(L, bassL, nonBassL);
         p->crossMidBassR.process(R, bassR, nonBassR);
@@ -470,12 +470,12 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
                 // Very low anchors overlap the subsonic protection slope, so
                 // recover a little weight there without touching the punch band.
                 const float deepAnchorScale = subHz <= 40.0f ? 1.20f : 1.0f;
-                const float subDb = drive * (2.2f + 1.6f * p->bassScarcity) * headroom * deepAnchorScale;
-                const float midDb = drive * (3.0f + 2.4f * p->bassScarcity) * headroom;
-                p->subPeakL.update_coeffs(sr, subHz, 0.70f, subDb);
-                p->subPeakR.update_coeffs(sr, subHz, 0.70f, subDb);
-                p->midPeakL.update_coeffs(sr, p->currentFreq, 0.80f, midDb);
-                p->midPeakR.update_coeffs(sr, p->currentFreq, 0.80f, midDb);
+                const float subDb = drive * (2.8f + 1.2f * p->bassScarcity) * headroom * deepAnchorScale;
+                const float midDb = drive * (3.8f + 1.6f * p->bassScarcity) * headroom;
+                p->subPeakL.update_coeffs(sr, subHz, 0.65f, subDb);
+                p->subPeakR.update_coeffs(sr, subHz, 0.65f, subDb);
+                p->midPeakL.update_coeffs(sr, p->currentFreq, 0.70f, midDb);
+                p->midPeakR.update_coeffs(sr, p->currentFreq, 0.70f, midDb);
                 p->lastBassGain = drive;
                 p->lastTunedFreq = p->currentFreq;
                 p->lastSubHz = subHz;
@@ -498,7 +498,7 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         p->transientSlow += p->transientSlowCoef * (detector - p->transientSlow);
         const float onset = (std::max)(0.0f, p->transientFast - p->transientSlow);
         const float onsetRatio = (std::min)(1.0f, onset / (p->transientSlow + 0.015f));
-        const float punchGain = 0.42f * drive * onsetRatio;
+        const float punchGain = 0.60f * drive * onsetRatio;
         const float tonalBlend = (std::min)(0.90f, 0.42f + 0.16f * drive + 0.12f * p->bassScarcity);
         const float tonalDeltaL = (shapedBassL - L) * tonalBlend;
         const float tonalDeltaR = (shapedBassR - R) * tonalBlend;
@@ -524,7 +524,7 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         const float transientSpace = 1.0f / (1.0f + 6.0f * spatialOnset / (oldEnergy + 0.01f));
         // Compact Bass is an exact no-reflection mode. Bass Field becomes audible
         // only when 3D Room is explicitly selected.
-        const float space = field * room * 0.24f * transientSpace * (1.0f - onsetRatio);
+        const float space = field * room * 0.90f * transientSpace * (1.0f - onsetRatio);
         outL += space * reflectL;
         outR += space * reflectR;
 
@@ -847,8 +847,9 @@ static void audio_restoration_process(ma_node *node, const float **input, ma_uin
 {
     auto* p = (AudioRestorationNode*)node;
     *countOut = *countIn;
-    p->amount.set(g_isUpscaleOn.load() ? (std::clamp)(g_upscaleTarget.load(), 0.0f, 2.0f) : 0.0f);
+    p->amount.set(g_isUpscaleOn.load() ? (std::clamp)(g_upscaleTarget.load(), 0.0f, 1.0f) : 0.0f);
     const bool sleeping = g_ecoMode.load() && p->amount.target.load() == 0.0f && p->amount.peek() < 1.0e-6f;
+    if (sleeping) { p->shelfL.reset(); p->shelfR.reset(); p->lastShelfDb = -100; }
     for (ma_uint32 i = 0; i < *countIn; ++i) {
         const float L = input[0][2*i], R = input[0][2*i+1];
         if (sleeping) {
@@ -874,9 +875,16 @@ static void audio_restoration_process(ma_node *node, const float **input, ma_uin
         const int w = p->delayIndex, r = (w + 64 - p->delaySamples) % 64;
         p->dryL[w] = L;
         p->dryR[w] = R;
-        const float amount = 0.15f * p->amount.next();
-        output[0][2*i] = p->dryL[r] + amount * wetL;
-        output[0][2*i+1] = p->dryR[r] + amount * wetR;
+        const float control = p->amount.next();
+        const float shelfDb = harmonicAirDb(control);
+        if ((p->coefficientCounter++ & 31u) == 0 && (std::abs(shelfDb - p->lastShelfDb) > .0001f || (shelfDb == 0 && p->lastShelfDb != 0))) {
+            p->shelfL.update_shelf(p->sampleRate, 6500.0f, shelfDb, true);
+            p->shelfR.update_shelf(p->sampleRate, 6500.0f, shelfDb, true);
+            p->lastShelfDb = shelfDb;
+        }
+        const float amount = 0.20f * effectAmount(control);
+        output[0][2*i] = p->shelfL.process(p->dryL[r]) + amount * wetL;
+        output[0][2*i+1] = p->shelfR.process(p->dryR[r]) + amount * wetR;
         p->delayIndex = (w + 1) % 64;
     }
 }
