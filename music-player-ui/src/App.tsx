@@ -16,8 +16,7 @@ import { vaultGet, vaultSet, initVault } from './services/vault';
 import { splitArtists, artistCacheKey, artistIdentity } from './utils/artistEngine';
 import { formatTime, parseLRC } from './utils/formatters';
 import { PlaylistGalleryView } from './views/PlaylistGalleryView';
-import { PROFILES, classifyAudio, AudioProfile } from './config/audio';
-import { metadataCategory } from './config/soundPresets';
+import { classifyAudio, AudioProfile } from './config/audio';
 import { useSoundSelection } from './components/player/useSoundSelection';
 import { ProcessingStatusBadge } from './components/player/ProcessingStatusBadge';
 import { isClassicYear } from './utils/trackYear';
@@ -166,7 +165,7 @@ function App() {
   const [depthAmount, setDepthAmount]       = useState(0.0);
   const [reverbWet, setReverbWet]           = useState(0.0);
   const [detectedProfile, setDetectedProfile] = useState<AudioProfile | null>(null);
-  const [isAnalyzing, setIsAnalyzing]       = useState(false);
+  const isAnalyzing = false;
   const [bulkScanActive, setBulkScanActive] = useState(false);
   const [bulkScanPaused, setBulkScanPaused] = useState(false);
   const [bulkScanDone, setBulkScanDone]     = useState(0);
@@ -532,10 +531,7 @@ function App() {
                      setAlbumArt(track.thumb || null);
                      const storedLyrics = await vaultGet<string>(`lrc_${track.path}`);
                      if (storedLyrics) setLyrics(parseLRC(storedLyrics));
-                     if (track.profile) {
-                         const p = PROFILES.find((pr: any) => pr.id === track.profile);
-                         if (p) setDetectedProfile(p);
-                     }
+                     setDetectedProfile(classifyAudio(0,0,0,0,track));
                      try {
                          await writeToEngine(`LOAD ${track.path}`);
                      } catch (_) {}
@@ -907,27 +903,29 @@ function App() {
 
   const startBulkCategoryScan = useCallback(async () => {
     if(bulkScanRunning.current) return;
-    const unscanned=playlistRef.current.filter(t=>!t.profile || (!metadataCategory(t) && !['DYNAMIC','DENSE','CENTERED','WIDE','BALANCED'].includes(t.profile)));
+    const unscanned=playlistRef.current.filter(t=>t.profile!==classifyAudio(0,0,0,0,t).id);
     if(!unscanned.length){setBulkScanActive(false);return;}
     bulkScanRunning.current=true;bulkScanPausedRef.current=false;
     setBulkScanActive(true);setBulkScanPaused(false);setBulkScanDone(0);setBulkScanTotal(unscanned.length);
     let done=0;let pendingSave:{path:string;profile:string}[]=[];
+    const flush = async () => {
+      const batch=pendingSave;pendingSave=[];
+      const profiles=new Map(batch.map(item=>[item.path,item.profile]));
+      setPlaylist(prev=>prev.map(track=>profiles.has(track.path)?{...track,profile:profiles.get(track.path)!}:track));
+      await Promise.all(batch.map(item=>invoke('update_profile',item).catch(()=>{})));
+      await new Promise(resolve=>setTimeout(resolve,0));
+    };
     for(const track of unscanned){
       while(bulkScanPausedRef.current&&bulkScanRunning.current) await new Promise(r=>setTimeout(r,200));
       if(!bulkScanRunning.current) break;
       try{
-        const fpLine:string=await invoke('analyze_audio_file', { path: track.path });
-        if(fpLine.startsWith("FINGERPRINT ")){
-          const p=fpLine.split(' ');
-          const prof=classifyAudio(Number(p[1]),Number(p[2]),Number(p[3]),Number(p[4]),track);
-          setPlaylist(prev=>prev.map(t=>t.path===track.path?{...t,profile:prof.id}:t));
+          const prof=classifyAudio(0,0,0,0,track);
           pendingSave.push({path:track.path,profile:prof.id});
-        }
       }catch(_){}
       setBulkScanDone(++done);
-      if(pendingSave.length>=20){for(const s of pendingSave) invoke('update_profile',{path:s.path,profile:s.profile}).catch(()=>{});pendingSave=[];}
+      if(pendingSave.length>=20) await flush();
     }
-    for(const s of pendingSave) invoke('update_profile',{path:s.path,profile:s.profile}).catch(()=>{});
+    if(pendingSave.length) await flush();
     bulkScanRunning.current=false;setBulkScanActive(false);setBulkScanPaused(false);
   }, []);
 
@@ -1021,35 +1019,25 @@ function App() {
           if (id !== loadIdRef.current) return;
           const current = playlistRef.current.find(t => t.path === track.path) || track;
           const updated = { ...current, ...native };
+          const updatedProfile = classifyAudio(0,0,0,0,updated);
+          updated.profile = updatedProfile.id;
           playlistRef.current = playlistRef.current.map(t => t.path === track.path ? updated : t);
           setPlaylist(prev => prev.map(t => t.path === track.path ? { ...t, ...native } : t));
           if (!removedSources.current.has(updated.path)) await invoke('add_to_library', { track: updated });
-          const category = metadataCategory(updated);
-          if (category && id === loadIdRef.current) {
-            const profile = PROFILES.find(value => value.id === category)!;
-            setDetectedProfile(profile); detectedProfileRef.current = profile;
+          if (id === loadIdRef.current) {
+            setDetectedProfile(updatedProfile); detectedProfileRef.current = updatedProfile;
           }
         } catch(err) {
             console.error(`GLOBAL METADATA CRASH:`, err);
         }
       },300);
 
-      const tagged = metadataCategory(track);
-      const cachedProfile=PROFILES.find(p=>p.id === tagged || (!tagged && ['DYNAMIC','DENSE','CENTERED','WIDE','BALANCED'].includes(track.profile || '') && p.id===track.profile));
-      if(cachedProfile){setDetectedProfile(cachedProfile);detectedProfileRef.current=cachedProfile;}
-      else{setTimeout(async()=>{
-        if(id!==loadIdRef.current) return;setIsAnalyzing(true);
-        try{
-          const fpLine:string=await invoke('analyze_current_track');if(id!==loadIdRef.current) return;
-          if(fpLine.startsWith("FINGERPRINT ")){
-            const parts=fpLine.split(' ');
-            const profile=classifyAudio(Number(parts[1]),Number(parts[2]),Number(parts[3]),Number(parts[4]),playlistRef.current.find(t=>t.path===track.path) || track);
-            setDetectedProfile(profile);detectedProfileRef.current=profile;
-            const nl=playlistRef.current.map(t=>t.path===track.path?{...t,profile:profile.id}:t);setPlaylist(nl);
-            await invoke('update_profile', { path: track.path, profile: profile.id });
-            vaultSet("user_playlist", nl);          }
-        }catch(_){}finally{setIsAnalyzing(false);}
-      },2000);}
+      const profile = classifyAudio(0,0,0,0,track);
+      setDetectedProfile(profile); detectedProfileRef.current=profile;
+      if(track.profile!==profile.id) {
+        setPlaylist(prev=>prev.map(t=>t.path===track.path?{...t,profile:profile.id}:t));
+        void invoke('update_profile',{path:track.path,profile:profile.id}).catch(()=>{});
+      }
     }catch(error){if(id===loadIdRef.current) setIsPlaying(false); console.error('Track playback failed:', error); if (IS_MOBILE) throw error;}
   };
   mobileLoaderRef.current = playTrack;

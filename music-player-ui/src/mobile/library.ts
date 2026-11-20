@@ -16,6 +16,17 @@ export function isFeaturedAlbum(id: string) {
   return (hash >>> 0) % 5 === 0;
 }
 export const albumId = (track: Track) => JSON.stringify([(track.album || 'Unknown Album').normalize('NFKC').trim().toLocaleLowerCase(), ((track as Track & { albumArtist?: string }).albumArtist || track.artist || 'Unknown Artist').normalize('NFKC').trim().toLocaleLowerCase()]);
+export const ALPHABET_INDEX = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
+const englishSort = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+export function alphabetSection(value: string): string {
+  const initial = value.trim().charAt(0);
+  return /^[A-Za-z]$/.test(initial) ? initial.toUpperCase() : '#';
+}
+function compareIndexed(a: string, b: string, descending: boolean): number {
+  const otherA = alphabetSection(a) === '#', otherB = alphabetSection(b) === '#';
+  if (otherA !== otherB) return otherA ? 1 : -1;
+  return englishSort.compare(a.trim(), b.trim()) * (descending ? -1 : 1);
+}
 export function sortTracks(tracks: Track[], sort: MobileSort, descending = false): Track[] {
   return [...tracks].sort((a, b) => {
     if (sort === 'year') {
@@ -23,15 +34,15 @@ export function sortTracks(tracks: Track[], sort: MobileSort, descending = false
       if (first === null || second === null) return first === second ? a.name.localeCompare(b.name) : first === null ? 1 : -1;
       return (descending ? second - first : first - second) || a.name.localeCompare(b.name);
     }
-    const result = sort === 'added' ? (b.dateAdded || 0) - (a.dateAdded || 0) || a.name.localeCompare(b.name) : sort === 'duration' ? b.duration - a.duration : sort === 'artist' ? a.artist.localeCompare(b.artist) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name);
+    if (sort === 'title' || sort === 'artist') return compareIndexed(sort === 'artist' ? a.artist : a.name, sort === 'artist' ? b.artist : b.name, descending) || compareIndexed(a.name,b.name,descending);
+    const result = sort === 'added' ? (b.dateAdded || 0) - (a.dateAdded || 0) || a.name.localeCompare(b.name) : b.duration - a.duration;
     return descending ? -result : result;
   });
 }
 export function trackSection(track: Track, sort?: MobileSort): string | null {
   if (sort === 'year') return String(releaseYear(track) ?? 'Unknown year');
   if (sort !== 'title' && sort !== 'artist') return null;
-  const first = (sort === 'artist' ? track.artist : track.name).trim().normalize('NFKC').charAt(0).toLocaleUpperCase();
-  return /\p{L}/u.test(first) ? first : '#';
+  return alphabetSection(sort === 'artist' ? track.artist : track.name);
 }
 export function smartTracks(id: SmartCollection, tracks: Track[], recent: Record<string, number>): Track[] {
   if (id === 'recentlyAdded') return sortTracks(tracks, 'added').slice(0, 100);

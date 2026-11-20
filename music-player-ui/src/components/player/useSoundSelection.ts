@@ -21,12 +21,12 @@ export function useSoundSelection(profileId: string | null, ready: boolean) {
     if (audio.status?.bypassAll || (!audio.status && localStorage.getItem('dmex_bypass_all') === 'true')) return;
     const id = ++generation.current;
     const fromManual = selectionRef.current.manual;
-    requested.current = `${value.categoryEnabled ? profileId || 'BALANCED' : 'NONE'}:${value.taste}`;
+    requested.current = `${value.categoryEnabled ? profileId || 'POP' : 'NONE'}:${value.taste}`;
     commit(value); setPending(true);
     try {
       if (fromManual && audio.environment !== 'NONE') await audio.loadAsset('NONE', false);
       if (id !== generation.current) return;
-      await audio.update(soundPreset(value.categoryEnabled ? profileId || 'BALANCED' : null, value.taste));
+      await audio.update(soundPreset(value.categoryEnabled ? profileId || 'POP' : null, value.taste));
       if (id === generation.current) setAppliedProfile(profileId);
     } catch (error) {
       if (id === generation.current) commit({ ...value, manual: true });
@@ -49,7 +49,7 @@ export function useSoundSelection(profileId: string | null, ready: boolean) {
   useEffect(() => {
     if (audio.status?.bypassAll) { requested.current = null; return; }
     if (!ready || audio.busy || !audio.status?.ready || selectionRef.current.manual) return;
-    const value = selectionRef.current, key = `${value.categoryEnabled ? profileId || 'BALANCED' : 'NONE'}:${value.taste}`;
+    const value = selectionRef.current, key = `${value.categoryEnabled ? profileId || 'POP' : 'NONE'}:${value.taste}`;
     if (requested.current !== key) void apply(value).catch(() => {});
   }, [profileId, ready, audio.busy, audio.status?.ready, audio.status?.bypassAll, apply]);
   return { selection, pending, markManual, setManualOverride, hydrateLegacy, toggle, chooseTaste,

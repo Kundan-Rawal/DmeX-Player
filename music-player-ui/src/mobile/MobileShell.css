@@ -104,6 +104,9 @@ html[data-mobile-launch],html[data-mobile-launch] body{overscroll-behavior-x:non
 .dmex-mobile-track-index{position:absolute;top:8px;right:0;bottom:8px;width:38px;touch-action:none;user-select:none;color:var(--m-secondary);outline-offset:-2px}
 .dmex-mobile-track-index>span{position:absolute;left:0;right:0;transform:translateY(-50%);text-align:center;font-size:10px;line-height:16px;pointer-events:none}
 .dmex-mobile-track-index>span[data-active=true]{color:var(--m-accent);font-weight:750}
+.dmex-mobile-track-index.is-alphabet{display:grid;grid-auto-flow:column;align-items:center}
+.dmex-mobile-track-index.is-alphabet>span{position:static;transform:none;line-height:1;font-size:9px}
+.dmex-mobile-track-index.is-alphabet>span[data-available=false]{opacity:.42}
 .dmex-mobile-index-preview{position:absolute;right:46px;top:42%;padding:12px;min-width:64px;text-align:center;font-size:22px;border-radius:8px;color:var(--m-text);background:var(--m-surface);border:1px solid var(--m-track-line);pointer-events:none}
 .dmex-mobile-list-toolbar [aria-pressed=true]{color:var(--m-accent)}
 .dmex-mobile-icon,.dmex-mobile-smart,.dmex-mobile-album,.dmex-mobile-primary,.dmex-mobile-action{transition:transform .16s ease,background-color .16s ease,opacity .16s ease}

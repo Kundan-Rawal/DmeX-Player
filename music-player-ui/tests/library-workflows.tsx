@@ -16,6 +16,8 @@ import { emit } from '@tauri-apps/api/event';
 import { releaseYear, isClassicYear } from '../src/utils/trackYear';
 import { metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS } from '../src/config/soundPresets';
 import { sortTracks } from '../src/mobile/library';
+import { alphabetSection, ALPHABET_INDEX, trackSection } from '../src/mobile/library';
+import { classifyAudio } from '../src/config/audio';
 import { discardMissingTrack } from '../src/mobile/queue';
 import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
 import { vocalPresenceDb, harmonicAirDb } from '../src/config/dspResponse';
@@ -36,6 +38,10 @@ if (query.has('mobile')) {
   }
   if (query.has('navigation')) tracks.forEach(track => { artistImages[artistCacheKey(track.artist)] = `/artist-art/${artistCacheKey(track.artist)}.png`; });
   if (query.has('iteration')) tracks.forEach((track, index) => { track.year = ['1880', '2003', '2004', '1879', '2001-07-15', '', '1995', '1996'][index % 8]; track.genre = ['Jazz', 'Metal', 'Pop', 'Classical'][index % 4]; });
+  if (query.has('iteration')) tracks[0].year = '2024';
+  if (query.has('alphabet')) {
+    ['Alpha', 'zebra', 'Bravo', 'नमस्ते', '한글', '42 song', '! Intro', 'Écho', 'Ａlpha', '  delta'].forEach((name,index)=>{tracks[index].name=name;});
+  }
 }
 mockWindows('main');
 mockConvertFileSrc('windows');
@@ -65,7 +71,7 @@ const calls: { command: string; payload: any }[] = [];
 const failures: Record<string, string> = {};
 let engineSettings = [...DEFAULT_AUDIO];
 let bypassAll = false;
-(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, harmonicAirDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, harmonicAirDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, alphabetSection, ALPHABET_INDEX, trackSection, classifyAudio, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });

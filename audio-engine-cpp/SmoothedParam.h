@@ -56,8 +56,10 @@ struct SmoothedGate {
 
     inline float next() {
         float t = on.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
-        g += (t - g) * coef;
-        if (std::fabs(t - g) < 1.0e-6f) g = t;
+        const float next = g + (t - g) * coef;
+        // At high rates float rounding can stall just below unity indefinitely.
+        if (next == g || std::fabs(t - next) < 1.0e-6f) g = t;
+        else g = next;
         return g;
     }
     inline bool fullyOff() const {

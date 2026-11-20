@@ -1,5 +1,9 @@
 # DSP Response Audit and Corrections
 
+The automatic preset gain/width recommendations below were corrected after
+listening feedback. See [Spatial Placement Correction](SPATIAL_PLACEMENT_CORRECTION_2026-11-19.md)
+for the current recipes, center-preserving renderer and verification limits.
+
 This supersedes the preset-value tables in the earlier November 19 iteration notes.
 
 ## Findings

@@ -10,8 +10,8 @@ import { artistCacheKey, buildArtistDictionary } from '../utils/artistEngine';
 import { formatTime } from '../utils/formatters';
 import { CloudFetchView } from '../views/CloudFetchView';
 import { BypassAllButton } from '../components/player/AdvancedAudioPanel';
-import { albumGroups, countLabel, folderPath, isFeaturedAlbum, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks, trackSection } from './library';
-import { CATEGORY_LABELS, metadataCategory } from '../config/soundPresets';
+import { ALPHABET_INDEX, albumGroups, countLabel, folderPath, isFeaturedAlbum, MobileRoute, MobileSort, MobileTab, routeTracks, SMART_TITLES, smartTracks, sortTracks, trackSection } from './library';
+import { canonicalCategory, CATEGORY_LABELS, metadataCategory } from '../config/soundPresets';
 import { isClassicYear } from '../utils/trackYear';
 import { MobilePlayback } from './useMobilePlayback';
 import { MobileQueueList } from './MobileQueueList';
@@ -135,15 +135,27 @@ function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, 
   let low = 0, high = tracks.length;
   while (low < high) { const middle = (low + high) >>> 1; if (layout.offsets[middle] < scroll) low = middle + 1; else high = middle; }
   const begin = Math.max(0, low - 4), end = Math.min(tracks.length, low + Math.ceil(height / rowHeight) + 5);
-  const sectionIndex = Math.max(0, layout.sections.findIndex((section, index) => section.top <= scroll + 1 && (!layout.sections[index + 1] || layout.sections[index + 1].top > scroll + 1)));
+  const currentSection = scroll>0 && scroll+height>=layout.total-1 ? layout.sections[layout.sections.length-1]
+    : layout.sections.find((section, index) => section.top <= scroll + 1 && (!layout.sections[index + 1] || layout.sections[index + 1].top > scroll + 1)) || layout.sections[0];
+  const alphabetical = !onReorder && (groupBy === 'title' || groupBy === 'artist');
+  const indexSections = alphabetical ? ALPHABET_INDEX.map(label => {
+    const exact = layout.sections.find(section => section.label === label);
+    const next = layout.sections.filter(section => section.label !== '#').sort((a,b)=>a.label.localeCompare(b.label)).find(section => section.label > label);
+    return { label, top: exact?.top ?? (label === '#' ? Math.max(0,layout.total-height) : next?.top ?? Math.max(0,layout.total-height)), available: !!exact };
+  }) : layout.sections.map(section=>({...section,available:true}));
+  const sectionIndex = Math.max(0,indexSections.findIndex(section=>section.label===currentSection?.label));
+  const indexColumns = alphabetical && height < 324 ? 2 : 1;
+  const indexRows = Math.ceil(indexSections.length/indexColumns);
+  const showIndex = tracks.length>0 && (alphabetical || indexSections.length>1);
   const [indexPreview, setIndexPreview] = useState<string | null>(null);
-  const jump = (index: number) => { const section = layout.sections[index]; if (section && ref.current) { ref.current.scrollTop = section.top; setIndexPreview(section.label); } };
+  const jump = (index: number) => { const section = indexSections[index]; if (section && ref.current) { ref.current.scrollTop = section.top; setIndexPreview(section.label); } };
   const scrub = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    jump(Math.max(0, Math.min(layout.sections.length - 1, Math.floor((event.clientY - rect.top) / rect.height * layout.sections.length))));
+    const column = alphabetical ? Math.max(0,Math.min(indexColumns-1,Math.floor((event.clientX-rect.left)/rect.width*indexColumns))) : 0;
+    jump(Math.max(0, Math.min(indexSections.length - 1, column*indexRows+Math.max(0,Math.min(indexRows-1,Math.floor((event.clientY - rect.top) / rect.height * indexRows))))));
   };
   const toggle = (track: Track) => onSelect(selected.includes(track.path) ? selected.filter(p => p !== track.path) : [...selected, track.path]);
-  return <div className={'dmex-mobile-track-container' + (layout.sections.length > 1 ? ' has-index' : '')}>
+  return <div className={'dmex-mobile-track-container' + (showIndex ? ' has-index' : '')}>
   <div ref={ref} className="dmex-mobile-track-scroll" role="list" aria-label="Tracks" onScroll={event => { const top = event.currentTarget.scrollTop; if (!event.currentTarget.closest('[data-current=false]')) positions.current[scrollKey] = top; setScroll(top); }}>
     <div className="dmex-mobile-track-spacer" style={{ height: layout.total }}>
       {layout.sections.filter(section => section.top >= scroll - 28 && section.top < scroll + height + 28).map(section => <div className="dmex-mobile-track-section" role="heading" aria-level={2} key={section.top} style={{ top: section.top }}>{section.label}</div>)}
@@ -169,13 +181,13 @@ function TrackList({ tracks, currentPath, favourites, selected, onPlay, onMenu, 
       </div>)}
     </div>
   </div>
-    {layout.sections.length > 0 && scroll > 0 && <div className="dmex-mobile-current-section" aria-hidden="true">{layout.sections[sectionIndex].label}</div>}
-    {layout.sections.length > 1 && <div className="dmex-mobile-track-index" role="slider" tabIndex={0} aria-label={groupBy === 'year' ? 'Release year index' : 'Alphabet index'} aria-orientation="vertical" aria-valuemin={0} aria-valuemax={layout.sections.length - 1} aria-valuenow={sectionIndex} aria-valuetext={layout.sections[sectionIndex].label}
+    {currentSection && scroll > 0 && <div className="dmex-mobile-current-section" aria-hidden="true">{currentSection.label}</div>}
+    {showIndex && <div className={'dmex-mobile-track-index'+(alphabetical?' is-alphabet':'')} style={alphabetical?{gridTemplateRows:`repeat(${indexRows},minmax(0,1fr))`,gridTemplateColumns:`repeat(${indexColumns},minmax(0,1fr))`}:undefined} role="slider" tabIndex={0} aria-label={groupBy === 'year' ? 'Release year index' : 'Alphabet index'} aria-orientation="vertical" aria-valuemin={0} aria-valuemax={indexSections.length - 1} aria-valuenow={sectionIndex} aria-valuetext={indexSections[sectionIndex]?.label}
       onPointerDown={event => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); scrub(event); }}
       onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrub(event); }}
       onPointerUp={event => { event.currentTarget.releasePointerCapture(event.pointerId); setIndexPreview(null); }} onPointerCancel={() => setIndexPreview(null)}
-      onKeyDown={event => { const next = event.key === 'Home' ? 0 : event.key === 'End' ? layout.sections.length - 1 : event.key === 'ArrowDown' ? Math.min(layout.sections.length - 1, sectionIndex + 1) : event.key === 'ArrowUp' ? Math.max(0, sectionIndex - 1) : null; if (next !== null) { event.preventDefault(); jump(next); setIndexPreview(null); } }}>
-      {layout.sections.map((section, index) => index % Math.ceil(layout.sections.length / Math.max(2, Math.floor(height / 22))) === 0 || index === layout.sections.length - 1 ? <span key={section.top} style={{ top: `${(index + .5) / layout.sections.length * 100}%` }} data-active={index === sectionIndex} aria-hidden="true">{section.label === 'Unknown year' ? '?' : section.label}</span> : null)}
+      onKeyDown={event => { const next = event.key === 'Home' ? 0 : event.key === 'End' ? indexSections.length - 1 : event.key === 'ArrowDown' ? Math.min(indexSections.length - 1, sectionIndex + 1) : event.key === 'ArrowUp' ? Math.max(0, sectionIndex - 1) : null; if (next !== null) { event.preventDefault(); jump(next); setIndexPreview(null); } }}>
+      {indexSections.map((section, index) => alphabetical || index % Math.ceil(indexSections.length / Math.max(2, Math.floor(height / 22))) === 0 || index === indexSections.length - 1 ? <span key={section.label} style={alphabetical?undefined:{ top: `${(index + .5) / indexSections.length * 100}%` }} data-available={section.available} data-active={index === sectionIndex} aria-hidden="true">{section.label === 'Unknown year' ? '?' : section.label}</span> : null)}
     </div>}
     {indexPreview && <output className="dmex-mobile-index-preview">{indexPreview}</output>}
   </div>;
@@ -212,7 +224,7 @@ export function MobileShell(p: Props) {
   const nav = useNavigation(p.isExpanded, p.onCollapse), { state } = nav, route = state.routes.slice(-1)[0]!;
   const [sort, setSort] = useState<MobileSort>(() => { const stored = localStorage.getItem('dmex_mobile_sort'); return ['title', 'artist', 'added', 'duration', 'year'].includes(stored || '') ? stored as MobileSort : 'added'; });
   const [descending, setDescending] = useState(() => localStorage.getItem('dmex_mobile_sort_reverse') === 'true');
-  const [categoryFilter, setCategoryFilter] = useState(() => { const stored = localStorage.getItem('dmex_mobile_category'); return stored && (stored === 'ALL' || stored in CATEGORY_LABELS) ? stored : 'ALL'; });
+  const [categoryFilter, setCategoryFilter] = useState(() => { const stored = localStorage.getItem('dmex_mobile_category'); return stored && stored !== 'ALL' ? canonicalCategory(stored) : 'ALL'; });
   const [query, setQuery] = useState(''), [draftName, setDraftName] = useState(''), [saving, setSaving] = useState(false), [notice, setNotice] = useState('');
   const [undo, setUndo] = useState<null | (() => void)>(null), positions = useRef<Record<string, number>>({}), navRef = useRef(nav);
   navRef.current = nav;
@@ -230,7 +242,7 @@ export function MobileShell(p: Props) {
   const baseTracks = useMemo(() => routeTracks(route, p.tracks, p.favourites, p.playlists, p.playback.recent), [route, p.tracks, p.favourites, p.playlists, p.playback.recent]);
   const list = useMemo(() => {
     if (route.kind === 'playlist' || route.kind === 'playlistEdit' || route.kind === 'collection' || route.kind === 'album') return baseTracks;
-    const filtered = root && categoryFilter !== 'ALL' ? baseTracks.filter(track => categoryFilter === 'BOLLYWOOD' ? isClassicYear(track) : metadataCategory(track) === categoryFilter) : baseTracks;
+    const filtered = root && categoryFilter !== 'ALL' ? baseTracks.filter(track => categoryFilter === 'BOLLYWOOD' ? isClassicYear(track) : (metadataCategory(track)||'POP') === categoryFilter) : baseTracks;
     return sortTracks(filtered, sort, descending);
   }, [baseTracks, route.kind, root, sort, descending, categoryFilter]);
   const selection = state.selected.map(path => byPath.get(path)).filter((t): t is Track => !!t);
@@ -324,7 +336,7 @@ export function MobileShell(p: Props) {
       {sheet.kind === 'libraryMenu' && <><Action icon={Plus} onClick={() => nav.replaceSheet({ kind: 'folder' })}>Add music</Action><Action icon={ListMusic} onClick={() => nav.fromSheet({ kind: 'queue' })}>Play queue</Action><Action icon={History} onClick={() => nav.fromSheet({ kind: 'activity' })}>Library activity</Action><Action icon={Settings} onClick={() => nav.fromSheet({ kind: 'settings' })}>Settings</Action></>}
       {sheet.kind === 'clearArtistArt' && <><p>Downloaded artist images will be removed. Music files and album covers will stay on this device.</p><Action icon={Trash2} danger disabled={saving} onClick={async () => { setSaving(true); try { await artistArt.clear(); nav.closeSheet(); notify('Artist artwork cache cleared'); } catch (error) { notify(error instanceof Error ? error.message : 'Artwork cache could not be cleared.'); } finally { setSaving(false); } }}>Clear artist artwork</Action></>}
       {sheet.kind === 'sort' && <>{(['added', 'title', 'artist', 'duration', 'year'] as MobileSort[]).map(mode => <Action icon={sort === mode ? Check : undefined} key={mode} onClick={() => { setSort(mode); localStorage.setItem('dmex_mobile_sort', mode); nav.closeSheet(); }}>{mode === 'added' ? 'Date added, newest first' : mode === 'title' ? 'Title, A to Z' : mode === 'artist' ? 'Artist, A to Z' : mode === 'year' ? 'Release year, oldest first' : 'Duration, longest first'}</Action>)}<div className="dmex-mobile-setting"><span>Reverse order</span><ToggleSwitch label="Reverse sort order" checked={descending} onChange={value => { setDescending(value); localStorage.setItem('dmex_mobile_sort_reverse', String(value)); }} /></div></>}
-      {sheet.kind === 'filter' && [['ALL', 'All categories'], ['BOLLYWOOD', "90s Bollywood Classics (1880-2003)"], ...Object.entries(CATEGORY_LABELS).filter(([id]) => !['BOLLYWOOD','DYNAMIC','DENSE','CENTERED','WIDE','BALANCED'].includes(id))].map(([id, label]) => <Action key={id} icon={categoryFilter === id ? Check : undefined} onClick={() => { setCategoryFilter(id); localStorage.setItem('dmex_mobile_category', id); nav.closeSheet(); }}>{label}</Action>)}
+      {sheet.kind === 'filter' && [['ALL', 'All categories'], ...Object.entries(CATEGORY_LABELS)].map(([id, label]) => <Action key={id} icon={categoryFilter === id ? Check : undefined} onClick={() => { setCategoryFilter(id); localStorage.setItem('dmex_mobile_category', id); nav.closeSheet(); }}>{label}</Action>)}
       {sheet.kind === 'queueEntry' && <>
         <Action icon={ArrowUp} disabled={queueIndex <= currentQueueIndex + 1} onClick={() => { p.playback.move(sheet.queueId!, -1); nav.closeSheet(); }}>Move up</Action>
         <Action icon={ArrowDown} disabled={queueIndex <= currentQueueIndex || queueIndex === p.playback.queue.entries.length - 1} onClick={() => { p.playback.move(sheet.queueId!, 1); nav.closeSheet(); }}>Move down</Action>

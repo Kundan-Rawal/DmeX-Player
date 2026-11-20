@@ -16,12 +16,12 @@ public:
     void init(float sampleRate, const char* sofaFile = nullptr)
     {
         sampleRate_ = sampleRate > 0.0f ? sampleRate : 48000.0f;
-        ambienceHpfL_.init(sampleRate_, 300.0f);
-        ambienceHpfR_.init(sampleRate_, 300.0f);
-        ambienceSplitL_.init(sampleRate_, 4500.0f);
-        ambienceSplitR_.init(sampleRate_, 4500.0f);
+        lowCoef_ = 1-std::exp(-2*static_cast<float>(M_PI)*300/sampleRate_);
+        midCoef_ = 1-std::exp(-2*static_cast<float>(M_PI)*4500/sampleRate_);
         separation_.init(0.0f, sampleRate_, 80.0f);
         depth_.init(0.0f, sampleRate_, 80.0f);
+        attenuationAttack_ = tauCoef(5.0f, sampleRate_);
+        attenuationRelease_ = tauCoef(100.0f, sampleRate_);
         midExtractor_.init(sampleRate_);
         highExtractor_.init(sampleRate_);
         hrtf_.init(static_cast<int>(sampleRate_), sofaFile);
@@ -40,10 +40,7 @@ public:
 
     void reset()
     {
-        ambienceHpfL_.reset();
-        ambienceHpfR_.reset();
-        ambienceSplitL_.reset();
-        ambienceSplitR_.reset();
+        lowL_ = lowR_ = midL_ = midR_ = 0;
         midExtractor_.reset();
         highExtractor_.reset();
         hrtf_.reset();
@@ -52,13 +49,16 @@ public:
         std::memset(wetOutputR_, 0, sizeof(wetOutputR_));
         std::memset(dryBlockL_, 0, sizeof(dryBlockL_));
         std::memset(dryBlockR_, 0, sizeof(dryBlockR_));
+        std::memset(routedBlockL_, 0, sizeof(routedBlockL_));
+        std::memset(routedBlockR_, 0, sizeof(routedBlockR_));
         writePos_ = 0;
         wetReadPos_ = 0;
         wetReady_ = false;
+        fieldAttenuation_ = 1.0f;
     }
 
-    // Keep the direct master and render both residual ambience and a decorrelated
-    // coherent send. A mono-heavy master must not silently disable the stage.
+    // One block of common latency aligns the direct bed with replacement HRTF
+    // routing. Center-coherent material is not decorrelated into fake ambience.
     inline void process(float inL, float inR, float& outL, float& outR)
     {
         float wetL = 0.0f;
@@ -72,16 +72,18 @@ public:
             }
         }
 
-        // The direct onset stays immediate; the spatial send adds early energy.
-        outL = inL + wetL;
-        outR = inR + wetR;
+        outL = wetL;
+        outR = wetR;
 
-        const float filteredL = ambienceHpfL_.process(inL);
-        const float filteredR = ambienceHpfR_.process(inR);
-        float midL = 0.0f, highL = 0.0f;
-        float midR = 0.0f, highR = 0.0f;
-        ambienceSplitL_.process(filteredL, midL, highL);
-        ambienceSplitR_.process(filteredR, midR, highR);
+        // Subtractive complementary splits reconstruct the input, unlike an LR4
+        // sum's all-pass phase rotation against an otherwise unchanged dry bed.
+        lowL_ += lowCoef_*(inL-lowL_);
+        lowR_ += lowCoef_*(inR-lowR_);
+        const float filteredL = inL-lowL_, filteredR = inR-lowR_;
+        midL_ += midCoef_*(filteredL-midL_);
+        midR_ += midCoef_*(filteredR-midR_);
+        const float midL = midL_, midR = midR_;
+        const float highL = filteredL-midL, highR = filteredR-midR;
 
         float ambientMidL = 0.0f, ambientMidR = 0.0f;
         float ambientHighL = 0.0f, ambientHighR = 0.0f;
@@ -90,18 +92,23 @@ public:
 
         const float separation = effectAmount(separation_.next());
         const float depth = effectAmount(depth_.next());
-        const float sideGain = separation * (0.55f - 0.06f * depth);
-        const float rearGain = separation * depth * 0.45f;
-        const float heightGain = separation * depth * 0.32f;
+        const float amount = .75f * separation;
+        // Complementary sends: depth relocates existing residual energy rather
+        // than multiplying it across front, rear and elevation speakers.
+        const float rearShareL = depth * midExtractor_.sustainL * .75f;
+        const float rearShareR = depth * midExtractor_.sustainR * .75f;
+        const float heightShare = depth * .60f;
 
         dryBlockL_[writePos_] = inL;
         dryBlockR_[writePos_] = inR;
-        sourceInputs_[0][writePos_] = (ambientMidL + 0.55f * ambientHighL) * sideGain;
-        sourceInputs_[1][writePos_] = (ambientMidR + 0.55f * ambientHighR) * sideGain;
-        sourceInputs_[2][writePos_] = (0.75f * ambientMidL + ambientHighL) * rearGain;
-        sourceInputs_[3][writePos_] = (0.75f * ambientMidR + ambientHighR) * rearGain;
-        sourceInputs_[4][writePos_] = ambientHighL * heightGain;
-        sourceInputs_[5][writePos_] = ambientHighR * heightGain;
+        routedBlockL_[writePos_] = amount * (ambientMidL + ambientHighL);
+        routedBlockR_[writePos_] = amount * (ambientMidR + ambientHighR);
+        sourceInputs_[0][writePos_] = amount * ((1-rearShareL)*ambientMidL + (1-heightShare)*ambientHighL);
+        sourceInputs_[1][writePos_] = amount * ((1-rearShareR)*ambientMidR + (1-heightShare)*ambientHighR);
+        sourceInputs_[2][writePos_] = amount * rearShareL * ambientMidL;
+        sourceInputs_[3][writePos_] = amount * rearShareR * ambientMidR;
+        sourceInputs_[4][writePos_] = amount * heightShare * ambientHighL;
+        sourceInputs_[5][writePos_] = amount * heightShare * ambientHighR;
 
         if (++writePos_ == kFrameSize) {
             renderAmbientBlock(separation);
@@ -118,18 +125,16 @@ private:
         float cross = 0.0f;
         float fastL = 0.0f, fastR = 0.0f;
         float slowL = 0.0f, slowR = 0.0f;
+        float sustainL = 0.0f, sustainR = 0.0f;
         float analysisCoef = 0.0f;
         float fastCoef = 0.0f;
         float slowCoef = 0.0f;
-        AllPassFilter coherentL{}, coherentR{};
 
         void init(float sampleRate)
         {
             analysisCoef = tauCoef(45.0f, sampleRate);
             fastCoef = tauCoef(3.0f, sampleRate);
             slowCoef = tauCoef(70.0f, sampleRate);
-            ap_init(&coherentL, static_cast<int>(149 * sampleRate / 48000.0f), .55f);
-            ap_init(&coherentR, static_cast<int>(233 * sampleRate / 48000.0f), .55f);
             reset();
         }
 
@@ -137,8 +142,7 @@ private:
         {
             energyL = energyR = cross = 0.0f;
             fastL = fastR = slowL = slowR = 0.0f;
-            std::memset(coherentL.buf, 0, sizeof(coherentL.buf)); coherentL.idx = 0;
-            std::memset(coherentR.buf, 0, sizeof(coherentR.buf)); coherentR.idx = 0;
+            sustainL = sustainR = 0.0f;
         }
 
         inline void process(float inL, float inR, float& ambientL, float& ambientR)
@@ -147,18 +151,25 @@ private:
             energyR += analysisCoef * (inR * inR - energyR);
             cross += analysisCoef * (inL * inR - cross);
 
-            const float denominator = std::sqrt(energyL * energyR) + 1.0e-10f;
+            const float denominator = std::sqrt((std::max)(energyL * energyR, 1.0e-30f));
             const float coherence = (std::clamp)(cross / denominator, 0.0f, 1.0f);
-            const float primaryStrength = (std::clamp)((coherence - 0.15f) / 0.75f, 0.0f, 1.0f);
-            const float predictL = (std::clamp)(cross / (energyR + 1.0e-10f), 0.0f, 2.0f);
-            const float predictR = (std::clamp)(cross / (energyL + 1.0e-10f), 0.0f, 2.0f);
+            const float balance = (std::clamp)(2*denominator / (energyL + energyR + 1.0e-20f), 0.0f, 1.0f);
+            const float balanceSquared = balance * balance;
+            // Protect a balanced coherent center, not every amplitude-panned
+            // instrument: off-center coherent sources still need a virtual location.
+            const float primaryStrength = (std::clamp)((coherence - 0.15f) / 0.75f, 0.0f, 1.0f)
+                * balanceSquared * balanceSquared;
+            const float predictL = (std::clamp)(cross / (std::max)(energyR, 1.0e-20f), 0.0f, 2.0f);
+            const float predictR = (std::clamp)(cross / (std::max)(energyL, 1.0e-20f), 0.0f, 2.0f);
 
-            ambientL = inL - inR * predictL * primaryStrength;
-            ambientR = inR - inL * predictR * primaryStrength;
+            // A broad-band estimate cannot cleanly separate a vocal sharing this
+            // band with instruments. Leave uncertain correlated energy in front
+            // instead of aggressively removing it from the direct mix.
+            const float uncertainty = 1-primaryStrength;
+            const float residualConfidence = uncertainty * uncertainty;
+            ambientL = (inL - inR * predictL * primaryStrength) * residualConfidence;
+            ambientR = (inR - inL * predictR * primaryStrength) * residualConfidence;
 
-            const float coherent = .5f * (inL + inR) * primaryStrength;
-            ambientL += .50f * ap_tick(&coherentL, coherent);
-            ambientR += .50f * ap_tick(&coherentR, coherent);
             const float magnitudeL = std::abs(ambientL);
             const float magnitudeR = std::abs(ambientR);
             fastL += fastCoef * (magnitudeL - fastL);
@@ -166,19 +177,16 @@ private:
             slowL += slowCoef * (magnitudeL - slowL);
             slowR += slowCoef * (magnitudeR - slowR);
 
-            // Protect attacks and vocal consonants; spatial sends favor the
-            // sustained residual that reads as room and recorded ambience.
-            const float sustainL = (std::clamp)(slowL / (fastL + 1.0e-6f), 0.0f, 1.0f);
-            const float sustainR = (std::clamp)(slowR / (fastR + 1.0e-6f), 0.0f, 1.0f);
-            ambientL *= sustainL;
-            ambientR *= sustainR;
+            // Attacks stay toward the front; sustained residual can move rearward.
+            sustainL = (std::clamp)(slowL / (fastL + 1.0e-6f), 0.0f, 1.0f);
+            sustainR = (std::clamp)(slowR / (fastR + 1.0e-6f), 0.0f, 1.0f);
         }
     };
 
     void renderAmbientBlock(float separation)
     {
         static constexpr float azimuth[kSourceCount] = {
-            -90.0f, 90.0f, -145.0f, 145.0f, -48.0f, 48.0f
+            -45.0f, 45.0f, -145.0f, 145.0f, -48.0f, 48.0f
         };
         static constexpr float elevation[kSourceCount] = {
             0.0f, 0.0f, 0.0f, 0.0f, 45.0f, 45.0f
@@ -194,16 +202,17 @@ private:
         }
 
         if (!rendered) {
-            std::memset(wetOutputL_, 0, sizeof(wetOutputL_));
-            std::memset(wetOutputR_, 0, sizeof(wetOutputR_));
+            std::memcpy(wetOutputL_, dryBlockL_, sizeof(wetOutputL_));
+            std::memcpy(wetOutputR_, dryBlockR_, sizeof(wetOutputR_));
             return;
         }
 
         double dryEnergy = 0.0;
         double wetEnergy = 0.0;
-        // The SDK bank has more aggregate gain than the normalized compact bank.
-        // Calibrate before the safety cap so ordinary stereo does not hit it unevenly.
-        const float rendererGain = hrtf_.measured() && !hrtf_.portableMeasured() ? .5f : 1.0f;
+        // The compact bank normalizes mean ear energy to one. A mono residual
+        // needs unit TOTAL ear energy, hence 1/sqrt(2), before replacement mixing.
+        // The SDK bank retains its independently calibrated source gain.
+        const float rendererGain = hrtf_.measured() && !hrtf_.portableMeasured() ? .5f : .70710678f;
         for (int i = 0; i < kFrameSize; ++i) {
             wetOutputL_[i] *= rendererGain;
             wetOutputR_[i] *= rendererGain;
@@ -211,23 +220,26 @@ private:
             wetEnergy += wetOutputL_[i] * wetOutputL_[i] + wetOutputR_[i] * wetOutputR_[i];
         }
 
-        // Bound even the strongest spatial setting; the final limiter still owns peaks.
+        // Only attenuate excessive rendering; never auto-raise a weak spatial field.
         const double dryRms = std::sqrt(dryEnergy / (2.0 * kFrameSize) + 1.0e-20);
         const double wetRms = std::sqrt(wetEnergy / (2.0 * kFrameSize) + 1.0e-20);
-        const float maxWetRms = static_cast<float>(dryRms) * 0.70f * separation;
+        const float maxWetRms = static_cast<float>(dryRms) * 0.80f * separation;
         const float normalization = wetRms > maxWetRms && wetRms > 1.0e-10
             ? maxWetRms / static_cast<float>(wetRms)
             : 1.0f;
 
         for (int i = 0; i < kFrameSize; ++i) {
-            wetOutputL_[i] *= normalization;
-            wetOutputR_[i] *= normalization;
+            // Avoid gain steps at the 64-frame boundary on changing material.
+            const float coef = normalization < fieldAttenuation_ ? attenuationAttack_ : attenuationRelease_;
+            fieldAttenuation_ += coef * (normalization - fieldAttenuation_);
+            wetOutputL_[i] = dryBlockL_[i] + fieldAttenuation_ * (wetOutputL_[i] - routedBlockL_[i]);
+            wetOutputR_[i] = dryBlockR_[i] + fieldAttenuation_ * (wetOutputR_[i] - routedBlockR_[i]);
         }
     }
 
     SteamAudioHrtf hrtf_;
-    BiquadHPF ambienceHpfL_, ambienceHpfR_;
-    LinkwitzRiley4 ambienceSplitL_, ambienceSplitR_;
+    float lowL_ = 0, lowR_ = 0, midL_ = 0, midR_ = 0;
+    float lowCoef_ = 0, midCoef_ = 0;
     PrimaryAmbientExtractor midExtractor_, highExtractor_;
     SmoothedParam separation_, depth_;
 
@@ -236,9 +248,13 @@ private:
     float wetOutputR_[kFrameSize]{};
     float dryBlockL_[kFrameSize]{};
     float dryBlockR_[kFrameSize]{};
+    float routedBlockL_[kFrameSize]{};
+    float routedBlockR_[kFrameSize]{};
 
     int writePos_ = 0;
     int wetReadPos_ = 0;
     bool wetReady_ = false;
+    float fieldAttenuation_ = 1.0f;
+    float attenuationAttack_ = 1.0f, attenuationRelease_ = 1.0f;
     float sampleRate_ = 48000.0f;
 };

@@ -790,7 +790,7 @@ static void limiter_process(ma_node *node, const float **input, ma_uint32 *count
 ma_node_vtable g_limiter_vtable = {limiter_process, NULL, 1, 1, 0};
 
 // ================================================================
-// TRUE 8D OBJECT-BASED SPATIALIZER (LR4 + HAAS)
+// Stereo-derived virtual stage (primary/residual extraction + measured HRTFs).
 // ================================================================
 static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
@@ -822,11 +822,11 @@ static void dynamic_spatializer_process(ma_node *pNode, const float **ppFramesIn
         float inL = pIn[i * 2];
         float inR = pIn[i * 2 + 1];
 
-        // 2. Render through the 9-Speaker Upmix & Binaural Matrix
+        // Render six virtual directions with a common one-block direct-bed delay.
         float spatL = 0.0f, spatR = 0.0f;
         p->upmixer.process(inL, inR, spatL, spatR);
 
-        // 3. Smooth lock-free 25ms crossfade between bypass and 9-speaker field
+        // Smooth lock-free 25ms crossfade between bypass and the virtual stage.
         float gate = p->gate.next();
         pOut[i * 2]     = inL + (spatL - inL) * gate;
         pOut[i * 2 + 1] = inR + (spatR - inR) * gate;

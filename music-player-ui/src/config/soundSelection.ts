@@ -32,7 +32,7 @@ export function processingStatus(selection: SoundSelection, profileId: string | 
   if (raw) return { ...base, label: 'Raw Stereo', kind: 'raw' };
   if (pending) return { ...base, label: 'Applying...', kind: 'pending' };
   if (selection.manual) return { ...base, label: 'Manual Override', kind: 'manual' };
-  const category = selection.categoryEnabled ? CATEGORY_LABELS[profileId || 'BALANCED'] || CATEGORY_LABELS.BALANCED : null;
+  const category = selection.categoryEnabled ? CATEGORY_LABELS[profileId || 'POP'] || CATEGORY_LABELS.POP : null;
   const pill = TASTE_LABELS[selection.taste] || null;
   return { categoryEnabled: selection.categoryEnabled, category, pill,
     label: [category, pill].filter(Boolean).join(' + ') || 'Normal Stereo', kind: category || pill ? 'automatic' : 'normal' };

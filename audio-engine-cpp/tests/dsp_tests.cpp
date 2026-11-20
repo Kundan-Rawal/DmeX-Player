@@ -87,6 +87,11 @@ bool finite(const Audio& a) {
 void sampleRateModes() {
     constexpr const char* hrtfPath = "assets/hrtf/subject_003.sofa";
     for (const int sampleRate : {44100, 48000, 96000}) {
+        SmoothedGate gate; gate.init(false,static_cast<float>(sampleRate),25);
+        gate.set(true); for(int i=0;i<sampleRate/2;++i) gate.next();
+        check(gate.g==1,"processing gate reaches unity without a permanent bypass leak");
+        gate.set(false); for(int i=0;i<sampleRate/2;++i) gate.next();
+        check(gate.fullyOff(),"processing gate returns to exact bypass");
         SteamAudioHrtf hrtf;
         check(hrtf.init(sampleRate, hrtfPath),
               "spatial renderer initializes at a supported rate");
@@ -103,6 +108,14 @@ void sampleRateModes() {
 Audio subtract(const Audio& a, const Audio& b) {
     Audio result(a.size());
     for (size_t i = 0; i < a.size(); ++i) result[i] = a[i] - b[i];
+    return result;
+}
+
+Audio stageDelay(const Audio& input) {
+    Audio result(input.size());
+    constexpr size_t samples = SteamAudioHrtf::kFrameSize * 2;
+    if (input.size() > samples)
+        std::copy(input.begin(), input.end()-samples, result.begin()+samples);
     return result;
 }
 
@@ -389,7 +402,14 @@ void spatialAndReverb() {
     check(difference(output, process(downstream.get(), g_psychoacoustic_vtable, output)) == 0,
           "legacy psychoacoustic stage bypasses while 9D is active");
 
-    Audio leftOnly = tone(1300);
+    // Lateral energy is a broadband property: a single HRTF notch can reverse
+    // the level difference of an isolated sine without reversing its ITD cue.
+    Audio leftOnly(48000*2);
+    unsigned noiseSeed=71;
+    for(size_t i=0;i<leftOnly.size();i+=2) {
+        noiseSeed=noiseSeed*1664525u+1013904223u;
+        leftOnly[i]=(static_cast<float>(noiseSeed>>8)/16777216.0f-.5f)*.3f;
+    }
     Audio rightOnly(leftOnly.size());
     Audio opposed(leftOnly.size());
     for (size_t i = 0; i < leftOnly.size() / 2; ++i) {
@@ -403,32 +423,43 @@ void spatialAndReverb() {
     const auto leftRendered = process(leftNode.get(), g_dynamic_spatializer_vtable, leftOnly);
     const auto rightRendered = process(rightNode.get(), g_dynamic_spatializer_vtable, rightOnly);
     const auto opposedRendered = process(opposedNode.get(), g_dynamic_spatializer_vtable, opposed);
-    check(difference(opposedRendered, subtract(leftRendered, rightRendered)) < 2e-5f,
-          "9D renders left and right as independent sources");
+    std::cout << "STAGE SUPERPOSITION " << difference(opposedRendered, subtract(leftRendered, rightRendered)) << '\n';
+    check(difference(opposedRendered,subtract(leftRendered,rightRendered))<2e-5f,
+          "independent broadband source routing remains additive below the field cap");
+    check(energy(leftRendered,0)>energy(leftRendered,1) && energy(rightRendered,1)>energy(rightRendered,0),
+          "virtual stage preserves the side of independent left and right sources");
 
     auto vocalNode = std::make_unique<DynamicSpatializerNode>(); vocalNode->init(sr);
     vocalNode->setSeparation(1); vocalNode->setDepth(1);
     const Audio centeredVocal = tone(1200, 48000, 1.0f);
     const Audio vocalOutput = process(vocalNode.get(), g_dynamic_spatializer_vtable, centeredVocal);
-    const double centeredEnergy=energy(centeredVocal,0,12000)+energy(centeredVocal,1,12000);
-    const double centeredChange=differenceEnergy(vocalOutput,centeredVocal,12000)/centeredEnergy;
+    const double centeredEnergy=energy(centeredVocal,0,24000)+energy(centeredVocal,1,24000);
+    const auto delayedVocal = stageDelay(centeredVocal);
+    const double centeredChange=differenceEnergy(vocalOutput,delayedVocal,24000)/centeredEnergy;
     std::cout << "MONO SPATIAL relative delta=" << std::sqrt(centeredChange) << '\n';
-    check(centeredChange > .0025 && centeredChange < .51,
-          "maximum spatial stage affects coherent material within the wet-field budget");
+    check(centeredChange < 1e-10,
+          "maximum spatial stage preserves the coherent center after fixed latency");
     double sideEnergy=0,midEnergy=0;
-    for(size_t i=24000;i<vocalOutput.size();i+=2) {
+    for(size_t i=48000;i<vocalOutput.size();i+=2) {
         const double side=(vocalOutput[i]-vocalOutput[i+1])*.5,mid=(vocalOutput[i]+vocalOutput[i+1])*.5;
         sideEnergy+=side*side;midEnergy+=mid*mid;
     }
-    check(sideEnergy > midEnergy * .0016, "mono source gains measurable lateral spatial cues");
-    double previousMonoChange=0;
+    check(sideEnergy < midEnergy * 1e-10, "mono vocal is not decorrelated into artificial lateral ambience");
     for(float amount : {.25f,.5f,.75f,1.f}) {
         auto node=std::make_unique<DynamicSpatializerNode>(); node->init(sr); node->setSeparation(amount); node->setDepth(.8f);
         const auto rendered=process(node.get(),g_dynamic_spatializer_vtable,centeredVocal);
-        const double change=std::sqrt(differenceEnergy(rendered,centeredVocal,12000)/centeredEnergy);
-        check(change>.03 && change>previousMonoChange, "mono spatial response is useful and increases across the slider");
-        previousMonoChange=change;
+        const double change=differenceEnergy(rendered,delayedVocal,24000)/centeredEnergy;
+        check(change<1e-10, "spatial amount preserves center anchoring throughout its travel");
     }
+    auto bassNode=std::make_unique<DynamicSpatializerNode>(); bassNode->init(sr); bassNode->setSeparation(1); bassNode->setDepth(1);
+    const auto centeredBass=tone(70,48000,1);
+    check(differenceEnergy(process(bassNode.get(),g_dynamic_spatializer_vtable,centeredBass),stageDelay(centeredBass),24000)<1e-9,
+          "spatial placement does not spread or attenuate centered sub-bass");
+    auto pannedNode=std::make_unique<DynamicSpatializerNode>(); pannedNode->init(sr); pannedNode->setSeparation(1); pannedNode->setDepth(.7f);
+    const auto panned=tone(1700,48000,.5f);
+    const auto pannedOutput=process(pannedNode.get(),g_dynamic_spatializer_vtable,panned);
+    check(differenceEnergy(pannedOutput,stageDelay(panned),24000)>.001 && energy(pannedOutput,0)>energy(pannedOutput,1),
+          "coherent off-center instruments receive placement without reversing their side");
 
     Audio diffuse = tone(1700, 48000, 0.0f);
     for (int i = 0; i < 48000; ++i)
@@ -440,11 +471,19 @@ void spatialAndReverb() {
     halfNode->setSeparation(0.5f); halfNode->setDepth(1.0f);
     const Audio halfOutput = process(halfNode.get(), g_dynamic_spatializer_vtable, diffuse);
     const double dryEnergy = energy(diffuse, 0) + energy(diffuse, 1);
-    check(differenceEnergy(diffuseOutput, diffuse) >
-          differenceEnergy(halfOutput, diffuse) * 1.5,
-          "full 9D separation adds more ambient field than half separation");
-    check(differenceEnergy(diffuseOutput, diffuse) < dryEnergy * 0.51,
-          "ambient field remains below dry-bed headroom budget");
+    const auto delayedDiffuse=stageDelay(diffuse);
+    check(differenceEnergy(diffuseOutput, delayedDiffuse) >
+          differenceEnergy(halfOutput, delayedDiffuse) * 1.5,
+          "full spatial amount relocates more residual than half amount");
+    check(differenceEnergy(diffuseOutput, delayedDiffuse) < dryEnergy * 1.5,
+          "replacement field remains within its bounded routing budget");
+    auto smallBlocks=std::make_unique<DynamicSpatializerNode>(); smallBlocks->init(sr); smallBlocks->setSeparation(1); smallBlocks->setDepth(1);
+    check(difference(diffuseOutput,process(smallBlocks.get(),g_dynamic_spatializer_vtable,diffuse,17))<1e-6f,
+          "spatial replacement is independent of host callback size");
+    auto frontStage=std::make_unique<DynamicSpatializerNode>(); frontStage->init(sr); frontStage->setSeparation(1); frontStage->setDepth(0);
+    const auto frontOutput=process(frontStage.get(),g_dynamic_spatializer_vtable,diffuse);
+    check(differenceEnergy(frontOutput,diffuseOutput)>dryEnergy*.001,
+          "depth changes front/rear/elevation allocation, not just stereo width");
 
     SteamAudioHrtf front, rear, height;
     constexpr const char* hrtfPath = "assets/hrtf/subject_003.sofa";
@@ -497,6 +536,9 @@ void measuredMobileAndAutomaticRoom() {
     check(difference(a,b)>0.01f, "mobile front and rear differ even at equal lateral angle");
     check(difference(a,c)>0.01f, "mobile elevation changes measured spectral cues");
     check(energy(a,0,0)>energy(a,1,0)*1.1, "mobile left source remains stronger at the left ear");
+    const double calibratedEnergy=(energy(a,0,0)+energy(a,1,0))*.5;
+    check(calibratedEnergy>.90 && calibratedEnergy<1.10,
+          "portable mono-source calibration preserves total two-ear impulse energy");
     front->reset(); float zero[64]{}, outL[64]{}, outR[64]{};
     front->renderSource(0, zero, -45, 0, 1, outL, outR);
     check(std::all_of(std::begin(outL),std::end(outL),[](float x){return x==0;}), "mobile filter reset removes previous-track tails");
@@ -709,6 +751,7 @@ void productionControlSweep() {
         return result;
     };
     const auto base=render(neutral);
+    std::cout << "NEUTRAL TRANSFER " << toneAmplitude(base,2500,0)/(.2*toneAmplitude(input,2500,0)) << '\n';
     std::FILE* response = std::fopen("control-response.csv", "w");
     if (!response) throw std::runtime_error("Cannot write response measurements");
     std::fprintf(response,"control,amount,relative_rms_delta\n");
@@ -716,7 +759,8 @@ void productionControlSweep() {
         auto referenceValues=neutral;
         if (control.second==4 || control.second==5) { referenceValues[17]=1; referenceValues[4]=control.second==5?.85f:0; referenceValues[5]=control.second==4?.7f:0; }
         if (control.second==10) referenceValues[11]=1;
-        const auto reference=render(referenceValues);
+        const auto unalignedReference=render(referenceValues);
+        const auto reference=control.second==4 ? stageDelay(unalignedReference) : unalignedReference;
         const double referenceEnergy=energy(reference,0,24000)+energy(reference,1,24000);
         double previous=0;
         for (float amount : {.25f,.5f,.75f,1.f}) {
@@ -767,16 +811,26 @@ void productionControlSweep() {
     // Base recipes mirror soundPresets.ts; volume is lowered only in this offline harness.
     Audio lastPreset;
     for (const auto& preset : {
-        Case{"Category-only Jazz recipe",{{0,.45f},{1,2.f},{3,1.12f},{12,.35f},{14,.72f},{15,.6f},{16,.30f}}},
-        Case{"HD Clear recipe",{{0,.75f},{1,5.f},{2,.20f},{3,1.12f},{12,.65f},{14,.72f},{15,.6f},{16,.60f}}},
-        Case{"Immersive recipe",{{0,.95f},{1,5.f},{2,.15f},{3,1.20f},{4,.85f},{5,.70f},{6,.20f},{10,.20f},{11,1.f},{12,.60f},{14,.72f},{15,.6f},{16,.50f},{17,1.f}}},
-        Case{"Chill recipe",{{0,.85f},{1,2.f},{3,1.15f},{4,.90f},{5,.85f},{6,.35f},{10,.32f},{11,1.f},{12,.60f},{14,.80f},{15,.65f},{16,.50f},{17,1.f}}}
+        Case{"Category-only Jazz recipe",{{0,.48f},{1,2.f},{2,.3f},{3,1.2f},{4,.55f},{5,.4f},{6,.05f},{10,.07f},{11,1.f},{12,.55f},{14,.72f},{15,.6f},{16,.2f},{17,1.f}}},
+        Case{"HD Clear recipe",{{0,.42f},{1,2.5f},{2,.3f},{3,1.2f},{10,.06f},{11,1.f},{12,.55f},{14,.72f},{15,.6f},{16,.25f}}},
+        Case{"Immersive recipe",{{0,.65f},{1,2.f},{2,.3f},{3,1.35f},{4,.75f},{5,.65f},{6,.12f},{10,.08f},{11,1.f},{12,.5f},{14,.65f},{15,.7f},{16,.2f},{17,1.f}}},
+        Case{"Chill recipe",{{0,.55f},{1,2.f},{2,.3f},{3,1.25f},{4,.70f},{5,.80f},{6,.18f},{10,.08f},{11,1.f},{12,.5f},{14,.76f},{15,.80f},{16,.2f},{17,1.f}}}
     }) {
         auto values=neutral; for(const auto& [index,value]:preset.changes) values[index]=value;
         const auto output=render(values);
-        check(differenceEnergy(base,output,24000)>.0001, preset.name);
+        check(differenceEnergy(values[17]>0 ? stageDelay(base) : base,output,24000)>.0001, preset.name);
+        check(values[0]>=.42f && values[3]>=1.2f && values[1]>=2 && values[16]>=.2f && values[2]>=.3f && values[12]>=.5f,
+              "category and quick recipes meet requested preference minimums");
+        const double presenceDb=20*std::log10((toneAmplitude(output,2500,0)+1e-12)/(toneAmplitude(base,2500,0)+1e-12));
+        const double trebleDb=20*std::log10((toneAmplitude(output,5900,1)+1e-12)/(toneAmplitude(base,5900,1)+1e-12));
+        std::cout << "PRESET PRESENCE " << preset.name << "=" << presenceDb << " dB\n";
+        std::cout << "PRESET TREBLE " << preset.name << "=" << trebleDb << " dB\n";
+        check(presenceDb>0 && presenceDb<10,"forward-vocal recipe remains within its intended presence range");
+        check(trebleDb<8,"enhanced recipe avoids excessive treble gain on the reference fixture");
         if (!lastPreset.empty()) check(differenceEnergy(lastPreset,output,24000)>.0001, "quick recipes produce distinct processed PCM");
         lastPreset=output;
+        auto fullMaster=values; fullMaster[8]=1;
+        render(fullMaster); // Exercise the actual limiter with the stronger recipes.
     }
     execute_audio_command("STOP"); uninit_audio_engine(); std::remove("controls-fixture.wav"); g_ecoMode=false;
 }
