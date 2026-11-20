@@ -361,7 +361,7 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
           </div>
 
           <div className="mep-seek">
-            <input type="range" className="mep-seek-bar" min="0" max={p.duration || 1} value={p.currentTime} onPointerDown={() => { p.isSeekingRef.current = true; }} onTouchStart={() => { p.isSeekingRef.current = true; }} onChange={p.onSeekDrag} onPointerUp={p.onSeekCommit} onTouchEnd={p.onSeekCommit}/>
+            <input type="range" className="mep-seek-bar" min="0" max={p.duration || 1} value={p.currentTime} onPointerDown={() => { p.isSeekingRef.current = true; }} onPointerCancel={() => { p.isSeekingRef.current = false; }} onChange={p.onSeekDrag} onPointerUp={p.onSeekCommit}/>
             <div className="mep-seek-labels"><span>{formatTime(p.currentTime)}</span><span>{formatTime(p.duration)}</span></div>
           </div>
 

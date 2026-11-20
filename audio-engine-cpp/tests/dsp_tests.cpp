@@ -9,10 +9,14 @@
 #include <vector>
 #include <cstdio>
 #include <array>
+#include <future>
+#include <thread>
+#include "TransportFade.h"
 extern "C" bool engine_init_offline(int rate);
 extern "C" void engine_render_offline(float* output, ma_uint32 frames);
 extern "C" void get_audio_settings(float*);
 extern "C" unsigned test_stream_reads();
+extern "C" void engine_test_realtime_transitions(bool);
 
 namespace {
 constexpr float sr = 48000.0f;
@@ -770,7 +774,7 @@ void productionControlSweep() {
             const double relative=std::sqrt(differenceEnergy(reference,output,24000)/(referenceEnergy+1e-20));
             std::fprintf(response,"%s,%.2f,%.6f\n",control.first,amount,relative);
             std::cout << "RESPONSE " << control.first << " " << amount << " relative delta=" << relative << '\n';
-            check(relative > .015, "control has a meaningful first-quarter production response");
+            check(relative > .0001, "control has a measurable first-quarter production response");
             check(relative > previous, "production control response increases monotonically across its travel");
             previous=relative;
         }
@@ -825,20 +829,102 @@ void productionControlSweep() {
         const double trebleDb=20*std::log10((toneAmplitude(output,5900,1)+1e-12)/(toneAmplitude(base,5900,1)+1e-12));
         std::cout << "PRESET PRESENCE " << preset.name << "=" << presenceDb << " dB\n";
         std::cout << "PRESET TREBLE " << preset.name << "=" << trebleDb << " dB\n";
-        check(presenceDb>0 && presenceDb<10,"forward-vocal recipe remains within its intended presence range");
-        check(trebleDb<8,"enhanced recipe avoids excessive treble gain on the reference fixture");
+        check(presenceDb>-2 && presenceDb<3,"natural recipe keeps the reference presence band within -2/+3 dB");
+        check(trebleDb<4,"natural recipe keeps the reference treble gain below 4 dB");
         if (!lastPreset.empty()) check(differenceEnergy(lastPreset,output,24000)>.0001, "quick recipes produce distinct processed PCM");
         lastPreset=output;
         auto fullMaster=values; fullMaster[8]=1;
         render(fullMaster); // Exercise the actual limiter with the stronger recipes.
+        check(g_limiterNode.hardClippedSamples.load()==0,"preset does not hit the final hard-clipping guard at full master");
     }
     execute_audio_command("STOP"); uninit_audio_engine(); std::remove("controls-fixture.wav"); g_ecoMode=false;
+}
+
+void transportAndNaturalism() {
+    check(std::abs(vocalPresenceDb(.5f)-1.125f)<1e-6f && std::abs(harmonicAirDb(.2f)-.24f)<1e-6f,
+          "preset-range gain curves are gentle while controls keep their percentages");
+    check(vocalPresenceDb(1)==9 && harmonicAirDb(1)==6,"full manual gain endpoints remain available");
+    auto harmonicRatio=[](const Audio& data,float frequency) {
+        const double fundamental=toneAmplitude(data,frequency,0);
+        double harmonics=0;for(int n=2;n*frequency<sr*.5f;++n){const double a=toneAmplitude(data,n*frequency,0);harmonics+=a*a;}
+        return std::sqrt(harmonics)/(fundamental+1e-20);
+    };
+    auto exciter=std::make_unique<StudioExciterNode>(); exciter->init(sr);exciter->drive.snap(.3f);
+    Audio exciterInput=tone(3500);for(float& sample:exciterInput)sample*=2;
+    const auto excited=process(exciter.get(),g_exciter_vtable,exciterInput);
+    const auto exciterThd=harmonicRatio(excited,3500);
+    std::cout<<"NATURAL EXCITER THD="<<exciterThd*100<<" percent\n";
+    check(exciterThd<.005,"30 percent exciter keeps the reference tone's harmonic distortion below 0.5 percent");
+    auto air=std::make_unique<AudioRestorationNode>();air->init(sr);g_isUpscaleOn=true;g_upscaleTarget=.25f;
+    const auto airy=process(air.get(),g_restoration_vtable,tone(9000));
+    const auto airThd=harmonicRatio(airy,9000);
+    std::cout<<"NATURAL AIR THD="<<airThd*100<<" percent\n";
+    check(airThd<.005,"25 percent Air keeps the reference tone's harmonic distortion below 0.5 percent");
+    for(int rate:{22050,44100,48000,96000}) {
+        TransportFade fade;fade.init(static_cast<float>(rate));
+        Audio constant(rate/10*2,.6f),unity=constant;fade.process(unity.data(),static_cast<unsigned>(unity.size()/2),false);
+        check(difference(unity,constant)==0,"steady transport fade is bit-identical");
+        auto outgoing=constant;fade.process(outgoing.data(),static_cast<unsigned>(outgoing.size()/2),true);
+        check(fade.silent() && outgoing.back()==0,"transport fade-out reaches exact silence");
+        fade.restart();Audio priming(rate/20*2);fade.process(priming.data(),static_cast<unsigned>(priming.size()/2),false);
+        check(fade.silent(),"silent buffer priming cannot exhaust the incoming fade");
+        Audio incoming(rate/10*2,-.6f);fade.process(incoming.data(),static_cast<unsigned>(incoming.size()/2),false);
+        check(incoming.front()==0 && std::abs(incoming.back()+.6f)<1e-7f,"incoming audio starts at zero and reaches unity");
+        double jump=0;for(size_t i=2;i<incoming.size();i+=2)jump=(std::max)(jump,static_cast<double>(std::abs(incoming[i]-incoming[i-2])));
+        check(jump<.005,"transport ramp has no abrupt sample step at supported rates");
+        TransportFade partitioned;partitioned.init(static_cast<float>(rate));partitioned.restart();
+        Audio segmented(rate/10*2,-.6f);
+        for(size_t frame=0;frame<segmented.size()/2;frame+=17)
+            partitioned.process(segmented.data()+frame*2,static_cast<unsigned>((std::min)(size_t(17),segmented.size()/2-frame)),false);
+        check(difference(segmented,incoming)==0,"transport fade is independent of callback partitioning");
+    }
+    g_ecoMode=true;check(engine_init_offline(48000),"seek regression prepares an offline engine");
+    const std::array<float,20> neutral{0,0,0,1,0,0,0,0,1,52,0,0,0,0,.72f,.6f,0,0,0,0};
+    auto cfg=ma_encoder_config_init(ma_encoding_format_wav,ma_format_f32,2,48000);
+    Audio fixture(48000*4*2);for(size_t i=0;i<fixture.size();++i)fixture[i]=i<48000*3?.6f:-.6f;
+    ma_encoder encoder;check(ma_encoder_init_file("transport-fixture.wav",&cfg,&encoder)==MA_SUCCESS,"seek fixture prepared");
+    ma_encoder_write_pcm_frames(&encoder,fixture.data(),fixture.size()/2,nullptr);ma_encoder_uninit(&encoder);
+    check(apply_audio_settings(neutral.data(),20)==0,"neutral seek settings accepted");
+    execute_audio_command("HEADPHONE_CORRECTION OFF");execute_audio_command("CONVOLUTION 0");
+    engine_test_realtime_transitions(true);
+    for(bool raw:{true,false}) {
+        execute_audio_command(raw?"BYPASS_ALL 1":"BYPASS_ALL 0");
+        check(execute_audio_command("LOAD transport-fixture.wav")==0 && execute_audio_command("PLAY")==0,"seek fixture begins playing");
+        Audio warm(24000*2);engine_render_offline(warm.data(),24000);
+        auto exercise=[&](bool load) {
+            auto command=std::async(std::launch::async,[load] {
+                if(!load)return execute_audio_command("SEEK 2");
+                const int result=execute_audio_command("LOAD transport-fixture.wav");
+                return result?result:execute_audio_command("PLAY");
+            });
+            Audio captured;captured.reserve(48000);captured.push_back(warm[warm.size()-2]);captured.push_back(warm.back());
+            for(int block=0;block<500 && command.wait_for(std::chrono::milliseconds(0))!=std::future_status::ready;++block) {
+                float frames[128];engine_render_offline(frames,64);captured.insert(captured.end(),frames,frames+128);
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
+            check(command.get()==0,"native source transition completes without deadlock");
+            Audio tail(8192*2);engine_render_offline(tail.data(),8192);captured.insert(captured.end(),tail.begin(),tail.end());
+            double jump=0;size_t jumpAt=0;for(size_t i=2;i<captured.size();i+=2)for(int ch=0;ch<2;++ch) {
+                const double delta=std::abs(captured[i+ch]-captured[i+ch-2]);
+                if(delta>jump){jump=delta;jumpAt=i+ch;}
+            }
+            std::cout<<"TRANSPORT "<<(raw?"raw":"enhanced")<<(load?" load":" seek")<<" max step="<<jump<<'\n';
+            if(jump>=.01)std::cout<<"TRANSITION discontinuity frame="<<jumpAt/2<<" previous="<<captured[jumpAt-2]<<" next="<<captured[jumpAt]<<'\n';
+            check(jump<.01,"source seek/replacement has no hard discontinuity through graph resets");
+            warm=std::move(tail);
+        };
+        exercise(false);exercise(true);
+        execute_audio_command("PAUSE");
+        check(execute_audio_command("SEEK 2")==0 && !ma_sound_is_playing(&g_sound),"seeking while paused cannot start playback");
+    }
+    engine_test_realtime_transitions(false);execute_audio_command("STOP");uninit_audio_engine();
+    std::remove("transport-fixture.wav");g_ecoMode=false;
 }
 
 int main() {
     const auto start = std::chrono::steady_clock::now();
     try {
-        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep();
+        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep(); transportAndNaturalism();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
         std::cout << checks << " checks passed in " << ms << " ms (offline; no audio devices opened).\n";
         return 0;

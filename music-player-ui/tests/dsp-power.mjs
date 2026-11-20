@@ -16,7 +16,7 @@ try {
         voice:t.vocalPresenceDb(.5),air:t.harmonicAirDb(.5),quality:t.soundPreset(null,'QUALITY'),immersive:t.soundPreset(null,'IMMERSIVE'),chill:t.soundPreset(null,'CHILL')};
     });
     assert.equal(semantics.removed,true);assert.equal(semantics.mixed,'POP');assert.equal(semantics.unclassified,null);
-    assert.ok(Math.abs(semantics.voice-5.85)<.00001&&Math.abs(semantics.air-3.9)<.00001);
+    assert.ok(Math.abs(semantics.voice-1.125)<.00001&&Math.abs(semantics.air-1.5)<.00001);
     for(const recipe of [semantics.quality,semantics.immersive,semantics.chill]) {
       assert.ok(recipe.width>=1.2&&recipe.air>=.2&&recipe.exciter>=.3);
       assert.ok(recipe.bass>=.42&&recipe.treble>=2&&recipe.vocal>=.5);assert.ok(!('volume'in recipe));

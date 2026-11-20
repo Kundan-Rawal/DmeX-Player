@@ -535,6 +535,7 @@ struct MultibandCompressorNode
 struct LimiterNode
 {
     ma_node_base baseNode;
+    std::atomic<unsigned> hardClippedSamples{0};
     SmoothedParam boost, master;
     int holdSamples = 0;
     float gainEnv;

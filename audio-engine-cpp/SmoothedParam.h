@@ -16,8 +16,14 @@ inline float effectAmount(float value) {
     const float x = value < 0 ? 0 : value > 1 ? 1 : value;
     return x * (1.6f - 0.6f * x);
 }
-inline float vocalPresenceDb(float value) { return 9.0f * effectAmount(value); }
-inline float harmonicAirDb(float value) { return 6.0f * effectAmount(value); }
+inline float vocalPresenceDb(float value) {
+    const float x = value < 0 ? 0 : value > 1 ? 1 : value;
+    return 9.0f * x * x * x;
+}
+inline float harmonicAirDb(float value) {
+    const float x = value < 0 ? 0 : value > 1 ? 1 : value;
+    return 6.0f * x * x;
+}
 
 struct SmoothedParam {
     std::atomic<float> target{0.0f};

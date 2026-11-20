@@ -3,12 +3,14 @@
 #include "EngineCore.h"
 #include "StreamingDecoder.h"
 #include "DenormalGuard.h"
+#include "TransportFade.h"
 #include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
 #include <chrono>
 #include <stdexcept>
+#include <thread>
 
 ma_engine g_engine{};
 ma_device g_device{};
@@ -61,6 +63,12 @@ ma_decoding_backend_vtable* decodingBackends[]{ &g_streamingDecoder };
 bool offline = false;
 #endif
 std::atomic<bool> renderReady{false}, recoveryRequested{false};
+std::atomic<unsigned> activeCallbacks{0};
+std::atomic<bool> transportMute{false}, transportSilent{false};
+TransportFade transportFade;
+#ifdef DMEX_DSP_TESTS
+bool offlineTransitionWait = false;
+#endif
 std::atomic<float> callbackLoad{0}, maximumCallbackLoad{0};
 std::atomic<unsigned> overBudgetCallbacks{0};
 std::string hrtfPath;
@@ -87,7 +95,11 @@ void notification(const ma_device_notification* event) {
 void callback(ma_device*, void* output, const void*, ma_uint32 frames) {
     DenormalGuard denormals;
     if (!output || !frames) return;
-    if (!renderReady.load(std::memory_order_acquire) || g_pauseRequested.load(std::memory_order_acquire)) {
+    struct CallbackScope {
+        CallbackScope() { activeCallbacks.fetch_add(1); }
+        ~CallbackScope() { activeCallbacks.fetch_sub(1); }
+    } callbackScope;
+    if (!renderReady.load() || g_pauseRequested.load(std::memory_order_acquire)) {
         std::memset(output, 0, frames * 2 * sizeof(float));
         g_audioLevel.store(0); g_outputPeak.store(0);
         return;
@@ -95,6 +107,8 @@ void callback(ma_device*, void* output, const void*, ma_uint32 frames) {
     const auto started = std::chrono::steady_clock::now();
     audio_apply_pending_parameters();
     ma_engine_read_pcm_frames(&g_engine, output, frames, nullptr);
+    transportFade.process(static_cast<float*>(output), frames, transportMute.load(std::memory_order_acquire));
+    transportSilent.store(transportFade.silent(), std::memory_order_release);
     const float* samples = static_cast<const float*>(output);
     float peak = 0;
     for (ma_uint32 i = 0; i < frames * 2; ++i)
@@ -126,9 +140,49 @@ void engine_reset_transport() {
     drainFrames = 0;
     g_trackFinished.store(false);
 }
+void engine_flush_source_caches() {
+    // miniaudio also caches processed PCM outside our DSP delay lines. The
+    // command thread calls this only after callbacks have left the graph.
+    auto clear=[](ma_node* node) {
+        auto* base=reinterpret_cast<ma_node_base*>(node);
+        base->cachedFrameCountOut=0; base->cachedFrameCountIn=0; base->consumedFrameCountIn=0;
+    };
+    for(size_t i=0;i<nodeCount;++i) clear(nodes[i]);
+    if(g_soundInitialized) {
+        clear(reinterpret_cast<ma_node*>(&g_sound));
+        g_sound.processingCacheFramesRemaining=0;
+    }
+    if(engineReady) clear(ma_engine_get_endpoint(&g_engine));
+}
 void engine_suspend() {
-    renderReady.store(false, std::memory_order_release);
+    renderReady.store(false);
     if (deviceReady) ma_device_stop(&g_device);
+    while (activeCallbacks.load()) std::this_thread::yield();
+}
+void engine_suspend_source(bool forceFadeIn) {
+    ma_uint64 cursor=0,length=0;
+    const bool exhausted=g_soundInitialized && ma_sound_get_cursor_in_pcm_frames(&g_sound,&cursor)==MA_SUCCESS &&
+        ma_sound_get_length_in_pcm_frames(&g_sound,&length)==MA_SUCCESS && length>0 && cursor>=length;
+    const bool audible = renderReady.load() && !g_pauseRequested.load() && g_soundInitialized &&
+        ma_sound_is_playing(&g_sound) && !ma_sound_at_end(&g_sound) && !exhausted;
+    bool waitForFade = deviceReady && ma_device_is_started(&g_device);
+#ifdef DMEX_DSP_TESTS
+    waitForFade = waitForFade || offlineTransitionWait;
+#endif
+    if (audible && waitForFade) {
+        transportSilent.store(false, std::memory_order_release);
+        transportMute.store(true, std::memory_order_release);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(120);
+        while (!transportSilent.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+    // Leave the device running on silence, but exclude callbacks from the graph
+    // while the command thread seeks/replaces the source and resets its state.
+    renderReady.store(false);
+    while (activeCallbacks.load()) std::this_thread::yield();
+    if (audible || forceFadeIn || (g_soundInitialized && !exhausted && !ma_sound_at_end(&g_sound))) transportFade.restart();
+    transportMute.store(false, std::memory_order_release);
+    transportSilent.store(false, std::memory_order_release);
 }
 bool engine_is_rendering() { return renderReady.load(std::memory_order_acquire); }
 extern "C" void audio_request_device_pause() { g_pauseRequested.store(true, std::memory_order_release); }
@@ -136,7 +190,7 @@ void engine_resume() {
     if (!g_engineInitialized.load()) return;
     renderReady.store(true, std::memory_order_release);
     if (!deviceReady) return;
-    if (ma_device_start(&g_device) != MA_SUCCESS) {
+    if (!ma_device_is_started(&g_device) && ma_device_start(&g_device) != MA_SUCCESS) {
         renderReady.store(false);
         recoveryRequested.store(true);
         throw std::runtime_error("Audio output could not start");
@@ -202,6 +256,8 @@ extern "C" void init_audio_engine() {
         ma_node_graph* pg = ma_engine_get_node_graph(&g_engine);
         const ma_uint32 sr = ma_engine_get_sample_rate(&g_engine);
         if (sr < 22050 || sr > 96000) throw std::runtime_error("Unsupported DSP sample rate");
+        transportFade.init(static_cast<float>(sr));
+        transportMute.store(false); transportSilent.store(false);
     g_audiophileEQNode.sampleRate = (float)sr;
     g_audiophileEQNode.targetBass.init(0.0f, (float)sr);
     g_audiophileEQNode.targetMid.init(0.0f, (float)sr);
@@ -460,6 +516,7 @@ extern "C" bool engine_init_offline(int rate) {
 extern "C" void engine_render_offline(float* output, ma_uint32 frames) {
     callback(nullptr, output, nullptr, frames);
 }
+extern "C" void engine_test_realtime_transitions(bool enabled) { offlineTransitionWait = enabled; }
 #endif
 extern "C" void audio_set_hrtf_path(const char* path) {
     std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
@@ -492,7 +549,7 @@ extern "C" int get_audio_status_json(char* output, int capacity) {
         "\"limiterGain\":%.6f,\"subBassHz\":%.0f,\"bassField\":%.4f,\"roomBass\":%s,"
         "\"vocalPresence\":%.4f,\"adaptiveLoudness\":%s,\"roomSize\":%.4f,\"damping\":%.4f,"
         "\"correctionAvailable\":%s,\"convolutionAvailable\":%s,\"recoveryRequested\":%s,\"processingDelayFrames\":%d,"
-        "\"callbackLoadPercent\":%.4f,\"maximumCallbackLoadPercent\":%.4f,\"overBudgetCallbacks\":%u,\"irRestoreFailed\":%s,\"autoReverb\":%s,\"portableHrtf\":%s}",
+        "\"callbackLoadPercent\":%.4f,\"maximumCallbackLoadPercent\":%.4f,\"overBudgetCallbacks\":%u,\"irRestoreFailed\":%s,\"autoReverb\":%s,\"portableHrtf\":%s,\"hardClippedSamples\":%u}",
         g_engineInitialized.load() ? "true" : "false", g_bypassAll.load() ? "true" : "false",
         g_ecoMode.load() ? "true" : "false", engine_get_sample_rate(), g_requestedSampleRate.load(),
         g_audioGeneration.load(), g_8DNode.upmixer.hrtfMeasured() ? "true" : "false",
@@ -504,6 +561,7 @@ extern "C" int get_audio_status_json(char* output, int capacity) {
         g_convolutionNode.convL.load() ? "true" : "false", recoveryRequested.load() ? "true" : "false",
         g_bypassAll.load() ? 0 : 1024 + 40 + g_compressorNode.delaySamples + g_limiterNode.delaySamples,
         callbackLoad.load(), maximumCallbackLoad.load(), overBudgetCallbacks.load(), g_irRestoreFailed.load() ? "true" : "false",
-        g_reverbNode.automatic.load() ? "true" : "false", g_8DNode.upmixer.hrtfPortable() ? "true" : "false");
+        g_reverbNode.automatic.load() ? "true" : "false", g_8DNode.upmixer.hrtfPortable() ? "true" : "false",
+        g_limiterNode.hardClippedSamples.load(std::memory_order_relaxed));
     return length >= capacity ? -1 : length;
 }

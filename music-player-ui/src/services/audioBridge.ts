@@ -2,13 +2,20 @@ import { invoke } from '@tauri-apps/api/core';
 
 let pending: Promise<unknown> = Promise.resolve();
 let snapshot: { values: number[]; operation: Promise<void> } | undefined;
+let activeSeek: { cmd: string; operation: Promise<void> } | undefined;
 export function sendAudioCommand(cmd: string): Promise<void> {
+  cmd = cmd.trim();
+  const seeking = cmd.startsWith('SEEK ');
+  if (seeking && activeSeek?.cmd === cmd) return activeSeek.operation;
+  if (!seeking) activeSeek = undefined;
   snapshot = undefined;
-  const operation = pending.catch(() => {}).then(() => invoke<void>('audio_command', { cmd: cmd.trim() }));
+  const operation = pending.catch(() => {}).then(() => invoke<void>('audio_command', { cmd }));
+  if (seeking) activeSeek = { cmd, operation };
   pending = operation;
-  operation.then(() => { window.dispatchEvent(new CustomEvent('dmex-audio-error', { detail: '' }));
+  const clearSeek = () => { if (activeSeek?.operation === operation) activeSeek = undefined; };
+  operation.then(() => { clearSeek(); window.dispatchEvent(new CustomEvent('dmex-audio-error', { detail: '' }));
     window.dispatchEvent(new Event('dmex-audio-changed')); },
-    error => { window.dispatchEvent(new CustomEvent('dmex-audio-error', { detail: String(error) }));
+    error => { clearSeek(); window.dispatchEvent(new CustomEvent('dmex-audio-error', { detail: String(error) }));
       window.dispatchEvent(new Event('dmex-audio-changed')); });
   return operation;
 }

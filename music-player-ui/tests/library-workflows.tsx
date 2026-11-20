@@ -21,6 +21,8 @@ import { classifyAudio } from '../src/config/audio';
 import { discardMissingTrack } from '../src/mobile/queue';
 import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
 import { vocalPresenceDb, harmonicAirDb } from '../src/config/dspResponse';
+import { sendAudioCommand } from '../src/services/audioBridge';
+(window as any).seekTestSend = sendAudioCommand;
 
 const tracks: Track[] = [];
 const query = new URLSearchParams(location.search);

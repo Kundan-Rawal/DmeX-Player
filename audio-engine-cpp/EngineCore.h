@@ -49,6 +49,8 @@ extern "C" int get_audio_status_json(char* output, int capacity);
 extern "C" int apply_audio_settings(const float* values, int count);
 void updateRouting();
 void engine_suspend();
+void engine_suspend_source(bool forceFadeIn = false);
+void engine_flush_source_caches();
 bool engine_is_rendering();
 void engine_resume();
 void engine_reset_transport();

@@ -77,8 +77,9 @@ static void exciter_process(ma_node* node, const float** input, ma_uint32* count
         p->dryDelayL[p->dryIdx] = L;
         p->dryDelayR[p->dryIdx] = R;
         const int rd = (p->dryIdx + 64 - p->dryDelay) % 64;
-        output[0][2*i] = p->dryDelayL[rd] + effectAmount(drive) * 0.22f * (wetL - cleanL);
-        output[0][2*i+1] = p->dryDelayR[rd] + effectAmount(drive) * 0.22f * (wetR - cleanR);
+        const float mix = .22f * drive * drive;
+        output[0][2*i] = p->dryDelayL[rd] + mix * (wetL - cleanL);
+        output[0][2*i+1] = p->dryDelayR[rd] + mix * (wetR - cleanR);
         p->dryIdx = (p->dryIdx + 1) % 64;
     }
 }
@@ -780,8 +781,12 @@ static void limiter_process(ma_node *node, const float **input, ma_uint32 *count
         p->dlyL[w] = L;
         p->dlyR[w] = R;
         const int r = (w + LIMITER_LOOKAHEAD_SAMPLES - p->delaySamples) % LIMITER_LOOKAHEAD_SAMPLES;
-        output[0][2*i] = (std::clamp)(p->dlyL[r] * p->gainEnv, -ceiling, ceiling);
-        output[0][2*i+1] = (std::clamp)(p->dlyR[r] * p->gainEnv, -ceiling, ceiling);
+        const float limitedL=p->dlyL[r]*p->gainEnv, limitedR=p->dlyR[r]*p->gainEnv;
+        // Count meaningful safety-guard hits, not float rounding at the ceiling.
+        const unsigned clipped=(std::abs(limitedL)>ceiling+1e-6f)+(std::abs(limitedR)>ceiling+1e-6f);
+        if(clipped) p->hardClippedSamples.fetch_add(clipped,std::memory_order_relaxed);
+        output[0][2*i] = (std::clamp)(limitedL, -ceiling, ceiling);
+        output[0][2*i+1] = (std::clamp)(limitedR, -ceiling, ceiling);
         p->dlyIdx = (w + 1) % LIMITER_LOOKAHEAD_SAMPLES;
     }
     extern std::atomic<float> g_limiterGR;
@@ -882,7 +887,7 @@ static void audio_restoration_process(ma_node *node, const float **input, ma_uin
             p->shelfR.update_shelf(p->sampleRate, 6500.0f, shelfDb, true);
             p->lastShelfDb = shelfDb;
         }
-        const float amount = 0.20f * effectAmount(control);
+        const float amount = 0.20f * control * control;
         output[0][2*i] = p->shelfL.process(p->dryL[r]) + amount * wetL;
         output[0][2*i+1] = p->shelfR.process(p->dryR[r]) + amount * wetR;
         p->delayIndex = (w + 1) % 64;
@@ -975,6 +980,7 @@ void dsp_flush_all_state(void)
     memset(g_limiterNode.dlyR, 0, sizeof(g_limiterNode.dlyR));
     g_limiterNode.dlyIdx = 0;
     g_limiterNode.gainEnv = 1.0f;
+    g_limiterNode.hardClippedSamples.store(0,std::memory_order_relaxed);
     g_limiterNode.gainSmooth = 1.0f;
     g_limiterNode.holdSamples = 0;
     g_limiterNode.osDetect.reset();

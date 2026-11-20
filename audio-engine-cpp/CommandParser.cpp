@@ -43,7 +43,9 @@ float number(const std::string& text) {
 float bounded(float v, float low, float high) { return (std::clamp)(v, low, high); }
 struct Suspended {
     bool resume;
-    Suspended() : resume(engine_is_rendering()) { engine_suspend(); }
+    Suspended(bool sourceChange = false, bool forceFadeIn = false) : resume(engine_is_rendering()) {
+        if (sourceChange) engine_suspend_source(forceFadeIn); else engine_suspend();
+    }
     ~Suspended() { if (resume) try { engine_resume(); } catch (...) {} }
 };
 void installIR(const float* left, int nL, const float* right, int nR, bool correction) {
@@ -210,7 +212,7 @@ extern "C" int execute_audio_command(const char* input) {
             ma_uint64 length = 0;
             g_streamTargetRate.store(g_bypassAll.load() ? 0 : engine_get_sample_rate());
             if (stream_probe(args.c_str(), g_streamTargetRate.load(), &originalRate, &length) != MA_SUCCESS) return -1;
-            Suspended suspend;
+            Suspended suspend(true);
             engine_release_source();
             if (g_bypassAll.load()) {
                 if (static_cast<int>(originalRate) != engine_get_sample_rate()) {
@@ -230,6 +232,7 @@ extern "C" int execute_audio_command(const char* input) {
             dsp_flush_all_state();
             restore_audio_parameters();
             updateRouting();
+            engine_flush_source_caches();
             const auto elapsed = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - loadStart).count());
 #ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_INFO, "DmeXAudio", "Stream ready in %lld ms", elapsed);
@@ -255,9 +258,10 @@ extern "C" int execute_audio_command(const char* input) {
             const float seconds = (std::max)(0.0f, number(args));
             ma_uint32 rate = 0;
             ma_data_source_get_data_format(ma_sound_get_data_source(&g_sound), nullptr, nullptr, &rate, nullptr, 0);
-            Suspended suspend;
-            ma_sound_seek_to_pcm_frame(&g_sound, static_cast<ma_uint64>(seconds * rate));
+            Suspended suspend(true, true);
+            if (ma_sound_seek_to_pcm_frame(&g_sound, static_cast<ma_uint64>(seconds * rate)) != MA_SUCCESS) return -1;
             dsp_flush_all_state(); restore_audio_parameters(); engine_reset_transport();
+            engine_flush_source_caches();
         } else if (command == "BYPASS_ALL") {
             const bool bypass = number(args) > 0.5f;
             if (bypass == g_bypassAll.load()) return 0;

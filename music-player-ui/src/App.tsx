@@ -740,7 +740,12 @@ function App() {
   }, []);
 
   const handleSeekDrag  = (e:React.ChangeEvent<HTMLInputElement>) => setCurrentTime(parseFloat(e.target.value));
-  const handleSeekCommit = async (e:React.MouseEvent|React.TouchEvent) => { await writeToEngine(`SEEK ${parseFloat((e.target as HTMLInputElement).value)}`); isSeekingRef.current=false; };
+  const handleSeekCommit = async (e:React.MouseEvent|React.TouchEvent) => {
+    const seconds = Number((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(seconds)) { isSeekingRef.current=false; return; }
+    try { await writeToEngine(`SEEK ${Math.max(0,seconds)}`); }
+    finally { isSeekingRef.current=false; }
+  };
 
   const toggleFavorite = async (e:React.MouseEvent) => {
     e.stopPropagation(); if(!currentTrack) return;

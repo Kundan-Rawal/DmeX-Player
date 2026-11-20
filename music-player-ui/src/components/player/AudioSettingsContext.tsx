@@ -11,6 +11,7 @@ export interface AudioStatus {
   recoveryRequested: boolean; settings: number[];
   irRestoreFailed: boolean;
   autoReverb?: boolean; portableHrtf?: boolean;
+  hardClippedSamples?: number;
   processingDelayFrames: number; callbackLoadPercent: number; maximumCallbackLoadPercent: number; overBudgetCallbacks: number;
 }
 export const PARAM = {
