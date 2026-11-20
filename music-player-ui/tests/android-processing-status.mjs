@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {readFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
-import ts from 'typescript';
+import {build} from 'esbuild';
 if(process.env.ANDROID_STATUS_TEST!=='approved') throw new Error('Obtain approval to install/open the update before device verification.');
 const run=promisify(execFile);
 const adb=async(...args)=>(await run('C:/Users/LEGION/AppData/Local/Android/Sdk/platform-tools/adb.exe',['-s',process.env.ANDROID_SERIAL||'RZGLA093AAA',...args])).stdout;
@@ -12,12 +11,11 @@ await adb('forward','tcp:9223','localabstract:webview_devtools_remote_'+pid);
 const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE||'C:/Users/LEGION/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs').href);
 const browser=await chromium.connectOverCDP('http://127.0.0.1:9223');
 const page=browser.contexts()[0].pages().find(page=>page.url().includes('tauri.localhost'));
-const compiled=ts.transpileModule(await readFile('src/config/soundPresets.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const compiled=(await build({entryPoints:['src/config/soundPresets.ts'],bundle:true,write:false,platform:'node',format:'esm'})).outputFiles[0].text;
 const {soundPreset,CATEGORY_LABELS}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
 const badge=page.locator('.mep-topbar-center .processing-status-badge');
 let opened=false;
 try {
-  await page.getByRole('button',{name:'Open expanded player',exact:true}).waitFor();
   if(!await badge.isVisible()) {await page.getByRole('button',{name:'Open expanded player',exact:true}).click();opened=true;}
   await page.waitForFunction(()=>{const node=document.querySelector('.mep-topbar-center .processing-status-badge');return node&&node.dataset.processingKind!=='pending';});
   const mode=await page.evaluate(()=>JSON.parse(localStorage.getItem('dmex_sound_selection_v1')));
