@@ -22,6 +22,7 @@ import { discardMissingTrack } from '../src/mobile/queue';
 import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
 import { vocalPresenceDb, harmonicAirDb } from '../src/config/dspResponse';
 import { sendAudioCommand } from '../src/services/audioBridge';
+import { adaptiveCommand, validAnalysis } from '../src/config/adaptiveAudio';
 (window as any).seekTestSend = sendAudioCommand;
 
 const tracks: Track[] = [];
@@ -73,19 +74,40 @@ const calls: { command: string; payload: any }[] = [];
 const failures: Record<string, string> = {};
 let engineSettings = [...DEFAULT_AUDIO];
 let bypassAll = false;
+let sourceGeneration=0, adaptiveEnabled=false, adaptiveEqDb=[0,0,0,0];
 (window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, harmonicAirDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, alphabetSection, ALPHABET_INDEX, trackSection, classifyAudio, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
+(window as any).libraryTest.adaptiveCommand=adaptiveCommand;
+(window as any).libraryTest.validAnalysis=validAnalysis;
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
-  if (command === 'audio_status') return { ready: true, settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, bypassAll, ecoMode: true };
+  if (command === 'audio_status') return { ready: true, settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, sourceGeneration, adaptiveEnabled, adaptiveEqDb, bypassAll, ecoMode: true };
   if (command === 'audio_apply_settings') {
     if ((window as any).libraryTest.applyFailureCount > 0) { --(window as any).libraryTest.applyFailureCount; throw new Error('Fixture DSP update failed'); }
     const delay = (window as any).libraryTest.applyDelay || 0;
     if (delay) return new Promise<void>(resolve => setTimeout(() => { engineSettings = [...payload.values]; resolve(); }, delay));
     engineSettings = [...payload.values]; return;
   }
-  if (command === 'audio_command' && payload.cmd.startsWith('BYPASS_ALL ')) { bypassAll = payload.cmd.endsWith('1'); return; }
-  if (command === 'audio_command' && payload.cmd.startsWith('LOAD ')) { if (failures[payload.cmd.slice(5)]) throw new Error('Fixture source unavailable'); return; }
+  if (command === 'audio_command' && payload.cmd.startsWith('BYPASS_ALL ')) {
+    const next=payload.cmd.endsWith('1');
+    if(next!==bypassAll&&sourceGeneration>0) ++sourceGeneration;
+    bypassAll=next;adaptiveEnabled=false;adaptiveEqDb=[0,0,0,0];return;
+  }
+  if(command==='audio_command'&&(payload.cmd.startsWith('SAMPLE_RATE ')||payload.cmd==='RECOVER')) {
+    if(sourceGeneration>0) ++sourceGeneration;
+    adaptiveEnabled=false;adaptiveEqDb=[0,0,0,0];return;
+  }
+  if (command === 'audio_command' && payload.cmd.startsWith('LOAD ')) { if (failures[payload.cmd.slice(5)]) throw new Error('Fixture source unavailable'); ++sourceGeneration;adaptiveEnabled=false;adaptiveEqDb=[0,0,0,0];return; }
+  if (command === 'audio_command' && payload.cmd.startsWith('ADAPTIVE_EQ ')) {
+    const values=payload.cmd.split(' ').slice(1).map(Number);
+    if(values[0]!==sourceGeneration) throw new Error('Stale source correction rejected');
+    adaptiveEnabled=values[1]===1;adaptiveEqDb=values.slice(2);return;
+  }
+  if(command==='analyze_track_audio') {
+    const result=(window as any).libraryTest.analysisResult||{version:1,sampledSeconds:30,activeSeconds:25,confidence:1,samplePeakDbfs:-2,crestDb:12,correlation:.5,eqDb:[0,0,0,0],reasons:[]};
+    const delay=(window as any).libraryTest.analysisDelay||0;
+    return new Promise((resolve,reject)=>setTimeout(()=>{if((window as any).libraryTest.analysisFailure) reject(new Error('Analysis unavailable'));else resolve(result);},delay));
+  }
   if (command === 'remove_missing_track') {
     const status = failures[payload.path] || 'available';
     if (status === 'missing') { const index = tracks.findIndex(track => track.path === payload.path); if (index >= 0) tracks.splice(index, 1); testPlaylists.forEach(playlist => { playlist.trackPaths = playlist.trackPaths.filter(path => path !== payload.path); }); }

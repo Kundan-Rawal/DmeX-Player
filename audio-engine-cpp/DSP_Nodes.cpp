@@ -269,18 +269,29 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
 
         const float bass = p->targetBass.next(), high = p->targetHigh.next();
         const float presence = p->targetMid.next();
+        float adaptive[4];
+        for (int band=0; band<4; ++band) adaptive[band]=p->adaptiveDb[band].next();
         if ((p->coefficientCounter++ & 31u) == 0) {
-            if (fabsf(presence - p->lastPresence) > 0.0001f) {
+            for (int band=0; band<4; ++band) {
+                if (fabsf(adaptive[band]-p->lastAdaptiveDb[band]) <= .0001f && !(adaptive[band]==0 && p->lastAdaptiveDb[band]!=0)) continue;
+                const float frequencies[]{120,350,3200,8000};
+                for (auto* filter : {&p->adaptiveL[band], &p->adaptiveR[band]}) {
+                    if (band==0 || band==3) filter->update_shelf(p->sampleRate,frequencies[band],adaptive[band],band==3);
+                    else filter->update_coeffs(p->sampleRate,frequencies[band],.8f,adaptive[band]);
+                }
+                p->lastAdaptiveDb[band]=adaptive[band];
+            }
+            if (fabsf(presence - p->lastPresence) > 0.0001f || (presence==0 && p->lastPresence!=0)) {
                 p->presenceL.update_coeffs(p->sampleRate, 2500.0f, 0.8f, vocalPresenceDb(presence));
                 p->presenceR.update_coeffs(p->sampleRate, 2500.0f, 0.8f, vocalPresenceDb(presence));
                 p->lastPresence = presence;
             }
-            if (fabsf(bass - p->lastBassDb) > 0.0001f) {
+            if (fabsf(bass - p->lastBassDb) > 0.0001f || (bass==0 && p->lastBassDb!=0)) {
                 p->bassShelfL.update_shelf(p->sampleRate, 180.0f, bass, false);
                 p->bassShelfR.update_shelf(p->sampleRate, 180.0f, bass, false);
                 p->lastBassDb = bass;
             }
-            if (fabsf(high - p->lastTrebleDb) > 0.0001f) {
+            if (fabsf(high - p->lastTrebleDb) > 0.0001f || (high==0 && p->lastTrebleDb!=0)) {
                 p->trebleShelfL.update_shelf(p->sampleRate, 4500.0f, high, true);
                 p->trebleShelfR.update_shelf(p->sampleRate, 4500.0f, high, true);
                 p->lastTrebleDb = high;
@@ -290,6 +301,9 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
         float outR = p->trebleShelfR.process(p->bassShelfR.process(R));
         outL = p->presenceL.process(outL);
         outR = p->presenceR.process(outR);
+        for (int band=0; band<4; ++band) {
+            outL=p->adaptiveL[band].process(outL); outR=p->adaptiveR[band].process(outR);
+        }
         p->iso226.process(outL, outR);
         output[0][2*i] = outL;
         output[0][2*i+1] = outR;
@@ -512,6 +526,7 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         const float punchDeltaR = (shapedBassR - R) * punchGain * 0.5f;
         float outL = L + active * (cleanL - bassL) + tonalDeltaL + punchDeltaL;
         float outR = R + active * (cleanR - bassR) + tonalDeltaR + punchDeltaR;
+        if (drive==0) { outL=L; outR=R; }
 
         // Field receives only upper bass and remains independent from Drive.
         const float sendL = midL;
@@ -922,6 +937,9 @@ void dsp_flush_all_state(void)
     g_audiophileEQNode.bassShelfL.reset(); g_audiophileEQNode.bassShelfR.reset();
     g_audiophileEQNode.trebleShelfL.reset(); g_audiophileEQNode.trebleShelfR.reset();
     g_audiophileEQNode.presenceL.reset(); g_audiophileEQNode.presenceR.reset();
+    for (int band=0; band<4; ++band) {
+        g_audiophileEQNode.adaptiveL[band].reset(); g_audiophileEQNode.adaptiveR[band].reset();
+    }
     g_audiophileEQNode.iso226.lowShelfL.reset(); g_audiophileEQNode.iso226.lowShelfR.reset();
     g_audiophileEQNode.iso226.highShelfL.reset(); g_audiophileEQNode.iso226.highShelfR.reset();
     g_subwooferNode.crossBassL.reset(); g_subwooferNode.crossBassR.reset();

@@ -242,7 +242,7 @@ export function MobileShell(p: Props) {
   const baseTracks = useMemo(() => routeTracks(route, p.tracks, p.favourites, p.playlists, p.playback.recent), [route, p.tracks, p.favourites, p.playlists, p.playback.recent]);
   const list = useMemo(() => {
     if (route.kind === 'playlist' || route.kind === 'playlistEdit' || route.kind === 'collection' || route.kind === 'album') return baseTracks;
-    const filtered = root && categoryFilter !== 'ALL' ? baseTracks.filter(track => categoryFilter === 'BOLLYWOOD' ? isClassicYear(track) : (metadataCategory(track)||'POP') === categoryFilter) : baseTracks;
+    const filtered = root && categoryFilter !== 'ALL' ? baseTracks.filter(track => categoryFilter === 'BOLLYWOOD' ? isClassicYear(track) : (metadataCategory(track)||'OTHER') === categoryFilter) : baseTracks;
     return sortTracks(filtered, sort, descending);
   }, [baseTracks, route.kind, root, sort, descending, categoryFilter]);
   const selection = state.selected.map(path => byPath.get(path)).filter((t): t is Track => !!t);

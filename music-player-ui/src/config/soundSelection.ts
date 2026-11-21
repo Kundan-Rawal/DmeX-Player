@@ -1,5 +1,4 @@
 import type { Taste } from '../types';
-import { CATEGORY_LABELS } from './soundPresets';
 
 export type QuickTaste = 'ORIGINAL' | 'QUALITY' | 'IMMERSIVE' | 'CHILL';
 export interface SoundSelection { categoryEnabled: boolean; taste: QuickTaste; manual: boolean }
@@ -27,12 +26,12 @@ export interface ProcessingStatus {
   label: string; category: string | null; pill: string | null;
   kind: 'automatic' | 'manual' | 'normal' | 'raw' | 'pending'; categoryEnabled: boolean;
 }
-export function processingStatus(selection: SoundSelection, profileId: string | null, raw = false, pending = false): ProcessingStatus {
+export function processingStatus(selection: SoundSelection, _profileId: string | null, raw = false, pending = false): ProcessingStatus {
   const base = { categoryEnabled: selection.categoryEnabled, category: null, pill: null };
   if (raw) return { ...base, label: 'Raw Stereo', kind: 'raw' };
   if (pending) return { ...base, label: 'Applying...', kind: 'pending' };
   if (selection.manual) return { ...base, label: 'Manual Override', kind: 'manual' };
-  const category = selection.categoryEnabled ? CATEGORY_LABELS[profileId || 'POP'] || CATEGORY_LABELS.POP : null;
+  const category = selection.categoryEnabled ? 'DmeX Natural' : null;
   const pill = TASTE_LABELS[selection.taste] || null;
   return { categoryEnabled: selection.categoryEnabled, category, pill,
     label: [category, pill].filter(Boolean).join(' + ') || 'Normal Stereo', kind: category || pill ? 'automatic' : 'normal' };

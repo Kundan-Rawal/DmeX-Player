@@ -37,6 +37,7 @@ std::atomic<bool> g_isAndroidSpeaker{false}, g_isLaptopSpeaker{false}, g_is8DMod
 std::atomic<bool> g_isAdaptiveLoudnessOn{false}, g_trackFinished{false};
 std::atomic<int> g_requestedSampleRate{48000};
 std::atomic<unsigned long long> g_audioGeneration{0};
+std::atomic<unsigned long long> g_sourceGeneration{0};
 StudioExciterNode g_exciterNode;
 StereoWidenerNode g_widenerNode;
 PsychoacousticNode g_spatializerNode;
@@ -262,6 +263,12 @@ extern "C" void init_audio_engine() {
     g_audiophileEQNode.targetBass.init(0.0f, (float)sr);
     g_audiophileEQNode.targetMid.init(0.0f, (float)sr);
     g_audiophileEQNode.targetHigh.init(0.0f, (float)sr);
+    for (int band=0; band<4; ++band) {
+        g_audiophileEQNode.adaptiveDb[band].init(0.0f, (float)sr, 750.0f);
+        g_audiophileEQNode.adaptiveL[band].init((float)sr, 1000.0f, .7f, 0.0f);
+        g_audiophileEQNode.adaptiveR[band].init((float)sr, 1000.0f, .7f, 0.0f);
+        g_audiophileEQNode.lastAdaptiveDb[band]=0;
+    }
     
     
     
@@ -543,13 +550,15 @@ extern "C" void uninit_audio_engine() {
 extern "C" int get_audio_status_json(char* output, int capacity) {
     std::lock_guard<std::recursive_mutex> owner(g_audioMutex);
     if (!output || capacity < 512) return -1;
+    float adaptive[5]{}; get_adaptive_audio_settings(adaptive);
     const int length = std::snprintf(output, capacity,
         "{\"ready\":%s,\"bypassAll\":%s,\"ecoMode\":%s,\"sampleRate\":%d,\"requestedSampleRate\":%d,"
         "\"generation\":%llu,\"measuredHrtf\":%s,\"spatialAvailable\":%s,\"outputPeak\":%.6f,"
         "\"limiterGain\":%.6f,\"subBassHz\":%.0f,\"bassField\":%.4f,\"roomBass\":%s,"
         "\"vocalPresence\":%.4f,\"adaptiveLoudness\":%s,\"roomSize\":%.4f,\"damping\":%.4f,"
         "\"correctionAvailable\":%s,\"convolutionAvailable\":%s,\"recoveryRequested\":%s,\"processingDelayFrames\":%d,"
-        "\"callbackLoadPercent\":%.4f,\"maximumCallbackLoadPercent\":%.4f,\"overBudgetCallbacks\":%u,\"irRestoreFailed\":%s,\"autoReverb\":%s,\"portableHrtf\":%s,\"hardClippedSamples\":%u}",
+        "\"callbackLoadPercent\":%.4f,\"maximumCallbackLoadPercent\":%.4f,\"overBudgetCallbacks\":%u,\"irRestoreFailed\":%s,\"autoReverb\":%s,\"portableHrtf\":%s,\"hardClippedSamples\":%u,"
+        "\"sourceGeneration\":%llu,\"adaptiveEnabled\":%s,\"adaptiveEqDb\":[%.4f,%.4f,%.4f,%.4f]}",
         g_engineInitialized.load() ? "true" : "false", g_bypassAll.load() ? "true" : "false",
         g_ecoMode.load() ? "true" : "false", engine_get_sample_rate(), g_requestedSampleRate.load(),
         g_audioGeneration.load(), g_8DNode.upmixer.hrtfMeasured() ? "true" : "false",
@@ -562,6 +571,7 @@ extern "C" int get_audio_status_json(char* output, int capacity) {
         g_bypassAll.load() ? 0 : 1024 + 40 + g_compressorNode.delaySamples + g_limiterNode.delaySamples,
         callbackLoad.load(), maximumCallbackLoad.load(), overBudgetCallbacks.load(), g_irRestoreFailed.load() ? "true" : "false",
         g_reverbNode.automatic.load() ? "true" : "false", g_8DNode.upmixer.hrtfPortable() ? "true" : "false",
-        g_limiterNode.hardClippedSamples.load(std::memory_order_relaxed));
+        g_limiterNode.hardClippedSamples.load(std::memory_order_relaxed), g_sourceGeneration.load(),
+        adaptive[0]>.5f ? "true" : "false", adaptive[1],adaptive[2],adaptive[3],adaptive[4]);
     return length >= capacity ? -1 : length;
 }

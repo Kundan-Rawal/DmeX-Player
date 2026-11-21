@@ -10,7 +10,7 @@ async function open(viewport) {
   await page.getByRole('button',{name:'Play Night Drive 1',exact:true}).click();
   await page.getByRole('button',{name:'Pause',exact:true}).click();
   await page.getByRole('button',{name:'Open expanded player',exact:true}).click();
-  await label(page,'Jazz / Blues');
+  await label(page,'DmeX Natural');
   return {page,context,errors};
 }
 const badge=page=>page.locator('.mep-topbar-center .processing-status-badge');
@@ -34,16 +34,16 @@ try {
     const {page,context,errors}=await open(viewport);
     await recipe(page,'JAZZ','ORIGINAL');
     await page.getByRole('button',{name:'Immersive',exact:true}).click();
-    await label(page,'Jazz / Blues + Immersive'); await recipe(page,'JAZZ','IMMERSIVE');
+    await label(page,'DmeX Natural + Immersive'); await recipe(page,'JAZZ','IMMERSIVE');
     await badge(page).click();
     await label(page,'Immersive'); await recipe(page,null,'IMMERSIVE');
     assert.equal(await page.getByRole('button',{name:'Immersive',exact:true}).getAttribute('aria-pressed'),'true');
     await page.getByRole('button',{name:'Chill',exact:true}).click();
     await label(page,'Chill'); await recipe(page,null,'CHILL');
     await badge(page).click();
-    await label(page,'Jazz / Blues + Chill'); await recipe(page,'JAZZ','CHILL');
+    await label(page,'DmeX Natural + Chill'); await recipe(page,'JAZZ','CHILL');
     await page.getByRole('button',{name:'Chill',exact:true}).click();
-    await label(page,'Jazz / Blues'); await recipe(page,'JAZZ','ORIGINAL');
+    await label(page,'DmeX Natural'); await recipe(page,'JAZZ','ORIGINAL');
     await badge(page).click();
     await label(page,'Normal Stereo'); await recipe(page,null,'ORIGINAL');
     await page.getByRole('button',{name:'HD Clear',exact:true}).click();
@@ -53,14 +53,14 @@ try {
     const remembered=await page.evaluate(()=>JSON.parse(localStorage.getItem('dmex_sound_selection_v1')));
     assert.equal(remembered.taste,'QUALITY','Manual edits preserve the selected pill');
     await badge(page).click();
-    await label(page,'Jazz / Blues + HD Clear'); await recipe(page,'JAZZ','QUALITY');
+    await label(page,'DmeX Natural + HD Clear'); await recipe(page,'JAZZ','QUALITY');
     await manual(page);
     await page.getByRole('button',{name:'HD Clear',exact:true}).click();
-    await label(page,'Jazz / Blues + HD Clear'); await recipe(page,'JAZZ','QUALITY');
+    await label(page,'DmeX Natural + HD Clear'); await recipe(page,'JAZZ','QUALITY');
     await page.getByRole('button',{name:'HD Clear',exact:true}).click();
-    await label(page,'Jazz / Blues');
+    await label(page,'DmeX Natural');
     await manual(page); await badge(page).click();
-    await label(page,'Jazz / Blues'); await recipe(page,'JAZZ','ORIGINAL');
+    await label(page,'DmeX Natural'); await recipe(page,'JAZZ','ORIGINAL');
     const bounds=await badge(page).boundingBox();
     assert.ok(bounds.x>=0&&bounds.x+bounds.width<=viewport.width,'Status fits portrait and landscape');
     await page.screenshot({path:`tests/artifacts/processing-status-${viewport.width}.png`});
@@ -68,7 +68,7 @@ try {
     await page.getByRole('button',{name:'Play Every Little Moment 4',exact:true}).click();
     await page.getByRole('button',{name:'Open expanded player',exact:true}).click();
     await page.getByRole('button',{name:'Immersive',exact:true}).click();
-    await label(page,'Classical / Orchestral + Immersive');
+    await label(page,'DmeX Natural + Immersive');
     const pillBounds=await badge(page).locator('.processing-pill').boundingBox(),tagBounds=await badge(page).boundingBox();
     assert.ok(pillBounds.x>=tagBounds.x&&pillBounds.x+pillBounds.width<=tagBounds.x+tagBounds.width,'Long category never hides the selected pill');
     await page.screenshot({path:`tests/artifacts/processing-status-combined-${viewport.width}.png`});
@@ -84,28 +84,28 @@ try {
     await page.getByRole('button',{name:'Play Night Drive 1',exact:true}).click();
     await page.getByRole('button',{name:'Open expanded player',exact:true}).click();
     await label(page,persisted?'Chill':'Manual Override');
-    if(!persisted) { await badge(page).click(); await label(page,'Jazz / Blues + Immersive'); await recipe(page,'JAZZ','IMMERSIVE'); }
+    if(!persisted) { await badge(page).click(); await label(page,'DmeX Natural + Immersive'); await recipe(page,'JAZZ','IMMERSIVE'); }
     await context.close();
   }
   console.log('PASS: legacy manual/pill migration and new selection precedence');
   {
     const {page,context}=await open({width:360,height:800});
-    await page.getByRole('button',{name:'HD Clear',exact:true}).click(); await label(page,'Jazz / Blues + HD Clear');
+    await page.getByRole('button',{name:'HD Clear',exact:true}).click(); await label(page,'DmeX Natural + HD Clear');
     await page.evaluate(()=>{window.libraryTest.applyFailureCount=1;});
     await page.getByRole('button',{name:'Immersive',exact:true}).click(); await label(page,'Manual Override');
     await recipe(page,'JAZZ','QUALITY');
-    await badge(page).click(); await label(page,'Jazz / Blues + Immersive'); await recipe(page,'JAZZ','IMMERSIVE');
+    await badge(page).click(); await label(page,'DmeX Natural + Immersive'); await recipe(page,'JAZZ','IMMERSIVE');
     await page.evaluate(()=>{window.libraryTest.applyDelay=350;});
     await page.getByRole('button',{name:'Chill',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('.mep-topbar-center .processing-status-badge')?.getAttribute('aria-busy')==='true');
-    await label(page,'Jazz / Blues + Chill'); await recipe(page,'JAZZ','CHILL');
+    await label(page,'DmeX Natural + Chill'); await recipe(page,'JAZZ','CHILL');
     await page.evaluate(()=>{window.libraryTest.applyDelay=0;});
     await page.getByRole('button',{name:'Track Options',exact:true}).click();
     await page.getByRole('button',{name:'Bypass All',exact:true}).click();
     await label(page,'Raw Stereo'); assert.ok(await badge(page).isDisabled());
     assert.ok(await page.getByRole('button',{name:'Chill',exact:true}).isDisabled());
     await page.getByRole('button',{name:'Bypass All',exact:true}).click();
-    await label(page,'Jazz / Blues + Chill'); await recipe(page,'JAZZ','CHILL');
+    await label(page,'DmeX Natural + Chill'); await recipe(page,'JAZZ','CHILL');
     await page.locator('.mep-topbar > div[style*="position: fixed"]').click({position:{x:2,y:2}});
     await badge(page).click(); await label(page,'Chill');
     await page.waitForTimeout(800); await page.evaluate(()=>window.libraryTest.remount());
@@ -114,7 +114,7 @@ try {
     await manual(page); await page.waitForTimeout(800); await page.evaluate(()=>window.libraryTest.remount());
     await page.getByRole('button',{name:'Open expanded player',exact:true}).click();
     await label(page,'Manual Override');
-    await badge(page).click(); await label(page,'Jazz / Blues + Chill'); await recipe(page,'JAZZ','CHILL');
+    await badge(page).click(); await label(page,'DmeX Natural + Chill'); await recipe(page,'JAZZ','CHILL');
     console.log('PASS: failed applies never claim a preset, pending acknowledgement, raw-bypass priority, persisted category/pill/manual and recovery after restart');
     await context.close();
   }

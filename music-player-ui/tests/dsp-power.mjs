@@ -18,12 +18,12 @@ try {
     assert.equal(semantics.removed,true);assert.equal(semantics.mixed,'POP');assert.equal(semantics.unclassified,null);
     assert.ok(Math.abs(semantics.voice-1.125)<.00001&&Math.abs(semantics.air-1.5)<.00001);
     for(const recipe of [semantics.quality,semantics.immersive,semantics.chill]) {
-      assert.ok(recipe.width>=1.2&&recipe.air>=.2&&recipe.exciter>=.3);
-      assert.ok(recipe.bass>=.42&&recipe.treble>=2&&recipe.vocal>=.5);assert.ok(!('volume'in recipe));
+      assert.equal(recipe.width,1);assert.equal(recipe.air,0);assert.equal(recipe.exciter,0);
+      for(const key of ['bass','treble','vocal','bassField','roomBass']) assert.equal(recipe[key],0);assert.ok(!('volume'in recipe));
     }
     assert.ok(semantics.immersive.spatial===1&&semantics.chill.spatial===1);
     assert.ok(semantics.chill.depth>semantics.immersive.depth);
-    assert.equal(semantics.quality.reverb,0);assert.ok(semantics.immersive.reverb>=.1&&semantics.chill.reverb>=.1);
+    assert.equal(semantics.quality.reverb,0);assert.ok(semantics.immersive.reverb>0&&semantics.chill.reverb>semantics.immersive.reverb);
     await page.getByRole('button',{name:'DSP Controls',exact:true}).click();
     const field=page.getByRole('slider',{name:'Bass Field',exact:true});
     await field.focus();await page.keyboard.press('End');
@@ -41,7 +41,7 @@ try {
     assert.ok(await page.locator('.mep-dsp-scroll').evaluate(el=>el.scrollWidth<=el.clientWidth));
     await page.screenshot({path:`tests/artifacts/dsp-power-${viewport.width}.png`});
     assert.deepEqual(errors,[]);
-    console.log(`PASS ${viewport.width}x${viewport.height}: standalone pill minimums, reverb policy, calibrated manual gains, room/stage gating and bounded DSP layout`);
+    console.log(`PASS ${viewport.width}x${viewport.height}: source-preserving pills, independent spatial character, calibrated manual gains, room/stage gating and bounded DSP layout`);
     await context.close();
   }
 } finally {await browser.close();}

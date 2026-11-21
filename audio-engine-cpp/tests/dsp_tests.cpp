@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include <cstdio>
+#include <cstdlib>
 #include <array>
 #include <future>
 #include <thread>
@@ -815,16 +816,17 @@ void productionControlSweep() {
     // Base recipes mirror soundPresets.ts; volume is lowered only in this offline harness.
     Audio lastPreset;
     for (const auto& preset : {
-        Case{"Category-only Jazz recipe",{{0,.48f},{1,2.f},{2,.3f},{3,1.2f},{4,.55f},{5,.4f},{6,.05f},{10,.07f},{11,1.f},{12,.55f},{14,.72f},{15,.6f},{16,.2f},{17,1.f}}},
-        Case{"HD Clear recipe",{{0,.42f},{1,2.5f},{2,.3f},{3,1.2f},{10,.06f},{11,1.f},{12,.55f},{14,.72f},{15,.6f},{16,.25f}}},
-        Case{"Immersive recipe",{{0,.65f},{1,2.f},{2,.3f},{3,1.35f},{4,.75f},{5,.65f},{6,.12f},{10,.08f},{11,1.f},{12,.5f},{14,.65f},{15,.7f},{16,.2f},{17,1.f}}},
-        Case{"Chill recipe",{{0,.55f},{1,2.f},{2,.3f},{3,1.25f},{4,.70f},{5,.80f},{6,.18f},{10,.08f},{11,1.f},{12,.5f},{14,.76f},{15,.80f},{16,.2f},{17,1.f}}}
+        Case{"HD Clear neutral recipe",{}},
+        Case{"Immersive recipe",{{4,.32f},{5,.22f},{6,.025f},{14,.55f},{15,.72f},{17,1.f}}},
+        Case{"Chill recipe",{{4,.40f},{5,.38f},{6,.06f},{14,.65f},{15,.78f},{17,1.f}}}
     }) {
         auto values=neutral; for(const auto& [index,value]:preset.changes) values[index]=value;
         const auto output=render(values);
-        check(differenceEnergy(values[17]>0 ? stageDelay(base) : base,output,24000)>.0001, preset.name);
-        check(values[0]>=.42f && values[3]>=1.2f && values[1]>=2 && values[16]>=.2f && values[2]>=.3f && values[12]>=.5f,
-              "category and quick recipes meet requested preference minimums");
+        const double changed=differenceEnergy(values[17]>0 ? stageDelay(base) : base,output,24000);
+        std::cout<<"RECIPE DELTA "<<preset.name<<"="<<changed<<'\n';
+        check(values[17]>0 ? changed>.0001 : changed/(energy(base,0,24000)+energy(base,1,24000))<1e-8, preset.name);
+        check(values[0]==0 && values[3]==1 && values[1]==0 && values[16]==0 && values[2]==0 && values[12]==0 && values[10]==0 && values[11]==0,
+              "automatic recipes preserve tonal balance and focused bass");
         const double presenceDb=20*std::log10((toneAmplitude(output,2500,0)+1e-12)/(toneAmplitude(base,2500,0)+1e-12));
         const double trebleDb=20*std::log10((toneAmplitude(output,5900,1)+1e-12)/(toneAmplitude(base,5900,1)+1e-12));
         std::cout << "PRESET PRESENCE " << preset.name << "=" << presenceDb << " dB\n";
@@ -834,10 +836,38 @@ void productionControlSweep() {
         if (!lastPreset.empty()) check(differenceEnergy(lastPreset,output,24000)>.0001, "quick recipes produce distinct processed PCM");
         lastPreset=output;
         auto fullMaster=values; fullMaster[8]=1;
-        render(fullMaster); // Exercise the actual limiter with the stronger recipes.
+        render(fullMaster);
         check(g_limiterNode.hardClippedSamples.load()==0,"preset does not hit the final hard-clipping guard at full master");
     }
+    const auto source=g_sourceGeneration.load();
+    const auto adaptive="ADAPTIVE_EQ "+std::to_string(source)+" 1 -1.5 0 -1 0";
+    check(execute_audio_command(adaptive.c_str())==0,"bounded adaptive correction is accepted");
+    check(execute_audio_command(("ADAPTIVE_EQ "+std::to_string(source)+" 1 1 0 0 0").c_str())!=0,"automatic tone cannot boost or add coloration");
+    check(execute_audio_command(("ADAPTIVE_EQ "+std::to_string(source)+" 1 -4 0 0 0").c_str())!=0,"adaptive cuts are bounded in the native engine");
+    check(execute_audio_command(("ADAPTIVE_EQ "+std::to_string(source)+" 1 -1 -1 -1 -1").c_str())!=0,"combined adaptive correction cannot exceed its native budget");
+    check(execute_audio_command(("ADAPTIVE_EQ "+std::to_string(source+1)+" 1 -1 0 0 0").c_str())!=0,"stale source correction is rejected natively");
+    check(execute_audio_command("LOAD controls-fixture.wav")==0,"source change with adaptive EQ succeeds");
+    float actual[5];get_adaptive_audio_settings(actual);
+    check(actual[0]==0 && g_audiophileEQNode.adaptiveDb[0].current==0,"new source cannot inherit an old song's correction");
+    check(execute_audio_command(adaptive.c_str())!=0,"previous source token remains invalid after replacement");
+    execute_audio_command("BYPASS_ALL 1");
+    check(execute_audio_command(("ADAPTIVE_EQ "+std::to_string(g_sourceGeneration.load())+" 1 -1 0 0 0").c_str())!=0,"Raw Stereo cannot enable adaptive processing");
+    execute_audio_command("BYPASS_ALL 0");
     execute_audio_command("STOP"); uninit_audio_engine(); std::remove("controls-fixture.wav"); g_ecoMode=false;
+}
+
+void adaptiveTone() {
+    g_bassGain=0;g_trebleGain=0;g_presenceBoost=0;g_isAdaptiveLoudnessOn=false;
+    auto a=eq(),b=eq();
+    for(auto* node:{a.get(),b.get()}) for(int band=0;band<4;++band) node->adaptiveDb[band].init(0,sr,750);
+    a->adaptiveDb[2].set(-1.5f);b->adaptiveDb[2].set(-1.5f);
+    const auto input=tone(3200,48000*4,.7f);
+    const auto out=process(a.get(),g_audiophile_eq_vtable,input,257);
+    check(difference(out,process(b.get(),g_audiophile_eq_vtable,input,1))<1e-6,"adaptive correction is independent of callback partitioning");
+    const double gain=20*std::log10(toneAmplitude(out,3200,0,48000*3)/toneAmplitude(input,3200,0,48000*3));
+    check(gain < -1.4 && gain > -1.6,"adaptive presence correction is a bounded cut, not a vocal enhancer");
+    check(std::abs(toneAmplitude(out,3200,1)/toneAmplitude(out,3200,0)-.7)<1e-5,"linked corrective EQ preserves channel balance");
+    check(finite(out),"adaptive correction remains finite");
 }
 
 void transportAndNaturalism() {
@@ -921,10 +951,57 @@ void transportAndNaturalism() {
     std::remove("transport-fixture.wav");g_ecoMode=false;
 }
 
+void referenceRecording() {
+    const char* path=std::getenv("DMEX_DSP_REFERENCE"); if(!path) return;
+    ma_decoder decoder;
+    auto config=ma_decoder_config_init(ma_format_f32,2,44100);
+    check(ma_decoder_init_file(path,&config,&decoder)==MA_SUCCESS,"reference recording opens without playback");
+    ma_uint64 frames=0;ma_decoder_get_length_in_pcm_frames(&decoder,&frames);
+    frames=(std::min)(frames,ma_uint64(44100*40));
+    Audio input(static_cast<size_t>(frames)*2);ma_uint64 read=0;
+    ma_decoder_read_pcm_frames(&decoder,input.data(),frames,&read);ma_decoder_uninit(&decoder);
+    check(read>44100*2,"reference recording contains a useful passage");input.resize(static_cast<size_t>(read)*2);
+    const std::array<float,20> neutral{0,0,0,1,0,0,0,0,1,52,0,0,0,0,.72f,.6f,0,0,0,0};
+    double baselineBass=0;
+    for(int mode=0;mode<3;++mode) {
+        g_ecoMode=true;check(engine_init_offline(44100),"reference offline graph initializes");
+        execute_audio_command("BYPASS_ALL 0");execute_audio_command("HEADPHONE_CORRECTION OFF");execute_audio_command("CONVOLUTION 0");
+        auto values=neutral;
+        if(mode) {values[17]=1;values[4]=mode==1?.32f:.40f;values[5]=mode==1?.22f:.38f;values[6]=mode==1?.025f:.06f;values[14]=mode==1?.55f:.65f;values[15]=mode==1?.72f:.78f;}
+        check(apply_audio_settings(values.data(),20)==0 && execute_audio_command((std::string("LOAD ")+path).c_str())==0,"reference uses production presets and decoder");
+        execute_audio_command("PLAY");
+        Audio output(input.size());
+        for(size_t frame=0;frame<read;frame+=256)engine_render_offline(output.data()+frame*2,static_cast<ma_uint32>((std::min)(size_t(256),static_cast<size_t>(read)-frame)));
+        check(finite(output) && g_limiterNode.hardClippedSamples.load()==0,"reference preset has finite PCM and zero hard-clipping hits");
+        if(mode==0) {
+            constexpr size_t delay=1196;
+            double error=0,original=0;
+            for(size_t frame=44100;frame<read;++frame)for(int channel=0;channel<2;++channel) {
+                const double source=input[(frame-delay)*2+channel];
+                const double delta=output[frame*2+channel]-source;error+=delta*delta;original+=source*source;
+            }
+            const double relative=std::sqrt(error/(original+1e-30));
+            std::cout<<"REFERENCE Natural relative residual="<<relative<<'\n';
+            check(relative<.0001,"Natural preserves the supplied recording within -80 dB residual after latency alignment");
+        }
+        BiquadLPF lowL,lowR;lowL.init(44100,120);lowR.init(44100,120);
+        double bassEnergy=0;
+        for(size_t frame=0;frame<read;++frame){const float l=lowL.process(output[frame*2]),r=lowR.process(output[frame*2+1]);if(frame>44100)bassEnergy+=l*l+r*r;}
+        if(mode==0)baselineBass=bassEnergy;
+        else {
+            const double delta=10*std::log10((bassEnergy+1e-30)/(baselineBass+1e-30));
+            std::cout<<"REFERENCE "<<(mode==1?"Immersive":"Chill")<<" low-bass change="<<delta<<" dB\n";
+            check(std::abs(delta)<.5,"spatial intent retains the reference low-bass weight within half a dB");
+        }
+        execute_audio_command("STOP");uninit_audio_engine();
+    }
+    g_ecoMode=false;
+}
+
 int main() {
     const auto start = std::chrono::steady_clock::now();
     try {
-        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep(); transportAndNaturalism();
+        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); adaptiveTone(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep(); transportAndNaturalism(); referenceRecording();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
         std::cout << checks << " checks passed in " << ms << " ms (offline; no audio devices opened).\n";
         return 0;

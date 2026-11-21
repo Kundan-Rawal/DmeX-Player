@@ -9,5 +9,5 @@ export function releaseYear(track: Pick<Track, 'year'>): number | null {
 }
 export function isClassicYear(track: Pick<Track, 'year'>): boolean {
   const year = releaseYear(track);
-  return year !== null && year >= 1880 && year <= 2003;
+  return year !== null && year >= 1980 && year <= 2003;
 }

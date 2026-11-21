@@ -26,12 +26,20 @@ namespace {
 std::string playbackPath;
 std::string correctionPath, convolutionPath;
 float correctionStrength = 1.0f, convolutionWet = 0.0f;
-std::array<float, 20> settings{0.25f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+std::array<float, 20> settings{0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
     52.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.84f, 0.50f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 std::mutex parameterMutex;
 std::array<float, 20> pendingSettings{};
 std::atomic<bool> parametersPending{false};
+std::array<float,5> adaptiveSettings{}, pendingAdaptive{};
+std::atomic<bool> adaptivePending{false};
+
+void publishAdaptive(const std::array<float,5>& values) {
+    std::lock_guard<std::mutex> publish(parameterMutex);
+    adaptiveSettings=values; pendingAdaptive=values;
+    adaptivePending.store(true,std::memory_order_release);
+}
 
 float number(const std::string& text) {
     std::istringstream stream(text);
@@ -150,16 +158,24 @@ void restore_audio_parameters() {
     std::lock_guard<std::mutex> publish(parameterMutex);
     pendingSettings = settings;
     parametersPending.store(true, std::memory_order_release);
+    pendingAdaptive=adaptiveSettings;
+    adaptivePending.store(true,std::memory_order_release);
 }
 void audio_apply_pending_parameters() {
-    if (!parametersPending.load(std::memory_order_acquire)) return;
+    if (!parametersPending.load(std::memory_order_acquire) && !adaptivePending.load(std::memory_order_acquire)) return;
     std::unique_lock<std::mutex> publish(parameterMutex, std::try_to_lock);
     if (!publish.owns_lock()) return;
     const auto values = pendingSettings;
-    parametersPending.store(false, std::memory_order_release);
+    const bool settingsChanged=parametersPending.exchange(false,std::memory_order_acq_rel);
+    const bool adaptiveChanged=adaptivePending.exchange(false,std::memory_order_acq_rel);
+    const auto adaptive=pendingAdaptive;
     publish.unlock();
-    applyTargets(values);
+    if (settingsChanged) applyTargets(values);
+    if (adaptiveChanged) for (int band=0; band<4; ++band)
+        g_audiophileEQNode.adaptiveDb[band].set(adaptive[0]>.5f ? adaptive[band+1] : 0.0f);
 }
+void get_adaptive_audio_settings(float* output) { std::copy(adaptiveSettings.begin(),adaptiveSettings.end(),output); }
+extern "C" unsigned long long audio_source_generation() { return g_sourceGeneration.load(); }
 void engine_release_source() {
     if (g_soundInitialized) {
         ma_sound_stop(&g_sound);
@@ -213,7 +229,15 @@ extern "C" int execute_audio_command(const char* input) {
             g_streamTargetRate.store(g_bypassAll.load() ? 0 : engine_get_sample_rate());
             if (stream_probe(args.c_str(), g_streamTargetRate.load(), &originalRate, &length) != MA_SUCCESS) return -1;
             Suspended suspend(true);
+            g_sourceGeneration.fetch_add(1);
+            publishAdaptive({});
             engine_release_source();
+            for (int band=0; band<4; ++band) {
+                g_audiophileEQNode.adaptiveDb[band].snap(0);
+                g_audiophileEQNode.adaptiveL[band].init(static_cast<float>(engine_get_sample_rate()),1000,.8f,0);
+                g_audiophileEQNode.adaptiveR[band].init(static_cast<float>(engine_get_sample_rate()),1000,.8f,0);
+                g_audiophileEQNode.lastAdaptiveDb[band]=0;
+            }
             if (g_bypassAll.load()) {
                 if (static_cast<int>(originalRate) != engine_get_sample_rate()) {
                     const int selectedRate = g_requestedSampleRate.load();
@@ -262,9 +286,19 @@ extern "C" int execute_audio_command(const char* input) {
             if (ma_sound_seek_to_pcm_frame(&g_sound, static_cast<ma_uint64>(seconds * rate)) != MA_SUCCESS) return -1;
             dsp_flush_all_state(); restore_audio_parameters(); engine_reset_transport();
             engine_flush_source_caches();
+        } else if (command == "ADAPTIVE_EQ") {
+            std::istringstream stream(args);
+            unsigned long long source=0; std::array<float,5> values{}; char extra;
+            if (!(stream>>source>>values[0]>>values[1]>>values[2]>>values[3]>>values[4]) || (stream>>extra)) return -1;
+            if (source!=g_sourceGeneration.load() || (values[0]!=0 && values[0]!=1)) return -1;
+            for (int band=1; band<5; ++band) if (!std::isfinite(values[band]) || values[band]<-3 || values[band]>0) return -1;
+            if (values[1]+values[2]+values[3]+values[4] < -3.00001f) return -1;
+            if (g_bypassAll.load() && values[0]!=0) return -1;
+            publishAdaptive(values);
         } else if (command == "BYPASS_ALL") {
             const bool bypass = number(args) > 0.5f;
             if (bypass == g_bypassAll.load()) return 0;
+            if (bypass) publishAdaptive({});
             const bool playing = g_soundInitialized && ma_sound_is_playing(&g_sound);
             const std::string path = g_lastLoadedPath;
             float seconds = 0;

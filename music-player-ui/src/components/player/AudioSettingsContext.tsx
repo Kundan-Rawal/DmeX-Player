@@ -12,6 +12,7 @@ export interface AudioStatus {
   irRestoreFailed: boolean;
   autoReverb?: boolean; portableHrtf?: boolean;
   hardClippedSamples?: number;
+  sourceGeneration?: number; adaptiveEnabled?: boolean; adaptiveEqDb?: number[];
   processingDelayFrames: number; callbackLoadPercent: number; maximumCallbackLoadPercent: number; overBudgetCallbacks: number;
 }
 export const PARAM = {
@@ -20,7 +21,7 @@ export const PARAM = {
   damping: 15, air: 16, spatial: 17, boost: 18, device: 19,
 } as const;
 export type Parameter = keyof typeof PARAM;
-export const DEFAULT_AUDIO = [0.25, 0, 0, 1, 0, 0, 0, 0, 1, 52, 0, 0, 0, 0, 0.84, 0.5, 0, 0, 0, 0];
+export const DEFAULT_AUDIO = [0, 0, 0, 1, 0, 0, 0, 0, 1, 52, 0, 0, 0, 0, 0.84, 0.5, 0, 0, 0, 0];
 interface AudioControls {
   status: AudioStatus | null; values: number[]; busy: boolean; error: string;
   headphone: string; environment: string;

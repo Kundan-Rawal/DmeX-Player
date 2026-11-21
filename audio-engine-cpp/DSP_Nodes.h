@@ -369,6 +369,9 @@ struct AudiophileEQNode
 {
     ma_node_base baseNode;
     SmoothedParam targetBass, targetMid, targetHigh;
+    SmoothedParam adaptiveDb[4];
+    BiquadPeak adaptiveL[4]{{1},{1},{1},{1}}, adaptiveR[4]{{1},{1},{1},{1}};
+    float lastAdaptiveDb[4]{};
     float sampleRate = 48000.0f;
     float lastPresence = -1.0f;
     float lastBassDb = 100.0f, lastTrebleDb = 100.0f;

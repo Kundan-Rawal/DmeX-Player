@@ -13,22 +13,22 @@ try {
       const t=window.libraryTest;
       const names=['zebra','नमस्ते','Alpha','한글','42 song','! Intro','Écho','Ａlpha',' bravo','ı song','ſ song'];
       const tracks=names.map((name,i)=>({...t.tracks[i],name}));
-      return {labels:t.CATEGORY_LABELS, classic:[1880,1995,2003,2004].map(year=>t.classifyAudio(.9,18,0,.1,{year:String(year),genre:'Pop'}).label),
+      return {labels:t.CATEGORY_LABELS, classic:[1969,1979,1980,1995,2003,2004].map(year=>t.classifyAudio(.9,18,0,.1,{year:String(year),genre:'Pop'}).label),
         fallback:t.classifyAudio(.9,18,0,.1,{}).label,
         sections:names.map(t.alphabetSection),ascending:t.sortTracks(tracks,'title').map(x=>x.name),descending:t.sortTracks(tracks,'title',true).map(x=>x.name),
         neutral:t.soundPreset(null,'ORIGINAL'),recipes:[null,...Object.keys(t.CATEGORY_LABELS),'DYNAMIC','METAL','RNB','FOLK'].flatMap(category=>['ORIGINAL','QUALITY','IMMERSIVE','CHILL'].filter(taste=>category||taste!=='ORIGINAL').map(taste=>({category,taste,settings:t.soundPreset(category,taste)})))};
     });
-    assert.ok(Object.keys(result.labels).length<=10);
+    assert.ok(Object.keys(result.labels).length<=11);
     assert.ok(!Object.values(result.labels).some(label=>/unclassified|dynamic recording|1880|2003/i.test(label)));
-    assert.deepEqual(result.classic,["90's Classic","90's Classic","90's Classic",'Pop / Standard']);
-    assert.equal(result.fallback,'Pop / Standard');
+    assert.deepEqual(result.classic,['Pop / Standard','Pop / Standard',"90's Classic","90's Classic","90's Classic",'Pop / Standard']);
+    assert.equal(result.fallback,'Other / Untagged');
     assert.deepEqual(result.sections,['Z','#','A','#','#','#','#','#','B','#','#']);
     assert.deepEqual(result.ascending.slice(0,3),['Alpha',' bravo','zebra']);
     assert.deepEqual(result.descending.slice(0,3),['zebra',' bravo','Alpha']);
     for(const {category,taste,settings:s} of result.recipes) {
-      assert.ok(s.bass>=.42&&s.treble>=2&&s.exciter>=.3&&s.air>=.2&&s.width>=1.2&&s.vocal>=.5,`${category}/${taste} minimums`);
+      assert.ok(s.bass===0&&s.treble===0&&s.exciter===0&&s.air===0&&s.width===1&&s.vocal===0&&s.roomBass===0,`${category}/${taste} tonal preservation`);
       if(taste==='QUALITY') assert.equal(s.reverb,0);
-      if(taste==='IMMERSIVE'||taste==='CHILL') assert.ok(s.reverb>=.1);
+      if(taste==='IMMERSIVE'||taste==='CHILL') assert.ok(s.reverb>0&&s.reverb<=.06);
       assert.ok(!('volume'in s)&&!('device'in s));
     }
     assert.equal(result.neutral.width,1);for(const k of ['bass','treble','exciter','air','vocal','bassField','spatial','reverb']) assert.equal(result.neutral[k],0,'No preset floor leaks into normal/manual audio');
@@ -42,7 +42,7 @@ try {
     await page.waitForFunction(()=>document.querySelector('.dmex-mobile-route-page[data-current=true] .dmex-mobile-track-index')?.getAttribute('aria-valuetext')==='#');
     await page.screenshot({path:`tests/artifacts/preset-alphabet-${viewport.width}.png`});
     assert.deepEqual(errors,[]);
-    console.log(`PASS ${viewport.width}x${viewport.height}: all category/pill/combo minimums, classic/fallback labels, neutral isolation, ASCII-first sort, full A-Z/# rail and keyboard jump`);
+    console.log(`PASS ${viewport.width}x${viewport.height}: category-independent tonal preservation, 1980-2003/fallback labels, neutral isolation, ASCII-first sort, full A-Z/# rail and keyboard jump`);
     await context.close();
   }
 } finally {await browser.close();}
