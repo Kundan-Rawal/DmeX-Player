@@ -81,7 +81,9 @@ let sourceGeneration=0, adaptiveEnabled=false, adaptiveEqDb=[0,0,0,0];
 (window as any).libraryTest.validAnalysis=validAnalysis;
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
-  if (command === 'audio_status') return { ready: true, settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, sourceGeneration, adaptiveEnabled, adaptiveEqDb, bypassAll, ecoMode: true };
+  if (command === 'audio_status') return { ready: true, sampleRate:48000, requestedSampleRate:48000, outputPeak:0, limiterGain:1, processingDelayFrames:1196, callbackLoadPercent:12, overBudgetCallbacks:0, autoReverb:true, portableHrtf:true,
+    vocalFocusPeakDb:0,vocalFocusWeight:0,bassSubPeakDb:engineSettings[0]*4,bassBodyPeakDb:engineSettings[0]*5,bassBodyHz:98,
+    settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, sourceGeneration, adaptiveEnabled, adaptiveEqDb, bypassAll, ecoMode: true };
   if (command === 'audio_apply_settings') {
     if ((window as any).libraryTest.applyFailureCount > 0) { --(window as any).libraryTest.applyFailureCount; throw new Error('Fixture DSP update failed'); }
     const delay = (window as any).libraryTest.applyDelay || 0;

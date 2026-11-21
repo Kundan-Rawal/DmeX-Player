@@ -13,18 +13,27 @@ try {
     const semantics=await page.evaluate(()=>{
       const t=window.libraryTest;
       return {removed:!('SOUNDTRACK'in t.CATEGORY_LABELS),mixed:t.metadataCategory({genre:'Bollywood; Soundtrack; Pop'}),unclassified:t.metadataCategory({genre:'Film / Soundtrack'}),
-        voice:t.vocalPresenceDb(.5),air:t.harmonicAirDb(.5),quality:t.soundPreset(null,'QUALITY'),immersive:t.soundPreset(null,'IMMERSIVE'),chill:t.soundPreset(null,'CHILL')};
+        voice:t.vocalPresenceDb(.5),air:t.harmonicAirDb(.5),quality:t.soundPreset(null,'QUALITY'),immersive:t.soundPreset(null,'IMMERSIVE'),chill:t.soundPreset(null,'CHILL'),
+        focused:t.soundPreset('NATURAL','ORIGINAL'),restrained:t.soundPreset('NATURAL','ORIGINAL',{confidence:1,crestDb:12,eqDb:[-1.5,0,-1,0]})};
     });
     assert.equal(semantics.removed,true);assert.equal(semantics.mixed,'POP');assert.equal(semantics.unclassified,null);
     assert.ok(Math.abs(semantics.voice-1.125)<.00001&&Math.abs(semantics.air-1.5)<.00001);
+    assert.equal(semantics.restrained.bass,0,'A measured bass excess cannot receive a fixed bass boost');
+    assert.ok(Math.abs(Math.pow(semantics.restrained.vocal/semantics.focused.vocal,3)-.5)<.00001,'Harsh-recording restraint halves focus dB rather than accidentally reducing it eight-fold');
     for(const recipe of [semantics.quality,semantics.immersive,semantics.chill]) {
-      assert.equal(recipe.width,1);assert.equal(recipe.air,0);assert.equal(recipe.exciter,0);
-      for(const key of ['bass','treble','vocal','bassField','roomBass']) assert.equal(recipe[key],0);assert.ok(!('volume'in recipe));
+      assert.ok(recipe.width>1&&recipe.width<=1.2);assert.equal(recipe.air,0);assert.equal(recipe.exciter,0);
+      assert.ok(recipe.bass>0&&recipe.bass<=.4&&recipe.vocal>=.5);
+      for(const key of ['treble','bassField','roomBass']) assert.equal(recipe[key],0);assert.ok(!('volume'in recipe));
     }
     assert.ok(semantics.immersive.spatial===1&&semantics.chill.spatial===1);
     assert.ok(semantics.chill.depth>semantics.immersive.depth);
     assert.equal(semantics.quality.reverb,0);assert.ok(semantics.immersive.reverb>0&&semantics.chill.reverb>semantics.immersive.reverb);
     await page.getByRole('button',{name:'DSP Controls',exact:true}).click();
+    await page.getByLabel('Applied DSP values').waitFor();
+    await page.waitForTimeout(450);
+    assert.equal(await page.getByLabel('Applied DSP values').locator('dd').count(),5,'Native processing readouts are visible');
+    assert.ok(!/NaN|undefined/.test(await page.getByLabel('Applied DSP values').innerText()));
+    await page.screenshot({path:`tests/artifacts/dsp-live-${viewport.width}.png`});
     const field=page.getByRole('slider',{name:'Bass Field',exact:true});
     await field.focus();await page.keyboard.press('End');
     await page.waitForFunction(()=>{const call=window.libraryTest.calls.filter(c=>c.command==='audio_apply_settings').at(-1);return call?.payload.values[10]===1&&call.payload.values[11]===1;});

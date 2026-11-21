@@ -90,13 +90,13 @@ ma_node_vtable g_exciter_vtable = {exciter_process, NULL, 1, 1, 0};
 // ================================================================
 static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 *pFrameCountIn, float **ppFramesOut, ma_uint32 *pFrameCountOut)
 {
-    if (!g_isWidenOn)
+    StereoWidenerNode *p = (StereoWidenerNode *)pNode;
+    if (!g_isWidenOn && p->width.peek()==1.0f)
     {
         memcpy(ppFramesOut[0], ppFramesIn[0], (*pFrameCountIn) * 2 * sizeof(float));
         *pFrameCountOut = *pFrameCountIn;
         return;
     }
-    StereoWidenerNode *p = (StereoWidenerNode *)pNode;
     const float *pIn = ppFramesIn[0];
     float *pOut = ppFramesOut[0];
     ma_uint32 fc = *pFrameCountIn;
@@ -106,34 +106,19 @@ static void widener_process(ma_node *pNode, const float **ppFramesIn, ma_uint32 
     {
         float L = pIn[i * 2], R = pIn[i * 2 + 1];
 
-        const float mixL = L, mixR = R;
-
-        // 2. Blumlein Shuffler (Bass-Safe Widening)
-        float M = (mixL + mixR) * 0.5f;
-        float S = (mixL - mixR) * 0.5f;
-        
-        // Isolate the bass from the Side channel so we don't widen the sub-bass or kick body
-        // 2-Pole steeper slope (12 dB/oct) prevents 0-120Hz from leaking into widening and causing phase hollowing!
-        const float SIDE_HP_COEF = 1.0f - std::exp(-2.0f * static_cast<float>(M_PI) * 150.0f / p->sampleRate);
-        p->sideLp += SIDE_HP_COEF * (S - p->sideLp);
-        p->sideLp2 += SIDE_HP_COEF * (p->sideLp - p->sideLp2);
-        float sideLows = p->sideLp2;     // The bass of the Side channel
-        float sideHighs = S - sideLows;  // The treble/mids of the Side channel
+        const float S=(L-R)*.5f;
+        // Cascaded high-passes isolate the side send. Subtracting a two-pole
+        // low-pass from dry was not a steep high-pass and leaked bass into width.
+        const float sideHighs=p->sideHighpass2.process(p->sideHighpass1.process(S));
 
         float effectiveWidth = p->width.next();
         if (g_isLaptopSpeaker) {
             effectiveWidth = 1.0f + ((effectiveWidth - 1.0f) * 0.4f);
         }
 
-        float midGain = 1.0f + ((effectiveWidth - 1.0f) * 0.1f);
-        
-        // We multiply ONLY the upper frequencies of the Side channel by the width,
-        // and we pass the sideLows through exactly at 1.0x width.
-        // This guarantees pristine original stereo bass while massively widening the highs.
-        float finalS = sideLows + (sideHighs * effectiveWidth);
-
-        pOut[i * 2] = (M * midGain) + finalS;
-        pOut[i * 2 + 1] = (M * midGain) - finalS;
+        const float extra=(effectiveWidth-1)*sideHighs;
+        pOut[i * 2] = L+extra;
+        pOut[i * 2 + 1] = R-extra;
     }
 }
 ma_node_vtable g_widener_vtable = {widener_process, NULL, 1, 1, 0};
@@ -246,13 +231,7 @@ static void psychoacoustic_process(ma_node *pNode, const float **ppFramesIn, ma_
 ma_node_vtable g_psychoacoustic_vtable = {psychoacoustic_process, NULL, 1, 1, 0};
 
 // ================================================================
-// AUDIOPHILE EQ (Zero Distortion)
-// ================================================================
-// ================================================================
-// AUDIOPHILE EQ (Zero Phase-Distortion Parallel Architecture)
-// ================================================================
-// ================================================================
-// AUDIOPHILE EQ (True Parallel Full-Spectrum Architecture)
+// LINKED TONE EQ AND CENTRE-WEIGHTED VOCAL FOCUS
 // ================================================================
 static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 *countIn, float **output, ma_uint32 *countOut)
 {
@@ -269,9 +248,22 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
 
         const float bass = p->targetBass.next(), high = p->targetHigh.next();
         const float presence = p->targetMid.next();
+        const float focusL=p->focusLowpassL.process(p->focusHighpassL.process(L));
+        const float focusR=p->focusLowpassR.process(p->focusHighpassR.process(R));
+        p->focusEnergyL+=p->focusCoef*(focusL*focusL-p->focusEnergyL);
+        p->focusEnergyR+=p->focusCoef*(focusR*focusR-p->focusEnergyR);
+        p->focusCross+=p->focusCoef*(focusL*focusR-p->focusCross);
         float adaptive[4];
         for (int band=0; band<4; ++band) adaptive[band]=p->adaptiveDb[band].next();
         if ((p->coefficientCounter++ & 31u) == 0) {
+            const float common=std::sqrt((std::max)(p->focusEnergyL*p->focusEnergyR,1e-30f));
+            const float coherence=(std::clamp)(p->focusCross/common,0.0f,1.0f);
+            const float balance=(std::clamp)(2*common/(p->focusEnergyL+p->focusEnergyR+1e-20f),0.0f,1.0f);
+            float confidence=(std::clamp)((coherence-.15f)/.65f,0.0f,1.0f);
+            confidence=confidence*confidence*(3-2*confidence)*balance*balance*balance*balance;
+            p->focusMix.set(confidence);
+            p->focusWeight.store(presence>0 ? p->focusMix.peek() : 0,std::memory_order_relaxed);
+            p->focusAmount.store(presence,std::memory_order_relaxed);
             for (int band=0; band<4; ++band) {
                 if (fabsf(adaptive[band]-p->lastAdaptiveDb[band]) <= .0001f && !(adaptive[band]==0 && p->lastAdaptiveDb[band]!=0)) continue;
                 const float frequencies[]{120,350,3200,8000};
@@ -282,8 +274,8 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
                 p->lastAdaptiveDb[band]=adaptive[band];
             }
             if (fabsf(presence - p->lastPresence) > 0.0001f || (presence==0 && p->lastPresence!=0)) {
-                p->presenceL.update_coeffs(p->sampleRate, 2500.0f, 0.8f, vocalPresenceDb(presence));
-                p->presenceR.update_coeffs(p->sampleRate, 2500.0f, 0.8f, vocalPresenceDb(presence));
+                p->presenceL.update_coeffs(p->sampleRate, 1400.0f, 0.8f, vocalPresenceDb(presence));
+                p->presenceR.update_coeffs(p->sampleRate, 1400.0f, 0.8f, 0.0f);
                 p->lastPresence = presence;
             }
             if (fabsf(bass - p->lastBassDb) > 0.0001f || (bass==0 && p->lastBassDb!=0)) {
@@ -299,8 +291,15 @@ static void audiophile_eq_process(ma_node *node, const float **input, ma_uint32 
         }
         float outL = p->trebleShelfL.process(p->bassShelfL.process(L));
         float outR = p->trebleShelfR.process(p->bassShelfR.process(R));
-        outL = p->presenceL.process(outL);
-        outR = p->presenceR.process(outR);
+        const float mid=(outL+outR)*.5f;
+        const float focused=p->presenceL.process(mid);
+        const float focus=p->focusMix.next();
+        if(presence>0) {
+            // A centre estimate, not vocal stem separation. Correlation/balance
+            // gating leaves hard-panned and anti-phase sources unboosted.
+            const float delta=focus*(focused-mid);
+            outL+=delta;outR+=delta;
+        }
         for (int band=0; band<4; ++band) {
             outL=p->adaptiveL[band].process(outL); outR=p->adaptiveR[band].process(outR);
         }
@@ -487,10 +486,12 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
                 const float deepAnchorScale = subHz <= 40.0f ? 1.20f : 1.0f;
                 const float subDb = drive * (2.8f + 1.2f * p->bassScarcity) * headroom * deepAnchorScale;
                 const float midDb = drive * (3.8f + 1.6f * p->bassScarcity) * headroom;
+                p->subPeakDb.store(subDb,std::memory_order_relaxed);
+                p->bodyPeakDb.store(midDb,std::memory_order_relaxed);
                 p->subPeakL.update_coeffs(sr, subHz, 0.65f, subDb);
                 p->subPeakR.update_coeffs(sr, subHz, 0.65f, subDb);
-                p->midPeakL.update_coeffs(sr, p->currentFreq, 0.70f, midDb);
-                p->midPeakR.update_coeffs(sr, p->currentFreq, 0.70f, midDb);
+                p->midPeakL.update_coeffs(sr, p->currentFreq, 0.65f, midDb);
+                p->midPeakR.update_coeffs(sr, p->currentFreq, 0.65f, midDb);
                 p->lastBassGain = drive;
                 p->lastTunedFreq = p->currentFreq;
                 p->lastSubHz = subHz;
@@ -518,14 +519,13 @@ static void subwoofer_process(ma_node *node, const float **input, ma_uint32 *cou
         const float tonalDeltaL = (shapedBassL - L) * tonalBlend;
         const float tonalDeltaR = (shapedBassR - R) * tonalBlend;
 
-        // Remove subsonic content as a difference signal, then add tonal weight and
-        // the short upper-bass attack separately. There is no internal bass clipper;
-        // the downstream lookahead limiter remains the single peak-control stage.
-        const float active = (std::min)(1.0f, drive / 0.02f);
+        // Keep the direct bass intact. Subtracting a phase-rotated crossover
+        // branch to remove subsonics also changed ordinary 50-120 Hz music.
+        // The small-speaker path below retains its dedicated protection filter.
         const float punchDeltaL = (shapedBassL - L) * punchGain * 0.5f;
         const float punchDeltaR = (shapedBassR - R) * punchGain * 0.5f;
-        float outL = L + active * (cleanL - bassL) + tonalDeltaL + punchDeltaL;
-        float outR = R + active * (cleanR - bassR) + tonalDeltaR + punchDeltaR;
+        float outL = L + tonalDeltaL + punchDeltaL;
+        float outR = R + tonalDeltaR + punchDeltaR;
         if (drive==0) { outL=L; outR=R; }
 
         // Field receives only upper bass and remains independent from Drive.
@@ -937,6 +937,7 @@ void dsp_flush_all_state(void)
     g_audiophileEQNode.bassShelfL.reset(); g_audiophileEQNode.bassShelfR.reset();
     g_audiophileEQNode.trebleShelfL.reset(); g_audiophileEQNode.trebleShelfR.reset();
     g_audiophileEQNode.presenceL.reset(); g_audiophileEQNode.presenceR.reset();
+    g_audiophileEQNode.resetFocus();
     for (int band=0; band<4; ++band) {
         g_audiophileEQNode.adaptiveL[band].reset(); g_audiophileEQNode.adaptiveR[band].reset();
     }
@@ -1050,6 +1051,7 @@ void dsp_flush_all_state(void)
     g_subwooferNode.midPeakL.reset();
     g_subwooferNode.midPeakR.reset();
     g_subwooferNode.lastBassGain = -1.0f;
+    g_subwooferNode.subPeakDb.store(0);g_subwooferNode.bodyPeakDb.store(0);
     g_subwooferNode.lastScarcity = -1.0f;
     g_subwooferNode.isHighlightInit = false;
 
@@ -1071,6 +1073,7 @@ void dsp_flush_all_state(void)
     g_widenerNode.lpStateR = 0.0f;
     g_widenerNode.sideLp = 0.0f;
     g_widenerNode.sideLp2 = 0.0f;
+    g_widenerNode.sideHighpass1.reset();g_widenerNode.sideHighpass2.reset();
 
     g_restorationNode.init(g_subwooferNode.sampleRate);
 

@@ -32,7 +32,7 @@ export function useSoundSelection(_profileId: string | null, ready: boolean) {
       if(id!==generation.current) return;
       if(source) await audio.command(adaptiveCommand(source,false,null));
       if(id!==generation.current) return;
-      await audio.update(soundPreset(null,value.taste));
+      await audio.update(soundPreset(value.categoryEnabled?'NATURAL':null,value.taste,value.categoryEnabled?analysisRef.current:null));
       if(id!==generation.current) return;
       if(source) await audio.command(adaptiveCommand(source,value.categoryEnabled,analysisRef.current,value.taste==='QUALITY'?1:.65));
     } catch(error) {
@@ -79,7 +79,7 @@ export function useSoundSelection(_profileId: string | null, ready: boolean) {
       .then(value=>{
         if(cancelled||sourceRef.current?.generation!==source.generation||!validAnalysis(value)) return;
         analysisRef.current=value;setAnalysis(value);
-      }).catch(()=>{}); // Unavailable/uncertain analysis leaves the neutral path intact.
+      }).catch(()=>{}); // Keep the selected intention; do not invent a corrective EQ.
     return()=>{cancelled=true;};
   },[source,selection.categoryEnabled,selection.manual,audio.status?.bypassAll]);
   return {selection,pending,analysis,beginSource,loadSource,markManual,setManualOverride,hydrateLegacy,toggle,chooseTaste,

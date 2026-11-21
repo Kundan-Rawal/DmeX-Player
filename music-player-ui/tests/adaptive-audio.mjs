@@ -24,7 +24,7 @@ try {
     await badge.click();
     await page.waitForFunction(async()=>!(await window.__TAURI_INTERNALS__.invoke('audio_status')).adaptiveEnabled);
     await page.getByRole('button',{name:'Immersive',exact:true}).click();
-    await page.waitForFunction(async()=>{const s=await window.__TAURI_INTERNALS__.invoke('audio_status');return s.settings[17]===1&&s.settings[3]===1&&s.settings[0]===0&&s.settings[11]===0&&!s.adaptiveEnabled;});
+    await page.waitForFunction(async()=>{const s=await window.__TAURI_INTERNALS__.invoke('audio_status');return s.settings[17]===1&&s.settings[3]>1&&s.settings[0]===.36&&s.settings[12]===.65&&s.settings[11]===0&&!s.adaptiveEnabled;});
     await page.screenshot({path:`tests/artifacts/adaptive-audio-${viewport.width}.png`});
     await badge.click();
     await page.waitForFunction(async()=>(await window.__TAURI_INTERNALS__.invoke('audio_status')).adaptiveEnabled);

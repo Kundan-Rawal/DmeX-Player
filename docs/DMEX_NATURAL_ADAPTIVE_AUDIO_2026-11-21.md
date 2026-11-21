@@ -2,6 +2,10 @@
 
 Date: 2026-11-21
 
+The later [vocal-focus and spatial iteration](VOCAL_FOCUS_SPATIAL_ITERATION_2026-11-21.md)
+supersedes the neutral automatic recipes below. This document retains the initial
+adaptive-analysis design and its original measurements as history.
+
 ## Product Decision
 
 Categories now describe the library, not how every recording must be processed.

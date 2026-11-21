@@ -13,6 +13,7 @@ export interface AudioStatus {
   autoReverb?: boolean; portableHrtf?: boolean;
   hardClippedSamples?: number;
   sourceGeneration?: number; adaptiveEnabled?: boolean; adaptiveEqDb?: number[];
+  vocalFocusWeight?: number; vocalFocusPeakDb?: number; bassSubPeakDb?: number; bassBodyPeakDb?: number; bassBodyHz?: number;
   processingDelayFrames: number; callbackLoadPercent: number; maximumCallbackLoadPercent: number; overBudgetCallbacks: number;
 }
 export const PARAM = {

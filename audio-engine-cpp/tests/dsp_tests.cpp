@@ -148,6 +148,7 @@ std::unique_ptr<AudiophileEQNode> eq() {
     p->crossTrebleL.init(sr, 8000); p->crossTrebleR.init(sr, 8000);
     p->presenceL.init(sr, 2500, 0.8f, 0); p->presenceR.init(sr, 2500, 0.8f, 0);
     p->iso226.init(sr);
+    p->initFocus(sr);
     return p;
 }
 
@@ -302,11 +303,12 @@ void toneAndBass() {
     g_bassGain = 0;
     g_presenceBoost = 1;
     auto vocalEq = eq();
-    const auto vocalInput = tone(2500);
+    const auto vocalInput = tone(1400,48000,1);
     const auto vocalOutput = process(vocalEq.get(), g_audiophile_eq_vtable, vocalInput);
-    check(toneAmplitude(vocalOutput, 2500, 0) > toneAmplitude(vocalInput, 2500, 0) * 1.8,
+    check(toneAmplitude(vocalOutput, 1400, 0) > toneAmplitude(vocalInput, 1400, 0) * 1.8,
           "maximum vocal frontness produces a strong presence lift");
-    check(energy(vocalOutput, 1) == 0, "vocal frontness keeps left and right independent");
+    double vocalSide=0;for(size_t i=0;i<vocalOutput.size();i+=2)vocalSide+=std::abs(vocalOutput[i]-vocalOutput[i+1]);
+    check(vocalSide==0,"vocal focus keeps a coherent centre centred");
     g_presenceBoost = 0;
     g_bassGain = 2.1f;
 
@@ -816,17 +818,18 @@ void productionControlSweep() {
     // Base recipes mirror soundPresets.ts; volume is lowered only in this offline harness.
     Audio lastPreset;
     for (const auto& preset : {
-        Case{"HD Clear neutral recipe",{}},
-        Case{"Immersive recipe",{{4,.32f},{5,.22f},{6,.025f},{14,.55f},{15,.72f},{17,1.f}}},
-        Case{"Chill recipe",{{4,.40f},{5,.38f},{6,.06f},{14,.65f},{15,.78f},{17,1.f}}}
+        Case{"Natural focus recipe",{{0,.30f},{3,1.08f},{4,.52f},{5,.36f},{12,.65f},{17,1.f}}},
+        Case{"HD Clear focus recipe",{{0,.26f},{3,1.05f},{12,.70f}}},
+        Case{"Immersive recipe",{{0,.36f},{3,1.16f},{4,.72f},{5,.62f},{6,.05f},{12,.65f},{14,.58f},{15,.72f},{17,1.f}}},
+        Case{"Chill recipe",{{0,.30f},{3,1.12f},{4,.66f},{5,.80f},{6,.10f},{12,.58f},{14,.68f},{15,.80f},{17,1.f}}}
     }) {
         auto values=neutral; for(const auto& [index,value]:preset.changes) values[index]=value;
         const auto output=render(values);
         const double changed=differenceEnergy(values[17]>0 ? stageDelay(base) : base,output,24000);
         std::cout<<"RECIPE DELTA "<<preset.name<<"="<<changed<<'\n';
-        check(values[17]>0 ? changed>.0001 : changed/(energy(base,0,24000)+energy(base,1,24000))<1e-8, preset.name);
-        check(values[0]==0 && values[3]==1 && values[1]==0 && values[16]==0 && values[2]==0 && values[12]==0 && values[10]==0 && values[11]==0,
-              "automatic recipes preserve tonal balance and focused bass");
+        check(changed>.0001, preset.name);
+        check(values[0]>0 && values[3]>1 && values[1]==0 && values[16]==0 && values[2]==0 && values[12]>0 && values[10]==0 && values[11]==0,
+              "enhancement uses real vocal, dual-bass and width controls without added treble or bass reflections");
         const double presenceDb=20*std::log10((toneAmplitude(output,2500,0)+1e-12)/(toneAmplitude(base,2500,0)+1e-12));
         const double trebleDb=20*std::log10((toneAmplitude(output,5900,1)+1e-12)/(toneAmplitude(base,5900,1)+1e-12));
         std::cout << "PRESET PRESENCE " << preset.name << "=" << presenceDb << " dB\n";
@@ -868,6 +871,37 @@ void adaptiveTone() {
     check(gain < -1.4 && gain > -1.6,"adaptive presence correction is a bounded cut, not a vocal enhancer");
     check(std::abs(toneAmplitude(out,3200,1)/toneAmplitude(out,3200,0)-.7)<1e-5,"linked corrective EQ preserves channel balance");
     check(finite(out),"adaptive correction remains finite");
+}
+
+void vocalFocusAndWidth() {
+    g_bassGain=0;g_trebleGain=0;g_presenceBoost=.65f;g_isAdaptiveLoudnessOn=false;
+    const auto centre=tone(1400,48000,1);
+    const auto focused=process(eq().get(),g_audiophile_eq_vtable,centre);
+    const double centreDb=20*std::log10(toneAmplitude(focused,1400,0)/toneAmplitude(centre,1400,0));
+    std::cout<<"FOCUS centre lift="<<centreDb<<" dB\n";
+    check(centreDb>2.1 && centreDb<2.6,"default vocal focus provides an audible bounded centre lift");
+    const auto panned=tone(1400);
+    check(difference(panned,process(eq().get(),g_audiophile_eq_vtable,panned))<1e-7,"vocal focus does not pull a hard-panned instrument into the centre");
+    const auto opposite=tone(1400,48000,-1);
+    check(difference(opposite,process(eq().get(),g_audiophile_eq_vtable,opposite))<1e-7,"vocal focus leaves anti-phase content unboosted");
+    const auto high=tone(9000,48000,1), highOut=process(eq().get(),g_audiophile_eq_vtable,high);
+    check(std::abs(20*std::log10(toneAmplitude(highOut,9000,0)/toneAmplitude(high,9000,0)))<.15,"vocal focus does not become a treble shelf");
+    const auto low=tone(60,48000,1),lowOut=process(eq().get(),g_audiophile_eq_vtable,low);
+    check(std::abs(20*std::log10(toneAmplitude(lowOut,60,0)/toneAmplitude(low,60,0)))<.05,"vocal focus leaves low-bass weight intact");
+    Audio mixed=centre;for(size_t frame=0;frame<mixed.size()/2;++frame){const float side=.04f*std::sin(2*M_PI*3000*frame/sr);mixed[frame*2]+=side;mixed[frame*2+1]-=side;}
+    const auto mixedOut=process(eq().get(),g_audiophile_eq_vtable,mixed);
+    double sideError=0;for(size_t frame=0;frame<mixed.size()/2;++frame)sideError=(std::max)(sideError,static_cast<double>(std::abs((mixedOut[frame*2]-mixedOut[frame*2+1])-(mixed[frame*2]-mixed[frame*2+1]))));
+    check(sideError<1e-7,"vocal focus preserves the side signal rather than suppressing surrounding instruments");
+    g_presenceBoost=0;g_isWidenOn=true;g_isLaptopSpeaker=false;
+    auto widener=[] {auto node=std::make_unique<StereoWidenerNode>();node->sampleRate=sr;node->width.init(1.5f,sr);node->sideHighpass1.init(sr,220);node->sideHighpass2.init(sr,220);return node;};
+    check(difference(centre,process(widener().get(),g_widener_vtable,centre))==0,"widener leaves coherent vocals bit-identical");
+    const auto sideBass=tone(60,48000,-1),sideBassOut=process(widener().get(),g_widener_vtable,sideBass);
+    const double bassDb=10*std::log10(energy(sideBassOut,0)/energy(sideBass,0));
+    std::cout<<"WIDTH side bass change="<<bassDb<<" dB\n";
+    check(std::abs(bassDb)<.1,"widener keeps side bass within 0.1 dB at 1.5x");
+    const auto sideHigh=tone(3000,48000,-1),sideHighOut=process(widener().get(),g_widener_vtable,sideHigh);
+    check(toneAmplitude(sideHighOut,3000,0)>toneAmplitude(sideHigh,3000,0)*1.4,"widener has a strong measurable upper-side response");
+    g_isWidenOn=false;
 }
 
 void transportAndNaturalism() {
@@ -963,11 +997,11 @@ void referenceRecording() {
     check(read>44100*2,"reference recording contains a useful passage");input.resize(static_cast<size_t>(read)*2);
     const std::array<float,20> neutral{0,0,0,1,0,0,0,0,1,52,0,0,0,0,.72f,.6f,0,0,0,0};
     double baselineBass=0;
-    for(int mode=0;mode<3;++mode) {
+    for(int mode=0;mode<4;++mode) {
         g_ecoMode=true;check(engine_init_offline(44100),"reference offline graph initializes");
         execute_audio_command("BYPASS_ALL 0");execute_audio_command("HEADPHONE_CORRECTION OFF");execute_audio_command("CONVOLUTION 0");
         auto values=neutral;
-        if(mode) {values[17]=1;values[4]=mode==1?.32f:.40f;values[5]=mode==1?.22f:.38f;values[6]=mode==1?.025f:.06f;values[14]=mode==1?.55f:.65f;values[15]=mode==1?.72f:.78f;}
+        if(mode) {values[0]=mode==2?.36f:.30f;values[3]=mode==1?1.08f:mode==2?1.16f:1.12f;values[12]=mode==3?.58f:.65f;values[17]=1;values[4]=mode==1?.52f:mode==2?.72f:.66f;values[5]=mode==1?.36f:mode==2?.62f:.80f;values[6]=mode==1?0:mode==2?.05f:.10f;values[14]=mode==1?.72f:mode==2?.58f:.68f;values[15]=mode==3?.80f:.72f;}
         check(apply_audio_settings(values.data(),20)==0 && execute_audio_command((std::string("LOAD ")+path).c_str())==0,"reference uses production presets and decoder");
         execute_audio_command("PLAY");
         Audio output(input.size());
@@ -981,8 +1015,8 @@ void referenceRecording() {
                 const double delta=output[frame*2+channel]-source;error+=delta*delta;original+=source*source;
             }
             const double relative=std::sqrt(error/(original+1e-30));
-            std::cout<<"REFERENCE Natural relative residual="<<relative<<'\n';
-            check(relative<.0001,"Natural preserves the supplied recording within -80 dB residual after latency alignment");
+            std::cout<<"REFERENCE Normal relative residual="<<relative<<'\n';
+            check(relative<.0001,"Normal Stereo preserves the supplied recording within -80 dB residual after latency alignment");
         }
         BiquadLPF lowL,lowR;lowL.init(44100,120);lowR.init(44100,120);
         double bassEnergy=0;
@@ -990,8 +1024,8 @@ void referenceRecording() {
         if(mode==0)baselineBass=bassEnergy;
         else {
             const double delta=10*std::log10((bassEnergy+1e-30)/(baselineBass+1e-30));
-            std::cout<<"REFERENCE "<<(mode==1?"Immersive":"Chill")<<" low-bass change="<<delta<<" dB\n";
-            check(std::abs(delta)<.5,"spatial intent retains the reference low-bass weight within half a dB");
+            std::cout<<"REFERENCE "<<(mode==1?"Natural":mode==2?"Immersive":"Chill")<<" low-bass change="<<delta<<" dB\n";
+            check(std::abs(delta)<2.0,"enhancement retains the reference bass balance within a bounded two-dB budget");
         }
         execute_audio_command("STOP");uninit_audio_engine();
     }
@@ -1001,7 +1035,7 @@ void referenceRecording() {
 int main() {
     const auto start = std::chrono::steady_clock::now();
     try {
-        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); adaptiveTone(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep(); transportAndNaturalism(); referenceRecording();
+        sampleRateModes(); oversampling(); allpassAndLoudness(); toneAndBass(); adaptiveTone(); vocalFocusAndWidth(); spatialAndReverb(); measuredMobileAndAutomaticRoom(); airAndLimiter(); convolution(); adapterAndRawRouting(); productionControlSweep(); transportAndNaturalism(); referenceRecording();
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
         std::cout << checks << " checks passed in " << ms << " ms (offline; no audio devices opened).\n";
         return 0;

@@ -166,7 +166,7 @@ private:
             // band with instruments. Leave uncertain correlated energy in front
             // instead of aggressively removing it from the direct mix.
             const float uncertainty = 1-primaryStrength;
-            const float residualConfidence = uncertainty * uncertainty;
+            const float residualConfidence = uncertainty;
             ambientL = (inL - inR * predictL * primaryStrength) * residualConfidence;
             ambientR = (inR - inL * predictR * primaryStrength) * residualConfidence;
 

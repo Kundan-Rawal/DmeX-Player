@@ -59,6 +59,13 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
     {audio.status?.irRestoreFailed && <p className="audio-error" role="status">An IR could not be restored. Reselect the headphone or acoustic preset.</p>}
     {audio.error && <p className="audio-error" role="alert">{audio.error}</p>}
     <div className="dsp-grid">
+      {group('Live Processing','tone',<dl className="dsp-live-values" aria-label="Applied DSP values">
+        <div><dt>Centre focus</dt><dd>{audio.status?.bypassAll?'Off':`${(audio.status?.vocalFocusPeakDb??0).toFixed(1)} dB`}</dd></div>
+        <div><dt>Centre weighting</dt><dd>{audio.status?.bypassAll?'Off':percent(audio.status?.vocalFocusWeight??0)}</dd></div>
+        <div><dt>Sub peak · {value('subBassHz')} Hz</dt><dd>{(audio.status?.bassSubPeakDb??0).toFixed(1)} dB</dd></div>
+        <div><dt>Punch peak · {Math.round(audio.status?.bassBodyHz??105)} Hz</dt><dd>{(audio.status?.bassBodyPeakDb??0).toFixed(1)} dB</dd></div>
+        <div><dt>Adaptive EQ · 120 / 350 / 3.2k / 8k</dt><dd>{audio.status?.adaptiveEnabled&&!audio.status?.bypassAll?(audio.status.adaptiveEqDb??[0,0,0,0]).map(v=>v.toFixed(1)).join(' / ')+' dB':'Off'}</dd></div>
+      </dl>)}
       {group('Output', 'neutral', <div className="audio-mode-row">
         <div className="dsp-select-control"><span>Processing</span>
           <CustomSelect label="Processing quality" disabled={audio.busy} value={audio.status?.ecoMode ? 'ECO' : 'FULL'}
@@ -83,7 +90,7 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
       {group('Tone & Harmonics', 'tone', <>
         {slider('exciter', 'Tube Exciter', 0, 1, 0.01, percent)}
         {slider('air', 'Harmonic Air', 0, 1, 0.01, v => `${percent(v)} (+${harmonicAirDb(v).toFixed(1)} dB)`)}
-        {slider('vocal', 'Vocal Frontness', 0, 1, 0.01, v => `${percent(v)} (+${vocalPresenceDb(v).toFixed(1)} dB)`)}
+        {slider('vocal', 'Vocal Frontness', 0, 1, 0.01, v => `${percent(v)} (+${vocalPresenceDb(v).toFixed(1)} dB centre peak)`)}
       </>)}
       {group('Stereo Image', 'stereo', <>
         {slider('width', 'Stereo Widener', 1, 2.5, 0.01, v => v.toFixed(2) + 'x')}

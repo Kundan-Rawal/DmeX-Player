@@ -265,6 +265,7 @@ struct StereoWidenerNode
     ma_node_base baseNode;
     float sampleRate = 48000.0f;
     SmoothedParam width;
+    BiquadHPF sideHighpass1, sideHighpass2;
     
     // Crossfeed states
     float delayL[CROSSFEED_DELAY_SAMPLES];
@@ -382,7 +383,22 @@ struct AudiophileEQNode
     LinkwitzRiley4 crossMidBassL, crossMidBassR; // 180Hz
     LinkwitzRiley4 crossTrebleL, crossTrebleR;   // 8000Hz
     
-    BiquadPeak presenceL, presenceR; // 2.5kHz Fletcher-Munson presence eq
+    BiquadPeak presenceL, presenceR; // Mid-focus bell; second filter remains unity.
+    BiquadHPF focusHighpassL, focusHighpassR;
+    BiquadLPF focusLowpassL, focusLowpassR;
+    SmoothedParam focusMix;
+    float focusEnergyL=0, focusEnergyR=0, focusCross=0, focusCoef=0;
+    std::atomic<float> focusWeight{0}, focusAmount{0};
+    void initFocus(float rate) {
+        focusHighpassL.init(rate,180);focusHighpassR.init(rate,180);
+        focusLowpassL.init(rate,4000);focusLowpassR.init(rate,4000);
+        focusMix.init(0,rate,80);focusCoef=tauCoef(45,rate);
+        resetFocus();
+    }
+    void resetFocus() {
+        focusHighpassL.reset();focusHighpassR.reset();focusLowpassL.reset();focusLowpassR.reset();
+        focusEnergyL=focusEnergyR=focusCross=0;focusMix.snap(0);focusWeight.store(0);focusAmount.store(0);
+    }
     float envUpwardL, envUpwardR;    // Envelope trackers for Upward Compression
     
     float dcBlockL, dcBlockR;
@@ -446,6 +462,7 @@ struct SubwooferNode
     BiquadHPF subsonicL, subsonicR; // Removes non-musical content below roughly 26Hz
     bool isHighlightInit = false;
     float lastBassGain = -1.0f;
+    std::atomic<float> subPeakDb{0}, bodyPeakDb{0};
     float sampleRate = 44100.0f;
 };
 struct ConvolutionNode
