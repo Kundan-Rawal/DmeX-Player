@@ -2,6 +2,9 @@
 
 Date: 2026-11-21
 
+Historical only: this iteration was subsequently removed by the
+[pre-category engine restoration](PRE_CATEGORY_ENGINE_RESTORATION_2026-11-21.md).
+
 This iteration supersedes the neutral automatic recipes in
 `DMEX_NATURAL_ADAPTIVE_AUDIO_2026-11-21.md`. Normal Stereo (automatic off and no
 pill) and Raw Stereo remain distinct neutral/reference options. DmeX Natural now

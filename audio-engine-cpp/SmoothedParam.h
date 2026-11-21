@@ -11,20 +11,6 @@ inline float tauCoef(float timeMs, float sr) {
     return 1.0f - std::exp(-1.0f / (timeMs * 0.001f * sr));
 }
 
-// Continuous normalized control taper: more useful travel below the last quarter.
-inline float effectAmount(float value) {
-    const float x = value < 0 ? 0 : value > 1 ? 1 : value;
-    return x * (1.6f - 0.6f * x);
-}
-inline float vocalPresenceDb(float value) {
-    const float x = value < 0 ? 0 : value > 1 ? 1 : value;
-    return 9.0f * x * x * x;
-}
-inline float harmonicAirDb(float value) {
-    const float x = value < 0 ? 0 : value > 1 ? 1 : value;
-    return 6.0f * x * x;
-}
-
 struct SmoothedParam {
     std::atomic<float> target{0.0f};
     float current = 0.0f;
@@ -62,10 +48,8 @@ struct SmoothedGate {
 
     inline float next() {
         float t = on.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
-        const float next = g + (t - g) * coef;
-        // At high rates float rounding can stall just below unity indefinitely.
-        if (next == g || std::fabs(t - next) < 1.0e-6f) g = t;
-        else g = next;
+        g += (t - g) * coef;
+        if (std::fabs(t - g) < 1.0e-6f) g = t;
         return g;
     }
     inline bool fullyOff() const {

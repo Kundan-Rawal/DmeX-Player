@@ -11,7 +11,6 @@ mod db;
 mod sbr;
 mod audio_decode;
 mod audio_stream;
-mod audio_adaptive;
 mod metadata;
 mod media_source;
 #[cfg(target_os = "android")]
@@ -167,7 +166,6 @@ extern "C" {
     fn get_audio_metrics(out_data: *mut f32, out_level: *mut f32);
     fn analyze_audio(sc: *mut f32, cf: *mut f32, zcr: *mut f32, rms: *mut f32) -> bool;
     fn analyze_audio_file_cpp(path: *const c_char, sc: *mut f32, cf: *mut f32, zcr: *mut f32, rms: *mut f32) -> bool;
-    fn audio_source_generation() -> u64;
 }
 
 fn scan_audio_paths(root: &str) -> Vec<String> {
@@ -377,16 +375,6 @@ async fn analyze_audio_file(path: String) -> Result<String, String> {
             Ok(format!("FINGERPRINT {sc} {cf} {zcr} {rms}"))
         } else { Err("Audio analysis failed".into()) }
     }).await.map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn analyze_track_audio(path: String, source_generation: u64) -> Result<audio_adaptive::Analysis, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cache=DB_PATH.get().and_then(|p|p.parent()).map(|p|p.join("analysis-v1"))
-            .unwrap_or_else(||std::env::temp_dir().join("dmex-analysis-v1"));
-        let (resolved,_file)=resolved_audio_path(&path)?;
-        audio_adaptive::analyze(&resolved,&path,&cache,|| unsafe { audio_source_generation()==source_generation })
-    }).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]
@@ -940,7 +928,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mobile_haptic, mobile_media_update, remove_missing_track, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, delete_playlist, get_all_artist_images, get_setting, set_setting,
-            audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, analyze_track_audio, read_file_head, scan_directory, scan_mobile_audio,
+            audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music, pick_music_folder, extract_audio_metadata, record_play, identify_lyrics_song, download_cloud_stream, fetch_cloud_api,
             #[cfg(target_os = "android")]
             load_ir_memory_android,

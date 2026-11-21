@@ -2,6 +2,9 @@
 
 Date: 2026-11-21
 
+Historical only: this implementation was subsequently removed by the
+[pre-category engine restoration](PRE_CATEGORY_ENGINE_RESTORATION_2026-11-21.md).
+
 The later [vocal-focus and spatial iteration](VOCAL_FOCUS_SPATIAL_ITERATION_2026-11-21.md)
 supersedes the neutral automatic recipes below. This document retains the initial
 adaptive-analysis design and its original measurements as history.

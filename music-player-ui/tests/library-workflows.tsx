@@ -20,9 +20,8 @@ import { alphabetSection, ALPHABET_INDEX, trackSection } from '../src/mobile/lib
 import { classifyAudio } from '../src/config/audio';
 import { discardMissingTrack } from '../src/mobile/queue';
 import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
-import { vocalPresenceDb, harmonicAirDb } from '../src/config/dspResponse';
+import { vocalPresenceDb } from '../src/config/dspResponse';
 import { sendAudioCommand } from '../src/services/audioBridge';
-import { adaptiveCommand, validAnalysis } from '../src/config/adaptiveAudio';
 (window as any).seekTestSend = sendAudioCommand;
 
 const tracks: Track[] = [];
@@ -75,10 +74,8 @@ const failures: Record<string, string> = {};
 let engineSettings = [...DEFAULT_AUDIO];
 let bypassAll = false;
 let sourceGeneration=0, adaptiveEnabled=false, adaptiveEqDb=[0,0,0,0];
-(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, harmonicAirDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, alphabetSection, ALPHABET_INDEX, trackSection, classifyAudio, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+(window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, alphabetSection, ALPHABET_INDEX, trackSection, classifyAudio, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
-(window as any).libraryTest.adaptiveCommand=adaptiveCommand;
-(window as any).libraryTest.validAnalysis=validAnalysis;
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
   if (command === 'audio_status') return { ready: true, sampleRate:48000, requestedSampleRate:48000, outputPeak:0, limiterGain:1, processingDelayFrames:1196, callbackLoadPercent:12, overBudgetCallbacks:0, autoReverb:true, portableHrtf:true,

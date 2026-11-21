@@ -21,15 +21,11 @@ try {
   const mode=await page.evaluate(()=>JSON.parse(localStorage.getItem('dmex_sound_selection_v1')));
   const status=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const kind=await badge.getAttribute('data-processing-kind');
+  assert.equal(status.engineRevision,'842a9f2','Installed native engine is the restored pre-category revision');
   if(status.bypassAll) assert.equal(kind,'raw');
   else if(mode.manual) assert.equal(kind,'manual');
   else {
-    const analysis=mode.categoryEnabled ? await page.evaluate(async()=>{
-      const q=JSON.parse(localStorage.getItem('dmex_mobile_queue_v1')||'null');const path=q?.entries.find(e=>e.id===q.currentId)?.track.path;
-      const s=await window.__TAURI_INTERNALS__.invoke('audio_status');
-      return path?window.__TAURI_INTERNALS__.invoke('analyze_track_audio',{path,sourceGeneration:s.sourceGeneration}).catch(()=>null):null;
-    }):null;
-    const expected=soundPreset(mode.categoryEnabled?'NATURAL':null,mode.taste,analysis);
+    const expected=mode.categoryEnabled&&mode.taste==='ORIGINAL'?{}:soundPreset(null,mode.taste);
     const indices={bass:0,treble:1,exciter:2,width:3,separation:4,depth:5,reverb:6,compressor:7,bassField:10,roomBass:11,vocal:12,loudness:13,roomSize:14,damping:15,air:16,spatial:17,boost:18};
     for(const [key,value]of Object.entries(expected)) assert.ok(Math.abs(status.settings[indices[key]]-value)<.0001,`${key} agrees with the displayed category/pill recipe`);
   }

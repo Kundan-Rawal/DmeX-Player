@@ -11,29 +11,14 @@ try {
     await page.getByRole('button',{name:'Pause',exact:true}).click();
     await page.getByRole('button',{name:'Open expanded player',exact:true}).click();
     const semantics=await page.evaluate(()=>{
-      const t=window.libraryTest;
-      return {removed:!('SOUNDTRACK'in t.CATEGORY_LABELS),mixed:t.metadataCategory({genre:'Bollywood; Soundtrack; Pop'}),unclassified:t.metadataCategory({genre:'Film / Soundtrack'}),
-        voice:t.vocalPresenceDb(.5),air:t.harmonicAirDb(.5),quality:t.soundPreset(null,'QUALITY'),immersive:t.soundPreset(null,'IMMERSIVE'),chill:t.soundPreset(null,'CHILL'),
-        focused:t.soundPreset('NATURAL','ORIGINAL'),restrained:t.soundPreset('NATURAL','ORIGINAL',{confidence:1,crestDb:12,eqDb:[-1.5,0,-1,0]})};
+      const t=window.libraryTest;return {voice:t.vocalPresenceDb(.5),quality:t.soundPreset(null,'QUALITY'),immersive:t.soundPreset(null,'IMMERSIVE'),chill:t.soundPreset(null,'CHILL')};
     });
-    assert.equal(semantics.removed,true);assert.equal(semantics.mixed,'POP');assert.equal(semantics.unclassified,null);
-    assert.ok(Math.abs(semantics.voice-1.125)<.00001&&Math.abs(semantics.air-1.5)<.00001);
-    assert.equal(semantics.restrained.bass,0,'A measured bass excess cannot receive a fixed bass boost');
-    assert.ok(Math.abs(Math.pow(semantics.restrained.vocal/semantics.focused.vocal,3)-.5)<.00001,'Harsh-recording restraint halves focus dB rather than accidentally reducing it eight-fold');
-    for(const recipe of [semantics.quality,semantics.immersive,semantics.chill]) {
-      assert.ok(recipe.width>1&&recipe.width<=1.2);assert.equal(recipe.air,0);assert.equal(recipe.exciter,0);
-      assert.ok(recipe.bass>0&&recipe.bass<=.4&&recipe.vocal>=.5);
-      for(const key of ['treble','bassField','roomBass']) assert.equal(recipe[key],0);assert.ok(!('volume'in recipe));
-    }
-    assert.ok(semantics.immersive.spatial===1&&semantics.chill.spatial===1);
-    assert.ok(semantics.chill.depth>semantics.immersive.depth);
-    assert.equal(semantics.quality.reverb,0);assert.ok(semantics.immersive.reverb>0&&semantics.chill.reverb>semantics.immersive.reverb);
+    assert.equal(semantics.voice,3);
+    assert.equal(semantics.quality.bass,.25);assert.equal(semantics.quality.vocal,.12);
+    assert.equal(semantics.immersive.separation,.55);assert.equal(semantics.immersive.depth,.4);assert.equal(semantics.immersive.reverb,.08);
+    assert.equal(semantics.chill.treble,-1);assert.equal(semantics.chill.reverb,.12);
+    for(const recipe of [semantics.quality,semantics.immersive,semantics.chill])assert.ok(!('volume' in recipe));
     await page.getByRole('button',{name:'DSP Controls',exact:true}).click();
-    await page.getByLabel('Applied DSP values').waitFor();
-    await page.waitForTimeout(450);
-    assert.equal(await page.getByLabel('Applied DSP values').locator('dd').count(),5,'Native processing readouts are visible');
-    assert.ok(!/NaN|undefined/.test(await page.getByLabel('Applied DSP values').innerText()));
-    await page.screenshot({path:`tests/artifacts/dsp-live-${viewport.width}.png`});
     const field=page.getByRole('slider',{name:'Bass Field',exact:true});
     await field.focus();await page.keyboard.press('End');
     await page.waitForFunction(()=>{const call=window.libraryTest.calls.filter(c=>c.command==='audio_apply_settings').at(-1);return call?.payload.values[10]===1&&call.payload.values[11]===1;});
@@ -44,13 +29,13 @@ try {
     await page.getByRole('switch',{name:'9D Cinema Stage',exact:true}).click();
     await page.waitForFunction(()=>{const v=window.libraryTest.calls.filter(c=>c.command==='audio_apply_settings').at(-1)?.payload.values;return v?.[17]===0&&v[4]===0&&v[5]===0;});
     const air=page.getByRole('slider',{name:'Harmonic Air',exact:true});await air.focus();await page.keyboard.press('Home');await page.keyboard.press('ArrowRight');
-    assert.match(await air.locator('..').locator('output').innerText(),/dB/);
+    assert.match(await air.locator('..').locator('output').innerText(),/%/);
     const voice=page.getByRole('slider',{name:'Vocal Frontness',exact:true});await voice.focus();await page.keyboard.press('End');
-    assert.match(await voice.locator('..').locator('output').innerText(),/9\.0 dB/);
+    assert.match(await voice.locator('..').locator('output').innerText(),/6\.0 dB/);
     assert.ok(await page.locator('.mep-dsp-scroll').evaluate(el=>el.scrollWidth<=el.clientWidth));
     await page.screenshot({path:`tests/artifacts/dsp-power-${viewport.width}.png`});
     assert.deepEqual(errors,[]);
-    console.log(`PASS ${viewport.width}x${viewport.height}: source-preserving pills, independent spatial character, calibrated manual gains, room/stage gating and bounded DSP layout`);
+    console.log(`PASS ${viewport.width}x${viewport.height}: restored runtime pills, original linear gain scale, room/stage gating and bounded DSP layout`);
     await context.close();
   }
 } finally {await browser.close();}

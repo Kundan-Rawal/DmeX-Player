@@ -534,8 +534,6 @@ function App() {
                      setDetectedProfile(classifyAudio(0,0,0,0,track));
                      try {
                          await writeToEngine(`LOAD ${track.path}`);
-                         const restored=await invoke<{sourceGeneration:number}>('audio_status');
-                         await sound.loadSource({path:track.path,generation:restored.sourceGeneration});
                      } catch (_) {}
                  }
              }, 500);
@@ -959,7 +957,6 @@ function App() {
   const playTrack = async (track:Track, options: MobileLoadOptions = {}) => {
     if (!track || !includeLibraryTrack(track, libraryFiltersRef.current)) return;
     const id=++loadIdRef.current;
-    sound.beginSource();
     try { await writeToEngine('STOP'); } catch (_) {}
     if (id!==loadIdRef.current) return;
     currentTimeRef.current=0;lastCountedTrackRef.current=null;setDuration(track.duration || 0);
@@ -978,10 +975,6 @@ function App() {
         if (id !== loadIdRef.current) return;
       }
       await writeToEngine(`LOAD ${playbackPath}`);
-      if(id!==loadIdRef.current) return;
-      const loadedStatus=await invoke<{sourceGeneration:number}>('audio_status');
-      if(id!==loadIdRef.current) return;
-      await sound.loadSource({path:playbackPath,generation:loadedStatus.sourceGeneration});
       if(id!==loadIdRef.current) return;
       if (options.position && options.position > 0) { await writeToEngine(`SEEK ${options.position}`); setCurrentTime(options.position); }
       if (options.autoplay !== false) { await writeToEngine('PLAY'); if (id === loadIdRef.current) setIsPlaying(true); }

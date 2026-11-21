@@ -37,8 +37,8 @@ try {
       return window.libraryTest.calls.slice(before).filter(c=>c.command==='audio_command').map(c=>c.payload.cmd);
     });
     assert.deepEqual(acrossLoad,['SEEK 12','LOAD /Music/test.flac','SEEK 12'],'A new source invalidates seek deduplication');
-    const gains=await page.evaluate(()=>({voice:window.libraryTest.vocalPresenceDb(.5),air:window.libraryTest.harmonicAirDb(.2),maxVoice:window.libraryTest.vocalPresenceDb(1),maxAir:window.libraryTest.harmonicAirDb(1)}));
-    assert.deepEqual(gains,{voice:1.125,air:.24000000000000005,maxVoice:9,maxAir:6});
+    const gains=await page.evaluate(()=>({voice:window.libraryTest.vocalPresenceDb(.5),maxVoice:window.libraryTest.vocalPresenceDb(1)}));
+    assert.deepEqual(gains,{voice:3,maxVoice:6});
     await page.screenshot({path:`tests/artifacts/seek-naturalism-${viewport.width}.png`});
     assert.deepEqual(errors,[]);
     console.log(`PASS ${viewport.width}x${viewport.height}: one touch seek, in-flight deduplication, source-change ordering and gentle gain calibration`);

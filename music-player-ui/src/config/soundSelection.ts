@@ -31,7 +31,7 @@ export function processingStatus(selection: SoundSelection, _profileId: string |
   if (raw) return { ...base, label: 'Raw Stereo', kind: 'raw' };
   if (pending) return { ...base, label: 'Applying...', kind: 'pending' };
   if (selection.manual) return { ...base, label: 'Manual Override', kind: 'manual' };
-  const category = selection.categoryEnabled ? 'DmeX Natural' : null;
+  const category = selection.categoryEnabled ? 'DmeX Original' : null;
   const pill = TASTE_LABELS[selection.taste] || null;
   return { categoryEnabled: selection.categoryEnabled, category, pill,
     label: [category, pill].filter(Boolean).join(' + ') || 'Normal Stereo', kind: category || pill ? 'automatic' : 'normal' };

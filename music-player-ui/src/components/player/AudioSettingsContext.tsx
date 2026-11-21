@@ -11,9 +11,7 @@ export interface AudioStatus {
   recoveryRequested: boolean; settings: number[];
   irRestoreFailed: boolean;
   autoReverb?: boolean; portableHrtf?: boolean;
-  hardClippedSamples?: number;
-  sourceGeneration?: number; adaptiveEnabled?: boolean; adaptiveEqDb?: number[];
-  vocalFocusWeight?: number; vocalFocusPeakDb?: number; bassSubPeakDb?: number; bassBodyPeakDb?: number; bassBodyHz?: number;
+  engineRevision?: string;
   processingDelayFrames: number; callbackLoadPercent: number; maximumCallbackLoadPercent: number; overBudgetCallbacks: number;
 }
 export const PARAM = {
@@ -22,7 +20,7 @@ export const PARAM = {
   damping: 15, air: 16, spatial: 17, boost: 18, device: 19,
 } as const;
 export type Parameter = keyof typeof PARAM;
-export const DEFAULT_AUDIO = [0, 0, 0, 1, 0, 0, 0, 0, 1, 52, 0, 0, 0, 0, 0.84, 0.5, 0, 0, 0, 0];
+export const DEFAULT_AUDIO = [0.25, 0, 0, 1, 0, 0, 0, 0, 1, 52, 0, 0, 0, 0, 0.84, 0.5, 0, 0, 0, 0];
 interface AudioControls {
   status: AudioStatus | null; values: number[]; busy: boolean; error: string;
   headphone: string; environment: string;
@@ -71,12 +69,12 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
       next[PARAM.separation] = 0; next[PARAM.depth] = 0;
     }
     if (changes.spatial === 1) {
-      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.85;
-      if (next[PARAM.depth] === 0) next[PARAM.depth] = 0.70;
+      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.65;
+      if (next[PARAM.depth] === 0) next[PARAM.depth] = 0.45;
     }
     if (changes.spatial !== 0 && ((changes.separation ?? 0) > 0 || (changes.depth ?? 0) > 0)) {
       next[PARAM.spatial] = 1;
-      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.85;
+      if (next[PARAM.separation] === 0) next[PARAM.separation] = 0.65;
     }
     if (changes.roomBass === 1 && next[PARAM.bassField] === 0) next[PARAM.bassField] = 0.35;
     if (changes.roomBass === 0 && changes.bassField === undefined) next[PARAM.bassField] = 0;
