@@ -21,6 +21,7 @@ import { classifyAudio } from '../src/config/audio';
 import { discardMissingTrack } from '../src/mobile/queue';
 import { processingStatus, parseSoundSelection, selectTaste, toggleCategory } from '../src/config/soundSelection';
 import { vocalPresenceDb } from '../src/config/dspResponse';
+import { enhancedPreset, referencePreset, validSignature, isPresetParameter, suggestedSpeakerBoost } from '../src/config/enhancement';
 import { sendAudioCommand } from '../src/services/audioBridge';
 (window as any).seekTestSend = sendAudioCommand;
 
@@ -73,12 +74,14 @@ const calls: { command: string; payload: any }[] = [];
 const failures: Record<string, string> = {};
 let engineSettings = [...DEFAULT_AUDIO];
 let bypassAll = false;
+let autoReverb = true, convolutionAvailable = false, correctionAvailable = false;
 let sourceGeneration=0, adaptiveEnabled=false, adaptiveEqDb=[0,0,0,0];
 (window as any).libraryTest = { tracks, calls, emit, failures, PARAM, vocalPresenceDb, processingStatus, parseSoundSelection, selectTaste, toggleCategory, releaseYear, isClassicYear, sortTracks, alphabetSection, ALPHABET_INDEX, trackSection, classifyAudio, metadataCategory, signalCategory, soundPreset, CATEGORY_LABELS, discardMissingTrack, createQueue, cleanArtistString, buildArtistDictionary, artistCacheKey, sanitizeForLyricsAPI, chooseLyricsMatch, parseLRC, includeLibraryTrack, parseLibraryFilters, MINIMUM_DURATIONS };
+Object.assign((window as any).libraryTest, { enhancedPreset, referencePreset, validSignature, isPresetParameter, suggestedSpeakerBoost });
 (window as any).brandingTest = { BRAND, DEFAULT_AMBIENT_COLORS, getPalette, nudgeVibrancy, trackAccentColor };
 mockIPC((command, payload: any) => {
   calls.push({ command, payload });
-  if (command === 'audio_status') return { ready: true, sampleRate:48000, requestedSampleRate:48000, outputPeak:0, limiterGain:1, processingDelayFrames:1196, callbackLoadPercent:12, overBudgetCallbacks:0, autoReverb:true, portableHrtf:true,
+  if (command === 'audio_status') return { ready: true, sampleRate:48000, requestedSampleRate:48000, outputPeak:0, limiterGain:1, processingDelayFrames:1196, callbackLoadPercent:12, overBudgetCallbacks:0, autoReverb, convolutionAvailable, correctionAvailable, portableHrtf:true,
     vocalFocusPeakDb:0,vocalFocusWeight:0,bassSubPeakDb:engineSettings[0]*4,bassBodyPeakDb:engineSettings[0]*5,bassBodyHz:98,
     settings: query.has('iteration') ? engineSettings : DEFAULT_AUDIO, generation: 1, sourceGeneration, adaptiveEnabled, adaptiveEqDb, bypassAll, ecoMode: true };
   if (command === 'audio_apply_settings') {
@@ -87,6 +90,16 @@ mockIPC((command, payload: any) => {
     if (delay) return new Promise<void>(resolve => setTimeout(() => { engineSettings = [...payload.values]; resolve(); }, delay));
     engineSettings = [...payload.values]; return;
   }
+  if(command==='analyze_track_signature') {
+    const test=(window as any).libraryTest;
+    const result=test.signatureResults?.[payload.path]||test.signatureResult||null;
+    const delay=test.signatureDelays?.[payload.path]??test.signatureDelay??0;
+    return new Promise((resolve,reject)=>setTimeout(()=>test.signatureFailure?reject(new Error('Signature unavailable')):resolve(result),delay));
+  }
+  if(command==='audio_command'&&payload.cmd.startsWith('AUTO_REVERB ')) {autoReverb=payload.cmd.endsWith('1');return;}
+  if(command==='audio_command'&&payload.cmd.startsWith('CONVOLUTION ')) {convolutionAvailable=!payload.cmd.endsWith(' 0');return;}
+  if(command==='audio_command'&&payload.cmd.startsWith('HEADPHONE_CORRECTION ')) {correctionAvailable=!payload.cmd.endsWith(' OFF');return;}
+  if(command==='extract_and_load_ir') return '/test/impulse.wav';
   if (command === 'audio_command' && payload.cmd.startsWith('BYPASS_ALL ')) {
     const next=payload.cmd.endsWith('1');
     if(next!==bypassAll&&sourceGeneration>0) ++sourceGeneration;

@@ -24,7 +24,9 @@ export const DEFAULT_AUDIO = [0.25, 0, 0, 1, 0, 0, 0, 0, 1, 52, 0, 0, 0, 0, 0.84
 interface AudioControls {
   status: AudioStatus | null; values: number[]; busy: boolean; error: string;
   headphone: string; environment: string;
-  update: (changes: Partial<Record<Parameter, number>>) => Promise<void>;
+  speakerBoostAuto: boolean;
+  setSpeakerBoostAuto: (enabled: boolean) => void;
+  update: (changes: Partial<Record<Parameter, number>>, options?: { preserveError?: boolean }) => Promise<void>;
   command: (cmd: string) => Promise<void>;
   loadAsset: (id: string, correction: boolean) => Promise<void>;
   refresh: () => Promise<void>;
@@ -38,6 +40,10 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
   const valuesRef = useRef(DEFAULT_AUDIO);
   const [headphone, setHeadphone] = useState(localStorage.getItem('dmex_headphone_model') || 'NONE');
   const [environment, setEnvironment] = useState(localStorage.getItem('dmex_environment_v2') || 'NONE');
+  const [speakerBoostAuto, setBoostAuto] = useState(localStorage.getItem('dmex_speaker_boost_auto') !== 'false');
+  const setSpeakerBoostAuto = useCallback((enabled: boolean) => {
+    setBoostAuto(enabled); localStorage.setItem('dmex_speaker_boost_auto', String(enabled));
+  }, []);
   const [busy, setBusy] = useState(true), [error, setError] = useState('');
   const booted = useRef(false), initialized = useRef(false);
   const mutations = useRef(0), revision = useRef(0), operations = useRef(0);
@@ -62,7 +68,7 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
     catch (e) { setError(String(e)); throw e; }
     finally { setBusy(--operations.current > 0 || !initialized.current); }
   }, [refresh]);
-  const update = useCallback(async (changes: Partial<Record<Parameter, number>>) => {
+  const update = useCallback(async (changes: Partial<Record<Parameter, number>>, options?: { preserveError?: boolean }) => {
     const next = [...valuesRef.current];
     for (const [key, value] of Object.entries(changes)) next[PARAM[key as Parameter]] = value!;
     if (changes.spatial === 0 && changes.separation === undefined && changes.depth === undefined) {
@@ -80,7 +86,7 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
     if (changes.roomBass === 0 && changes.bassField === undefined) next[PARAM.bassField] = 0;
     if ((changes.bassField ?? 0) > 0 && changes.roomBass !== 0) next[PARAM.roomBass] = 1;
     ++revision.current; ++mutations.current;
-    valuesRef.current = next; setValues(next); setError('');
+    valuesRef.current = next; setValues(next); if (!options?.preserveError) setError('');
     try { await applyAudioSettings(next); }
     catch (e) { setError(String(e)); throw e; }
     finally { if (--mutations.current === 0) await refresh(); }
@@ -130,14 +136,17 @@ export function AudioSettingsProvider({ children }: { children: React.ReactNode 
       })();
     }
     const changed = () => { void refresh(); };
-    const failed = (event: Event) => setError(String((event as CustomEvent).detail));
+    const failed = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail) setError(String(detail));
+    };
     window.addEventListener('dmex-audio-error', failed);
     window.addEventListener('dmex-audio-changed', changed);
     const interval = window.setInterval(changed, 2000);
     return () => { clearInterval(interval); window.removeEventListener('dmex-audio-changed', changed);
       window.removeEventListener('dmex-audio-error', failed); };
   }, [refresh, loadAsset]);
-  return <Context.Provider value={{ status, values, busy, error, headphone, environment, update, command, loadAsset, refresh, setAutoReverb, dismissError: () => setError('') }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ status, values, busy, error, headphone, environment, speakerBoostAuto, setSpeakerBoostAuto, update, command, loadAsset, refresh, setAutoReverb, dismissError: () => setError('') }}>{children}</Context.Provider>;
 }
 export function useAudioSettings() {
   const value = useContext(Context);

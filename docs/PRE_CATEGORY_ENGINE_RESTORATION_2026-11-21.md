@@ -2,6 +2,10 @@
 
 Date: 2026-11-21
 
+The later [DmeX Enhanced reference policy](DMEX_ENHANCED_REFERENCES_2026-11-22.md)
+keeps these restored DSP algorithms but supersedes the historical pill recipes
+and configured-control-only automatic mode described below.
+
 ## Scope
 
 Restored the audio implementation from `842a9f2` (November 14), before the

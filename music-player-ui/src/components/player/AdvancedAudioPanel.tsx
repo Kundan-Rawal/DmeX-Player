@@ -3,6 +3,7 @@ import { Power, RotateCcw } from 'lucide-react';
 import { ACOUSTIC_ENVIRONMENTS, HEADPHONE_MODELS } from '../../config/audioAssets';
 import { IS_ANDROID } from '../../types';
 import { vocalPresenceDb } from '../../config/dspResponse';
+import { isPresetParameter } from '../../config/enhancement';
 import { CustomSelect } from '../common/CustomSelect';
 import { ToggleSwitch } from '../common/ToggleSwitch';
 import { PARAM, Parameter, useAudioSettings } from './AudioSettingsContext';
@@ -24,7 +25,7 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
   const disabled = !!audio.status?.bypassAll || audio.busy;
   const value = (key: Parameter) => audio.values[PARAM[key]];
   const set = (key: Parameter, v: number) => {
-    onManualEdit?.();
+    if (isPresetParameter(key)) onManualEdit?.();
     void audio.update({ [key]: v }).catch(() => {});
   };
   const percent = (v: number) => Math.round(v * 100) + '%';
@@ -104,11 +105,11 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
       {group('Room & Reverb', 'room', <>
         <div className="dsp-control dsp-switch-row"><span className="dsp-label-row">Automatic room</span>
           <ToggleSwitch label="Automatic reverb" checked={audio.status?.autoReverb ?? true} disabled={disabled}
-            onChange={enabled => { onManualEdit?.(); void audio.setAutoReverb(enabled).catch(() => {}); }} /></div>
+            onChange={enabled => { void audio.setAutoReverb(enabled).catch(() => {}); }} /></div>
         <div className="dsp-control"><span className="dsp-label-row">Acoustic Environment</span>
           <CustomSelect label="Acoustic impulse response" disabled={disabled}
             value={audio.status?.convolutionAvailable ? audio.environment : 'NONE'} options={environmentOptions}
-            onChange={id => { onManualEdit?.(); void audio.loadAsset(id, false).catch(() => {}); }} /></div>
+            onChange={id => { void audio.loadAsset(id, false).catch(() => {}); }} /></div>
         {slider('reverb', 'Digital Reverb', 0, 1, 0.01, percent)}
         {audio.status?.autoReverb === false && <>
           {slider('roomSize', 'Room Size', 0.2, 0.98, 0.01, percent)}
@@ -119,7 +120,7 @@ export function AdvancedAudioPanel({ onManualEdit }: { onManualEdit?: () => void
         <span className="dsp-label-row">Headphone EQ</span>
         <CustomSelect label="Headphone correction" disabled={disabled}
           value={audio.status?.correctionAvailable ? audio.headphone : 'NONE'} options={modelOptions}
-          onChange={id => { onManualEdit?.(); void audio.loadAsset(id, true).catch(() => {}); }} />
+          onChange={id => { void audio.loadAsset(id, true).catch(() => {}); }} />
       </div>)}
     </div>
     <div className="audio-engine-status">

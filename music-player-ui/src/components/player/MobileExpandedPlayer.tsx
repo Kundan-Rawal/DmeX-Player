@@ -212,7 +212,6 @@ export const MobileExpandedPlayer: React.FC<MobileExpandedPlayerProps> = (p) => 
 
       // Activate convolution and update UI state — mirrors the Windows path exactly
       await p.writeToEngine('CONVOLUTION 0.35');
-      p.setIsManualOverride(true);
     } catch (error) {
       console.error('[Android] Failed to extract and load IR file:', error);
     }

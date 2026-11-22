@@ -1,6 +1,7 @@
 import type { Taste, Track } from '../types';
 import type { Parameter } from '../components/player/AudioSettingsContext';
 import { isClassicYear } from '../utils/trackYear';
+import { enhancedPreset, type RecordingSignature } from './enhancement';
 
 export const CATEGORY_LABELS: Record<string, string> = {
   POP: 'Pop / Standard', CLASSICAL: 'Classical / Orchestral', VOCAL: 'Acoustic / Vocal',
@@ -32,12 +33,8 @@ export function canonicalCategory(category: string): string {
   if (category === 'FOLK') return 'VOCAL';
   return category in CATEGORY_LABELS ? category : 'OTHER';
 }
-// Runtime quick-preset recipes from 842a9f2 App.applySmartSettings.
-export function soundPreset(_category:string|null,taste:Taste):Partial<Record<Parameter,number>> {
-  const neutral={bass:0,treble:0,exciter:0,width:1,separation:0,depth:0,reverb:0,compressor:0,
-    bassField:0,roomBass:0,vocal:0,air:0,spatial:0,boost:0};
-  if(taste==='QUALITY')return {...neutral,bass:.25,vocal:.12};
-  if(taste==='IMMERSIVE')return {...neutral,bass:.35,spatial:1,separation:.55,depth:.40,reverb:.08};
-  if(taste==='CHILL')return {...neutral,bass:.15,treble:-1,reverb:.12};
-  return neutral;
+export function soundPreset(_category:string|null,taste:Taste,signature?:RecordingSignature|null):Partial<Record<Parameter,number>> {
+  if(taste!=='ORIGINAL')return enhancedPreset(taste,signature);
+  return {bass:0,treble:0,exciter:0,width:1,separation:0,depth:0,reverb:0,
+    bassField:0,roomBass:0,vocal:0,air:0,spatial:0};
 }

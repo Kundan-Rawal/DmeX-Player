@@ -14,9 +14,9 @@ try {
       const t=window.libraryTest;return {voice:t.vocalPresenceDb(.5),quality:t.soundPreset(null,'QUALITY'),immersive:t.soundPreset(null,'IMMERSIVE'),chill:t.soundPreset(null,'CHILL')};
     });
     assert.equal(semantics.voice,3);
-    assert.equal(semantics.quality.bass,.25);assert.equal(semantics.quality.vocal,.12);
-    assert.equal(semantics.immersive.separation,.55);assert.equal(semantics.immersive.depth,.4);assert.equal(semantics.immersive.reverb,.08);
-    assert.equal(semantics.chill.treble,-1);assert.equal(semantics.chill.reverb,.12);
+    assert.ok(Math.abs(semantics.quality.bass-.945)<1e-9);assert.equal(semantics.quality.vocal,.8);
+    assert.equal(semantics.immersive.separation,.9);assert.equal(semantics.immersive.depth,.8);assert.equal(semantics.immersive.reverb,.25);
+    assert.equal(semantics.chill.treble,5.5);assert.equal(semantics.chill.reverb,.7);
     for(const recipe of [semantics.quality,semantics.immersive,semantics.chill])assert.ok(!('volume' in recipe));
     await page.getByRole('button',{name:'DSP Controls',exact:true}).click();
     const field=page.getByRole('slider',{name:'Bass Field',exact:true});
@@ -35,7 +35,7 @@ try {
     assert.ok(await page.locator('.mep-dsp-scroll').evaluate(el=>el.scrollWidth<=el.clientWidth));
     await page.screenshot({path:`tests/artifacts/dsp-power-${viewport.width}.png`});
     assert.deepEqual(errors,[]);
-    console.log(`PASS ${viewport.width}x${viewport.height}: restored runtime pills, original linear gain scale, room/stage gating and bounded DSP layout`);
+    console.log(`PASS ${viewport.width}x${viewport.height}: user-reference pills, original linear gain scale, room/stage gating and bounded DSP layout`);
     await context.close();
   }
 } finally {await browser.close();}

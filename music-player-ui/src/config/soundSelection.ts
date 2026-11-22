@@ -24,6 +24,7 @@ export function selectTaste(selection: SoundSelection, taste: Taste): SoundSelec
 }
 export interface ProcessingStatus {
   label: string; category: string | null; pill: string | null;
+  detail?: string;
   kind: 'automatic' | 'manual' | 'normal' | 'raw' | 'pending'; categoryEnabled: boolean;
 }
 export function processingStatus(selection: SoundSelection, _profileId: string | null, raw = false, pending = false): ProcessingStatus {
@@ -31,7 +32,7 @@ export function processingStatus(selection: SoundSelection, _profileId: string |
   if (raw) return { ...base, label: 'Raw Stereo', kind: 'raw' };
   if (pending) return { ...base, label: 'Applying...', kind: 'pending' };
   if (selection.manual) return { ...base, label: 'Manual Override', kind: 'manual' };
-  const category = selection.categoryEnabled ? 'DmeX Original' : null;
+  const category = selection.categoryEnabled ? 'DmeX Enhanced' : null;
   const pill = TASTE_LABELS[selection.taste] || null;
   return { categoryEnabled: selection.categoryEnabled, category, pill,
     label: [category, pill].filter(Boolean).join(' + ') || 'Normal Stereo', kind: category || pill ? 'automatic' : 'normal' };

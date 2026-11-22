@@ -2,6 +2,8 @@ import { HEADPHONE_MODELS } from '../../config/audioAssets';
 import { IS_ANDROID } from '../../types';
 import { CustomSelect } from '../common/CustomSelect';
 import { BypassAllButton } from './AdvancedAudioPanel';
+import { ToggleSwitch } from '../common/ToggleSwitch';
+import { isPresetParameter } from '../../config/enhancement';
 import { PARAM, Parameter, useAudioSettings } from './AudioSettingsContext';
 
 interface TrackOptionsProps {
@@ -15,7 +17,11 @@ export function TrackOptions({ visMode, setVisMode, onManualEdit }: TrackOptions
   const disabled = audio.busy || !!audio.status?.bypassAll;
   const value = (key: Parameter) => audio.values[PARAM[key]];
   const selected = (key: Parameter, v: number) => Math.abs(value(key) - v) < 0.0001;
-  const set = (key: Parameter, v: number) => { onManualEdit?.(); void audio.update({ [key]: v }).catch(() => {}); };
+  const set = (key: Parameter, v: number) => {
+    if (isPresetParameter(key)) onManualEdit?.();
+    if (key === 'boost') audio.setSpeakerBoostAuto(false);
+    void audio.update({ [key]: v }).catch(() => {});
+  };
   const segment = (key: Parameter, label: string, choices: [number, string][]) =>
     <div className="glass-menu-section track-option-section">
       <div className="glass-label-row"><span>{label}</span></div>
@@ -38,6 +44,9 @@ export function TrackOptions({ visMode, setVisMode, onManualEdit }: TrackOptions
     {slider('bassField', 'Bass Field', 0, 1, 0.01, Math.round(value('bassField') * 100) + '%')}
     {slider('treble', 'Crystal Treble', -12, 12, 0.1, value('treble').toFixed(1) + ' dB')}
     {segment('boost', 'Speaker Boost', [[0, 'None'], [0.3, 'Low'], [0.6, 'Med'], [1, 'High']])}
+    <div className="glass-label-row track-option-section"><span>Automatic speaker boost</span>
+      <ToggleSwitch label="Automatic speaker boost" checked={audio.speakerBoostAuto} disabled={disabled}
+        onChange={audio.setSpeakerBoostAuto} /></div>
     <div className="glass-menu-section track-option-section">
       <div className="glass-label-row"><span>Background Visualizer</span></div>
       <div className="glass-boost-grid" role="group" aria-label="Background visualizer">
@@ -56,7 +65,7 @@ export function TrackOptions({ visMode, setVisMode, onManualEdit }: TrackOptions
       <CustomSelect label="Headphone correction" disabled={disabled}
         value={audio.status?.correctionAvailable ? audio.headphone : 'NONE'}
         options={HEADPHONE_MODELS.map(model => ({ value: model.id, label: model.label }))}
-        onChange={id => { onManualEdit?.(); void audio.loadAsset(id, true).catch(() => {}); }} />
+        onChange={id => { void audio.loadAsset(id, true).catch(() => {}); }} />
     </div>
     {audio.error && <p className="audio-error" role="alert">{audio.error}</p>}
   </div>;

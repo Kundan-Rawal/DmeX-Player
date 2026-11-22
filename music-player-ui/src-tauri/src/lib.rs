@@ -11,6 +11,7 @@ mod db;
 mod sbr;
 mod audio_decode;
 mod audio_stream;
+mod audio_signature;
 mod metadata;
 mod media_source;
 #[cfg(target_os = "android")]
@@ -52,6 +53,7 @@ async fn mobile_media_update(app: tauri::AppHandle, state: serde_json::Value) ->
 
 static DB_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 static ACTIVE_SOURCE: Mutex<Option<std::fs::File>> = Mutex::new(None);
+static SIGNATURE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 #[cfg(target_os = "android")]
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 
@@ -360,6 +362,25 @@ async fn analyze_current_track() -> Result<String, String> {
         else  { "FINGERPRINT_ERROR".to_string() }
     }).await.map_err(|e| format!("Thread error: {}", e))?;
     Ok(result)
+}
+
+#[tauri::command]
+fn cancel_track_signature() {
+    SIGNATURE_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+#[tauri::command]
+async fn analyze_track_signature(path: String) -> Result<audio_signature::Signature, String> {
+    let generation = SIGNATURE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn_blocking(move || {
+        let current = || SIGNATURE_GENERATION.load(Ordering::SeqCst) == generation;
+        if !current() { return Err("Recording analysis superseded".into()); }
+        let cache = DB_PATH.get().and_then(|p| p.parent()).map(|p| p.join("signature_cache_v1"))
+            .unwrap_or_else(|| std::env::temp_dir().join("dmex-signature-v1"));
+        // Retain the content-URI descriptor for the entire independent decode.
+        let (resolved, _source_file) = resolved_audio_path(&path)?;
+        audio_signature::analyze(&resolved, &path, &cache, current)
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -928,7 +949,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             mobile_haptic, mobile_media_update, remove_missing_track, fetch_library, add_to_library, add_library_tracks, clear_library, save_art_to_cache, extract_and_cache_art,download_artist_art,nuke_artist_cache,cache_dsp_asset,
             toggle_favorite, update_play_stats, update_profile, get_playlists, save_playlist, delete_playlist, get_all_artist_images, get_setting, set_setting,
-            audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, read_file_head, scan_directory, scan_mobile_audio,
+            audio_command, audio_status, audio_apply_settings, extract_and_load_ir, audio_metrics, analyze_current_track, analyze_audio_file, analyze_track_signature, cancel_track_signature, read_file_head, scan_directory, scan_mobile_audio,
             scan_android_music, pick_music_folder, extract_audio_metadata, record_play, identify_lyrics_song, download_cloud_stream, fetch_cloud_api,
             #[cfg(target_os = "android")]
             load_ir_memory_android,

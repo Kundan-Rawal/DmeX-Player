@@ -229,7 +229,7 @@ function App() {
   const isPhoneSpeakerRef = useRef(false);
   useEffect(() => { isPhoneSpeakerRef.current = isPhoneSpeaker; }, [isPhoneSpeaker]);
 
-  const sound = useSoundSelection(detectedProfile?.id || null, isBooted);
+  const sound = useSoundSelection(isBooted);
   const smartTaste = sound.selection.taste, isManualOverride = sound.selection.manual;
   const setIsManualOverride = sound.setManualOverride;
   const detectedProfileRef = useRef<AudioProfile | null>(null);
@@ -533,7 +533,9 @@ function App() {
                      if (storedLyrics) setLyrics(parseLRC(storedLyrics));
                      setDetectedProfile(classifyAudio(0,0,0,0,track));
                      try {
+                         sound.beginSource();
                          await writeToEngine(`LOAD ${track.path}`);
+                         await sound.loadSource(track.path);
                      } catch (_) {}
                  }
              }, 500);
@@ -957,6 +959,7 @@ function App() {
   const playTrack = async (track:Track, options: MobileLoadOptions = {}) => {
     if (!track || !includeLibraryTrack(track, libraryFiltersRef.current)) return;
     const id=++loadIdRef.current;
+    sound.beginSource();
     try { await writeToEngine('STOP'); } catch (_) {}
     if (id!==loadIdRef.current) return;
     currentTimeRef.current=0;lastCountedTrackRef.current=null;setDuration(track.duration || 0);
@@ -975,6 +978,8 @@ function App() {
         if (id !== loadIdRef.current) return;
       }
       await writeToEngine(`LOAD ${playbackPath}`);
+      if(id!==loadIdRef.current) return;
+      await sound.loadSource(playbackPath);
       if(id!==loadIdRef.current) return;
       if (options.position && options.position > 0) { await writeToEngine(`SEEK ${options.position}`); setCurrentTime(options.position); }
       if (options.autoplay !== false) { await writeToEngine('PLAY'); if (id === loadIdRef.current) setIsPlaying(true); }
@@ -1529,10 +1534,6 @@ function App() {
                       // 2. Safely download it to a temp cache via Rust
                       const tempPath = await invoke<string>('download_cloud_stream', { url: downloadUrl });
                       
-                      // 3. Blast it through the DSP engine!
-                      await invoke('audio_command', { cmd: `LOAD ${tempPath}` });
-                      
-                      // 4. Update the UI
                       const newTrack = {
                          path: tempPath,
                          name: (trackData.name || trackData.title).replace(/&quot;/g, '"').replace(/&amp;/g, '&'),
@@ -1541,8 +1542,7 @@ function App() {
                          duration: trackData.duration || 0,
                          thumb: trackData.image?.[2]?.url || trackData.image?.[0]?.url
                       };
-                      setCurrentTrack(newTrack as any);
-                      setIsPlaying(true);
+                      await playTrack(newTrack as Track);
                     } else {
                         console.error("No download URL found in API response");
                     }

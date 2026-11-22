@@ -26,9 +26,10 @@ try {
     assert.deepEqual(result.ascending.slice(0,3),['Alpha',' bravo','zebra']);
     assert.deepEqual(result.descending.slice(0,3),['zebra',' bravo','Alpha']);
     for(const {category,taste,settings:s} of result.recipes) {
-      assert.ok(s.bass>=0&&s.bass<=.35&&s.exciter===0&&s.air===0&&s.width===1&&s.roomBass===0,`${category}/${taste} recorded runtime recipe`);
+      if(taste==='ORIGINAL'){assert.deepEqual(s,result.neutral);continue;}
+      assert.ok(s.bass>0&&s.bass<=1.1&&s.exciter>0&&s.air>0&&s.width>=1.1,`${category}/${taste} user reference recipe`);
       if(taste==='QUALITY') assert.equal(s.reverb,0);
-      if(taste==='IMMERSIVE'||taste==='CHILL') assert.ok(s.reverb>0&&s.reverb<=.12);
+      if(taste==='IMMERSIVE'||taste==='CHILL') assert.ok(s.reverb>0&&s.reverb<=.8);
       assert.ok(!('volume'in s)&&!('device'in s));
     }
     assert.equal(result.neutral.width,1);for(const k of ['bass','treble','exciter','air','vocal','bassField','spatial','reverb']) assert.equal(result.neutral[k],0,'No preset floor leaks into normal/manual audio');

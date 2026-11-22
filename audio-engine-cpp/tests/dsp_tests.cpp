@@ -699,6 +699,14 @@ void productionControlSweep() {
     auto stage=neutral; stage[17]=1; stage[4]=.8f; stage[5]=.1f;
     const auto near=render(stage); stage[5]=.9f;
     check(differenceEnergy(near,render(stage),24000)>.0001, "depth slider affects the production measured stage");
+    for(const auto& preset : {
+        std::array<float,20>{.63f,2.5f,.6f,1.5f,.9f,.8f,.25f,0,1,60,.2f,1,.5f,0,.72f,.6f,.5f,1,0,0},
+        std::array<float,20>{.945f,4,.9f,1.1f,0,0,0,0,1,60,0,0,.8f,0,.72f,.6f,.7f,0,0,0},
+        std::array<float,20>{1.05f,5.5f,.4f,1.75f,.9f,.9f,.7f,0,1,60,.3f,1,.8f,0,.72f,.6f,.3f,1,0,0}
+    }) {
+        const auto output=render(preset);
+        check(differenceEnergy(base,output,24000)>.0001, "user reference preset reaches the complete production graph");
+    }
     execute_audio_command("STOP"); uninit_audio_engine(); std::remove("controls-fixture.wav"); g_ecoMode=false;
 }
 
